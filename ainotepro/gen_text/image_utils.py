@@ -4,6 +4,7 @@ import json
 import requests
 import os
 import time
+import openai
 from openai import OpenAI
 
 
