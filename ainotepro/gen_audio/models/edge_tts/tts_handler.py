@@ -1,11 +1,4 @@
 import os
-import sys
-
-# 固定的 `libs` 目录
-PLUGIN_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../"))
-LIBS_DIR = os.path.join(PLUGIN_ROOT, "libs")
-sys.path.insert(0, LIBS_DIR)  # 添加到 Python 路径
-
 import json
 import asyncio
 import edge_tts

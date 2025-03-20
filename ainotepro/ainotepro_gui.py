@@ -47,7 +47,20 @@ class AiNoteProConfigDialog(QDialog):
         for name, tab in self.tabs.items():
             self.tab_widget.addTab(tab, name)
 
-        # 重新定义底部按钮
+        # 重新定义底部布局
+        bottom_layout = QHBoxLayout()
+
+        # 底部信息放左侧
+        bottom_label = QLabel(
+            '<p style="font-size:12px;">'
+            'Found a bug or have a feature request? '
+            '<a href="https://github.com/ernestyu/AINotePro/issues">Create an issue on Github</a> '
+            '</p>'
+        )
+        bottom_label.linkActivated.connect(openLink)
+        bottom_layout.addWidget(bottom_label)
+
+        # 按钮组
         button_box = QDialogButtonBox()
         self.generate_button = QPushButton("Generate")
         self.close_button = QPushButton("Close")
@@ -61,17 +74,12 @@ class AiNoteProConfigDialog(QDialog):
         self.close_button.clicked.connect(self.accept)
         self.help_button.clicked.connect(self.on_help)
 
-        main_layout.addWidget(button_box)
+        # 在底部布局中，左侧是文本，右侧是按钮组
+        bottom_layout.addStretch()  # 让底部信息靠左
+        bottom_layout.addWidget(button_box)  # 按钮在右侧
 
-        # 底部信息
-        bottom_label = QLabel(
-            '<p style="font-size:12px;">'
-            'Found a bug or have a feature request? '
-            '<a href="https://github.com/your-repo/ainotepro/issues">Create an issue on Github</a> '
-            '</p>'
-        )
-        bottom_label.linkActivated.connect(openLink)
-        main_layout.addWidget(bottom_label)
+        # 添加到主布局
+        main_layout.addLayout(bottom_layout)
 
     def on_generate(self):
         """根据当前选中的标签页调用不同的生成逻辑"""

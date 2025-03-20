@@ -8,9 +8,13 @@ from aqt.qt import (
     QCoreApplication, QCheckBox, QMessageBox, QWidget
 )
 from aqt.utils import showInfo, showWarning
+from aqt import mw
+import re
 from .models.openai import OpenAIGUI, generate_openai_chat
 from .models.ollama import OllamaGUI, generate_ollama_chat
 from .models.deepseek import DeepSeekGUI, generate_deepseek_chat
+from .img_hosting import ImageHostingDialog
+from .image_utils import upload_to_img_hosting, generate_with_img
 
 USER_DATA_DIR = os.path.join(
     os.path.dirname(__file__),       # \AINotePro\ainotepro\gen_text
@@ -105,16 +109,34 @@ class TextTab(QWidget):
         prompt_buttons_layout.addWidget(self.delete_button)
         layout.addLayout(prompt_buttons_layout)
 
-        # Source & Destination Field
+        # Source Field
         source_field_layout = QHBoxLayout()
-        self.source_field_label = QLabel("Source Field")
+        self.source_field_label = self._create_bold_label("Source Field: ")
         self.source_field_combo = QComboBox()
         source_field_layout.addWidget(self.source_field_label)
         source_field_layout.addWidget(self.source_field_combo)
         layout.addLayout(source_field_layout)
 
+        # “Image Input”复选框和按钮
+        image_layout = QHBoxLayout()
+        self.image_checkbox = QCheckBox("Enable Image Source")
+        self.image_checkbox.setChecked(False)
+
+        self.image_input_button = QPushButton("🖼️ Image Hosting Platform")
+        self.image_input_button.setEnabled(False)  # 默认不可点击
+
+        # 将这两个控件放入一个布局中
+        image_layout.addWidget(self.image_checkbox)
+        image_layout.addWidget(self.image_input_button)
+        layout.addLayout(image_layout)
+
+        # 连接信号槽
+        self.image_checkbox.stateChanged.connect(self.on_image_checkbox_toggled)
+        self.image_input_button.clicked.connect(self.on_image_input_button_clicked)
+
+        # Destination Field
         destination_field_layout = QHBoxLayout()
-        self.destination_field_label = QLabel("Destination Field")
+        self.destination_field_label = self._create_bold_label("Destination Field: ")
         self.destination_field_combo = QComboBox()
         destination_field_layout.addWidget(self.destination_field_label)
         destination_field_layout.addWidget(self.destination_field_combo)
@@ -132,6 +154,83 @@ class TextTab(QWidget):
 
         # 加载当前选中的牌组字段
         self.load_current_note_fields()
+
+    def _get_anki_media_path(self, image_filename):
+        """类内方法：获取 Anki collection.media 目录下的文件路径"""
+        media_dir = mw.col.media.dir()  # ✅ 使用 Anki API 获取路径
+        return os.path.join(media_dir, image_filename)
+
+    def _extract_image_filename(self, html_content):
+        """从 Anki 字段 HTML 提取图片文件名"""
+        match = re.search(r'<img\s+src=["\'](.*?)["\']', html_content)
+        return match.group(1) if match else None
+
+    def _create_bold_label(self, text, font_size=10):
+        """创建加粗 & 指定字号的 QLabel（私有方法）"""
+        label = QLabel(text)
+        font = label.font()
+        font.setBold(True)
+        font.setPointSize(font_size)
+        label.setFont(font)
+        return label
+
+    def _get_hosting_api_key(self):
+        """从 img_hosting.json 读取上次使用的 API Key 和 Upload URL"""
+        settings_file = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..", "..", "user_data", "gen_text", "img_hosting.json"
+        ))
+
+        if not os.path.exists(settings_file):
+            showWarning("Image hosting configuration not found!")
+            return None, None
+
+        try:
+            with open(settings_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # **优先使用 "last_used" 里的服务**
+            last_used = data.get("last_used", {})
+            platform_name = last_used.get("service")
+
+            if not platform_name or platform_name not in data:
+                # **如果 "last_used" 不存在或无效，使用第一个可用的 Hosting**
+                available_platforms = [k for k in data.keys() if k != "last_used"]
+                platform_name = available_platforms[0] if available_platforms else None
+
+            if not platform_name:
+                showWarning("No valid hosting platform found.")
+                return None, None
+
+            print(f"📌 Using platform: {platform_name}")
+
+            return data[platform_name].get("api_key", None), data[platform_name].get("upload_url", None)
+
+        except Exception as e:
+            print(f"⚠️ 读取 img_hosting.json 失败: {e}")
+            showWarning("Failed to read image hosting configuration.")
+            return None, None
+
+    def on_image_checkbox_toggled(self):
+        """根据勾选状态启用/禁用 Image Input 按钮"""
+        # 暂停按钮自己的信号，避免某些环境下产生的连锁反应
+        self.image_input_button.blockSignals(True)
+
+        # 如果勾选了，按钮启用且显示为黑色；否则禁用并显示为灰色
+        if self.image_checkbox.isChecked():
+            self.image_input_button.setEnabled(True)
+            self.image_input_button.setStyleSheet("color: black;")
+        else:
+            self.image_input_button.setEnabled(False)
+            self.image_input_button.setStyleSheet("color: gray;")
+
+        # 恢复按钮的信号
+        self.image_input_button.blockSignals(False)
+        # 强制按钮 UI 刷新
+        self.image_input_button.update()
+
+    def on_image_input_button_clicked(self):
+        dialog = ImageHostingDialog(self)
+        dialog.exec()
 
     def _clear_layout(self, layout):
         """递归清理布局中的子控件与子布局"""
@@ -289,8 +388,8 @@ class TextTab(QWidget):
         api_key = self.current_service_ui.api_key_edit.text().strip()
         model_name = self.current_service_ui.model_combo.currentText().strip()
         temperature = self.current_service_ui.temperature_slider.value() / 100.0
-
         system_prompt = self.prompt_text_edit.toPlainText().strip()
+
         if not system_prompt:
             showWarning("Prompt Preview is empty.")
             return
@@ -314,6 +413,10 @@ class TextTab(QWidget):
         print(f"Temperature: {temperature:.2f}")
         print(f"Notes to process: {len(note_ids)}")
 
+        # **修正：从 self.image_checkbox 获取状态**
+        is_image_input_enabled = self.image_checkbox.isChecked()
+        print(f"Image Input Enabled: {is_image_input_enabled}")
+
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled():
                 showInfo("Operation canceled.")
@@ -325,51 +428,57 @@ class TextTab(QWidget):
                 print(f"[Note {nid}] Source field '{source_field}' not found, skipping.")
                 continue
 
-            user_text = note[source_field].strip()
-            if not user_text:
-                print(f"[Note {nid}] Source field is empty, skipping.")
-                continue
+            if is_image_input_enabled:
+                # **从 HTML 提取 <img src="...">**
+                html_content = note[source_field].strip()
+                image_filename = self._extract_image_filename(html_content)
 
-            modified_prompt = system_prompt.replace("{Source Field}", user_text)
-            # 在终端打印出要发送的提示内容（只显示前50字符以防过长）
-            print(f"[Note {nid}] Sending text: {user_text[:50]}...")
+                # **用 Anki API 获取 collection.media 目录**
+                image_path = self._get_anki_media_path(image_filename)
 
-            if "ollama" in model_name.lower():
-                # Ollama / DeepSeek 逻辑
-                cleaned_content = generate_ollama_chat(
-                    base_url=base_url,
-                    model_name=model_name,
-                    temperature=temperature,
-                    prompt=modified_prompt
-                )
-            elif "openai" in model_name.lower():
-                # OpenAI 逻辑
-                cleaned_content = generate_openai_chat(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model_name=model_name,
-                    temperature=temperature,
-                    system_prompt=system_prompt,
-                    user_text=user_text
-                )
-            elif "deepseek" in model_name.lower():
-                cleaned_content = generate_deepseek_chat(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model_name=model_name,
-                    temperature=temperature,
-                    system_prompt=system_prompt,
-                    user_text=user_text
-                )
+                # **检查文件是否存在**
+                if not os.path.exists(image_path):
+                    print(f"[Note {nid}] Image file not found: {image_path}, skipping.")
+                    continue
+
+                # 获取当前选中的 Hosting 平台的 API Key 和 Upload URL
+                img_hosting_api_key, upload_url = self._get_hosting_api_key()
+
+                if not img_hosting_api_key or not upload_url:
+                    print(f"[Note {nid}] No valid image hosting API key found, skipping.")
+                    continue
+
+                # **上传图片到图床**
+                try:
+                    image_url = upload_to_img_hosting(image_path, img_hosting_api_key, upload_url)
+                    print(f"[Note {nid}] Uploaded Image URL: {image_url}")
+                except Exception as e:
+                    print(f"[Note {nid}] Image upload failed: {str(e)}")
+                    continue
+
+                # **用 Claude 生成描述**
+                final_url = base_url.rstrip("/") + "/v1/chat/completions"
+                cleaned_content = generate_with_img(image_url, api_key, final_url, system_prompt)
             else:
-                cleaned_content = generate_deepseek_chat(
-                    base_url=base_url,
-                    api_key=api_key,
-                    model_name=model_name,
-                    temperature=temperature,
-                    system_prompt=system_prompt,
-                    user_text=user_text
-                )
+                user_text = note[source_field].strip()
+                if not user_text:
+                    print(f"[Note {nid}] Source field is empty, skipping.")
+                    continue
+
+                modified_prompt = system_prompt.replace("{Source Field}", user_text)
+                print(f"[Note {nid}] Sending text: {user_text[:50]}...")
+
+                if "ollama" in model_name.lower():
+                    cleaned_content = generate_ollama_chat(base_url, model_name, temperature, modified_prompt)
+                elif "openai" in model_name.lower():
+                    cleaned_content = generate_openai_chat(base_url, api_key, model_name, temperature, system_prompt,
+                                                           user_text)
+                elif "deepseek" in model_name.lower():
+                    cleaned_content = generate_deepseek_chat(base_url, api_key, model_name, temperature, system_prompt,
+                                                             user_text)
+                else:
+                    cleaned_content = generate_deepseek_chat(base_url, api_key, model_name, temperature, system_prompt,
+                                                             user_text)
 
             note[destination_field] = cleaned_content
             note.col.update_note(note)

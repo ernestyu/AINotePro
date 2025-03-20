@@ -4,13 +4,25 @@ Author: Ernest
 Version: 1.0
 Description: An Anki plugin with multi-tab AI configuration dialog.
 """
+import os
+import sys  # ✅ 确保 `sys` 被正确导入
 
+# 修改 `sys.path` 让 Anki 能找到 `libs`
+addon_dir = os.path.dirname(__file__)
+libs_path = os.path.join(addon_dir, "libs")
+if libs_path not in sys.path:
+    sys.path.insert(0, libs_path)
+
+# 先导入 Anki 相关模块
 from aqt import mw, gui_hooks
 from aqt.qt import QAction, qconnect
 from aqt.browser import Browser
 from aqt.utils import showInfo
+
+# 再导入插件自己的模块
 from .ainotepro.ainotepro_gui import show_ainotepro_dialog
 from .ainotepro.remove import RemoveDialog
+
 
 def open_ainotepro_config_in_browser(browser: Browser):
     """弹出 AINotePro 多标签配置界面"""
