@@ -1,0 +1,10 @@
+{
+    "name": "AINotePro - AI-powered note enhancement for Anki",
+    "author": "Ernest",
+    "description": "Enhance your Anki notes with AI-generated text, speech, and images based on a specified field.",
+    "version": "1.0",
+    "min_point_version": 21,
+    "max_point_version": 24,
+    "conflicts": [],
+    "dependencies": []
+}
