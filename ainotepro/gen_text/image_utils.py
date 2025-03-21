@@ -39,7 +39,7 @@ def upload_to_img_hosting(image_path, img_hosting_api_key, upload_url):
 
 
 
-def generate_with_img(img_url, api_key, base_url, prompt):
+def generate_with_img(img_url, model_name, api_key, base_url, prompt):
     """
     使用 Claude 3 处理图片，并生成描述。
     - `img_url`: 上传后的图片 URL
@@ -65,7 +65,7 @@ def generate_with_img(img_url, api_key, base_url, prompt):
             client = OpenAI(api_key=api_key, base_url=base_url)
 
             response = client.chat.completions.create(
-                model="claude-3-haiku-20240307",
+                model= model_name,
                 messages=[
                     {
                         "role": "user",

@@ -458,7 +458,7 @@ class TextTab(QWidget):
 
                 # **用 Claude 生成描述**
                 final_url = base_url.rstrip("/") + "/v1/chat/completions"
-                cleaned_content = generate_with_img(image_url, api_key, final_url, system_prompt)
+                cleaned_content = generate_with_img(image_url, model_name, api_key, final_url, system_prompt)
             else:
                 user_text = note[source_field].strip()
                 if not user_text:
