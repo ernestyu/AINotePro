@@ -75,28 +75,19 @@ def generate_with_img(img_url, model_name, api_key, base_url, prompt):
                         ]
                     }
                 ],
-                stream=True
+                stream=False
             )
 
-            # **拼接返回内容**
-            result_text = ""
-            for chunk in response:
-                chunk_message = chunk.choices[0].delta.content
+            # 提取完整回复文本
+            # 注意：GPT-4 或 gpt-3.5-turbo 类模型，完整回复通常放在 choices[0].message.content
+            result_text = response.choices[0].message.content or ""
 
-                # ✅ **修复：跳过 `None` 值，避免 TypeError**
-                if chunk_message is None:
-                    print("⚠️ API 返回 `None`，跳过该段内容。")
-                    continue
+            # 5. 打印到终端进行验证
+            print("\n=== AI Response Preview ===\n")
+            print(result_text)
+            print("\n=== End of AI Response ===\n")
 
-                # ✅ **尝试强制转换为 UTF-8，防止乱码**
-                try:
-                    chunk_message = chunk_message.encode("utf-8").decode("utf-8")
-                except Exception as e:
-                    print(f"⚠️ 文本解码错误: {e}")
-                    continue
-
-                result_text += chunk_message
-                print(chunk_message, end='', flush=True)
+            # 6. 返回给外部，用于后续写入 Anki 等
 
             return result_text if result_text else "⚠️ API 没有返回有效内容，请检查日志。"
 
