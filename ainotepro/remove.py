@@ -111,7 +111,7 @@ class RemoveDialog(QDialog):
             note = mw.col.get_note(note_id)
             if field_name in note:
                 note[field_name] = ""  # ✅ 清空字段内容
-                note.flush()
+                mw.col.update_note(note)
                 count += 1
 
         mw.reset()
