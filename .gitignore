@@ -1,20 +1,21 @@
-# ignore user_data folder
+# Ignore user-generated data
 user_data/
 
-# ignore local_models
+# Ignore local model files
 local_models/
 
-# Python 缓存文件和虚拟环境
+# Python cache files
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
+
+# Virtual environments
 venv/
 env/
 
-# IDE 相关文件
+# IDE configuration files
 .idea/
 
-# 操作系统生成的无用文件
-.DS_Store  # macOS
-Thumbs.db  # Windows
+# OS-generated metadata files
+.DS_Store
+Thumbs.db
