@@ -431,6 +431,9 @@ class TextTab(QWidget):
             if is_image_input_enabled:
                 # **从 HTML 提取 <img src="...">**
                 html_content = note[source_field].strip()
+                if not html_content:
+                    print(f"[Note {nid}] Source field is empty after stripping, skipping.")
+                    continue
                 image_filename = self._extract_image_filename(html_content)
 
                 # **用 Anki API 获取 collection.media 目录**
