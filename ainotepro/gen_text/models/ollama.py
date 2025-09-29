@@ -110,25 +110,47 @@ def clean_response(response_text):
     return response_text
 
 def generate_ollama_chat(base_url, model_name, temperature, prompt):
-    final_url = base_url.rstrip("/") + "/api/generate"
+    """
+    base_url: Ollama 服务地址
+    model_name: 模型名称
+    temperature: 采样温度
+    prompt: 字符串形式的用户提示
+    """
+    final_url = base_url.rstrip("/") + "/api/chat/completions"
     headers = {"Content-Type": "application/json"}
+
+    # 1. 把单一 prompt 包装成 messages
+    messages = [
+        {"role": "user", "content": prompt}
+    ]
+
+    # 2. 构造符合 Chat Completions 规范的 payload
     payload = {
         "model": model_name,
-        "prompt": prompt,
+        "messages": messages,
+        "temperature": temperature,
         "stream": True,
-        "temperature": temperature
+        "chat_template_kwargs": {
+            "enable_thinking": False   # 关闭内部推理
+        }
     }
+
     try:
         with requests.post(final_url, json=payload, headers=headers, timeout=60, stream=True) as resp:
             resp.raise_for_status()
-            collected_response = []
+            collected = []
             for line in resp.iter_lines():
-                if line:
-                    parsed_json = json.loads(line)
-                    collected_response.append(parsed_json.get("response", ""))
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                # Ollama 的 Chat 兼容格式，回答在 choices[0].delta.content
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                collected.append(content)
 
-        full_content = "".join(collected_response).strip()
-        cleaned_content = clean_response(full_content)
-        return cleaned_content
+        full = "".join(collected).strip()
+        # （可选）如果模型仍偶尔残留 <think> 标签，继续清理
+        return clean_response(full)
     except Exception as e:
-        return f"[Error] {str(e)}"
+        return f"[Error] {e}"
+
