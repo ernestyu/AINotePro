@@ -82,12 +82,7 @@ class AiNoteProConfigDialog(QDialog):
             fn()
 
     def _on_close(self):
-        try:
-            for tab in self.tabs.values():
-                if hasattr(tab, "save_settings"):
-                    tab.save_settings()
-        except Exception as e:
-            print("[AINotePro] error saving settings on close:", e)
+        # Settings are now saved automatically by ConfigManager, no action needed on close.
         self.accept()
 
     def on_help(self):
