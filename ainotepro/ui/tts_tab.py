@@ -9,6 +9,8 @@ from aqt.qt import (
     QLineEdit, QSlider, QGroupBox, QSizePolicy, QToolButton, QFrame, Qt, QProgressDialog
 )
 from aqt.utils import showInfo, showWarning
+from ..config.manager import ConfigManager
+from ..gen_audio.models.edge_tts.tts_handler import get_languages, get_voices
 
 from ..services.provider_factory import create_provider
 from ..core.utils import add_audio_to_media_collection, update_field_content
@@ -18,8 +20,11 @@ class TTSTab(QWidget):
     def __init__(self, parent=None, browser=None):
         super().__init__(parent)
         self.browser = browser
+        self.cfg = ConfigManager()
         self._build_ui()
         self._load_fields()
+        self._load_languages()
+        self._load_settings()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -72,7 +77,7 @@ class TTSTab(QWidget):
             row2.addWidget(QLabel("Pitch:")); pit = QSlider(Qt.Orientation.Horizontal); pit.setRange(-50, 50); pit.setValue(0); row2.addWidget(pit)
 
             vb.addLayout(row1); vb.addLayout(row2); box.setLayout(vb); layout.addWidget(box)
-            self.voice_blocks.append({"enable": cb, "voice": voice_combo, "preview": preview_text, "speed": sp, "volume": vol, "pitch": pit})
+            self.voice_blocks.append({"enable": cb, "voice": voice_combo, "preview": preview_text, "speed": sp, "volume": vol, "pitch": pit, "gender": gender_combo})
 
         # Fields and handling
         field_sep = QFrame(); field_sep.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); field_sep.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))
@@ -81,6 +86,10 @@ class TTSTab(QWidget):
         fr.addWidget(QLabel("Destination Field:")); self.dst_combo = QComboBox(); fr.addWidget(self.dst_combo); layout.addLayout(fr)
 
         self.setLayout(layout)
+        # react to language/gender changes
+        self.language_combo.currentIndexChanged.connect(self._update_all_voices)
+        for blk in self.voice_blocks:
+            blk["gender"].currentIndexChanged.connect(lambda _=None, b=blk: self._update_block_voices(b))
 
     def _toggle_pw(self):
         mode = self.api_key_edit.echoMode()
@@ -103,13 +112,108 @@ class TTSTab(QWidget):
         except Exception:
             pass
 
+    def _load_languages(self) -> None:
+        try:
+            langs = get_languages("Edge-TTS")  # returns {code: full_name}
+            items = sorted(langs.items(), key=lambda x: x[1])
+            self.language_combo.clear()
+            for code, full in items:
+                self.language_combo.addItem(full, code)
+            # seed voices for initial language
+            self._update_all_voices()
+        except Exception as e:
+            print(f"[AINotePro] load languages failed: {e}")
+
+    def _current_lang_code(self) -> str:
+        idx = self.language_combo.currentIndex()
+        if idx < 0:
+            return "en"
+        data = self.language_combo.itemData(idx)
+        return data or "en"
+
+    def _update_all_voices(self) -> None:
+        for blk in self.voice_blocks:
+            self._update_block_voices(blk)
+
+    def _update_block_voices(self, blk: dict) -> None:
+        try:
+            code = self._current_lang_code()
+            gender = blk["gender"].currentText()
+            short_names = get_voices("Edge-TTS", code, gender) or []  # e.g., en-US-AriaNeural
+            cur_data = blk["voice"].currentData()
+            blk["voice"].clear()
+            for sn in short_names:
+                display = sn.split("-")[-1] if "-" in sn else sn
+                blk["voice"].addItem(display, sn)
+            if cur_data:
+                i = blk["voice"].findData(cur_data)
+                if i >= 0:
+                    blk["voice"].setCurrentIndex(i)
+        except Exception as e:
+            print(f"[AINotePro] update voices failed: {e}")
+
+    # Settings persistence
+    def _load_settings(self) -> None:
+        cfg = self.cfg.get_all().get("audio", {}).get("edge_tts", {})
+        # language
+        lang_code = cfg.get("language_code")
+        if lang_code:
+            for i in range(self.language_combo.count()):
+                if self.language_combo.itemData(i) == lang_code:
+                    self.language_combo.setCurrentIndex(i)
+                    break
+        # voices (list of up to 3)
+        voices = cfg.get("voices") or []
+        for idx, blk in enumerate(self.voice_blocks):
+            if idx >= len(voices):
+                break
+            vcfg = voices[idx]
+            blk["enable"].setChecked(bool(vcfg.get("enabled", False)))
+            # gender first (so voices query matches)
+            g = vcfg.get("gender") or "Female"
+            gi = blk["gender"].findText(g)
+            if gi >= 0:
+                blk["gender"].setCurrentIndex(gi)
+            # refresh voices for current gender/lang, then set voice by data
+            self._update_block_voices(blk)
+            short_name = vcfg.get("voice")
+            if short_name:
+                vi = blk["voice"].findData(short_name)
+                if vi >= 0:
+                    blk["voice"].setCurrentIndex(vi)
+            blk["speed"].setValue(int(vcfg.get("speed", 0)))
+            blk["volume"].setValue(int(vcfg.get("volume", 0)))
+            blk["pitch"].setValue(int(vcfg.get("pitch", 0)))
+            if vcfg.get("preview_text"):
+                blk["preview"].setText(vcfg.get("preview_text"))
+
+    def save_settings(self) -> None:
+        voices_cfg = []
+        for blk in self.voice_blocks:
+            voices_cfg.append({
+                "enabled": blk["enable"].isChecked(),
+                "voice": blk["voice"].currentData() or blk["voice"].currentText(),
+                "gender": blk["gender"].currentText(),
+                "speed": blk["speed"].value(),
+                "volume": blk["volume"].value(),
+                "pitch": blk["pitch"].value(),
+                "preview_text": blk["preview"].text().strip(),
+            })
+        data = self.cfg.get_all()
+        audio = data.setdefault("audio", {})
+        et = audio.setdefault("edge_tts", {})
+        et["language_code"] = self._current_lang_code()
+        et["voices"] = voices_cfg
+        self.cfg.save_all(data)
+
     def _preview_voice(self, enable_cb: QCheckBox, voice_combo: QComboBox, text_edit: QLineEdit):
         if not enable_cb.isChecked():
             showWarning("Enable this voice first."); return
         text = text_edit.text().strip() or "Hello from AINotePro!"
-        voice = voice_combo.currentText().strip() or "en-US-AriaNeural"
+        voice = voice_combo.currentData() or voice_combo.currentText().strip() or "en-US-AriaNeural"
         provider = create_provider("audio", "edge_tts", {})
         try:
+            print(f"[AINotePro][TTS Preview] voice={voice}, text_len={len(text)}")
             data = provider.generate(text, {"voice": voice, "speed": 0, "volume": 0, "pitch": 0})
             # play via Anki after writing to temp media
             fname = add_audio_to_media_collection(data, "preview.mp3")

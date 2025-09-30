@@ -1,4 +1,4 @@
-# ainotepro_gui.py
+"""Main tabbed dialog (Text / TTS / Images)."""
 
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
@@ -20,7 +20,7 @@ class AiNoteProConfigDialog(QDialog):
 
         main_layout = QVBoxLayout(self)
 
-        # 顶部提示
+        # Top info
         top_label = QLabel(
             '<div style="text-align:center; font-size:14px; margin: 10px 0; font-style:italic;">'
             'Enhance your Anki notes with AI-generated text, speech, and images!'
@@ -32,23 +32,20 @@ class AiNoteProConfigDialog(QDialog):
         top_label.linkActivated.connect(openLink)
         main_layout.addWidget(top_label)
 
-        # 多标签页
+        # Tabs
         self.tab_widget = QTabWidget()
         main_layout.addWidget(self.tab_widget)
 
-        # 三个标签页：Text / TTS / Images
         self.tabs = {
             "Text": TextTab(parent=self, browser=browser),
             "TTS": TTSTab(parent=self, browser=browser),
             "Images": ImageTab(parent=self, browser=browser),
         }
-
         for name, tab in self.tabs.items():
             self.tab_widget.addTab(tab, name)
 
-        # 底部信息 + 按钮
+        # Bottom info + buttons
         bottom_layout = QHBoxLayout()
-
         bottom_label = QLabel(
             '<p style="font-size:12px;">'
             'Found a bug or have a feature request? '
@@ -62,22 +59,19 @@ class AiNoteProConfigDialog(QDialog):
         self.generate_button = QPushButton("Generate")
         self.close_button = QPushButton("Close")
         self.help_button = QPushButton("Help")
-
         button_box.addButton(self.generate_button, QDialogButtonBox.ButtonRole.AcceptRole)
         button_box.addButton(self.close_button, QDialogButtonBox.ButtonRole.RejectRole)
         button_box.addButton(self.help_button, QDialogButtonBox.ButtonRole.HelpRole)
 
         self.generate_button.clicked.connect(self.on_generate)
-        self.close_button.clicked.connect(self.accept)
+        self.close_button.clicked.connect(self._on_close)
         self.help_button.clicked.connect(self.on_help)
 
         bottom_layout.addStretch()
         bottom_layout.addWidget(button_box)
-
         main_layout.addLayout(bottom_layout)
 
     def on_generate(self):
-        # 根据当前标签页调用不同逻辑
         mapping = {
             0: self.tabs["Text"].on_generate_text,
             1: self.tabs["TTS"].on_generate_tts,
@@ -86,6 +80,15 @@ class AiNoteProConfigDialog(QDialog):
         fn = mapping.get(self.tab_widget.currentIndex())
         if fn:
             fn()
+
+    def _on_close(self):
+        try:
+            for tab in self.tabs.values():
+                if hasattr(tab, "save_settings"):
+                    tab.save_settings()
+        except Exception as e:
+            print("[AINotePro] error saving settings on close:", e)
+        self.accept()
 
     def on_help(self):
         openLink("https://github.com/ernestyu/AINotePro/wiki")
