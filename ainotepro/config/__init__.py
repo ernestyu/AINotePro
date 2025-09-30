@@ -1,0 +1,4 @@
+"""
+Config package for AINotePro.
+"""
+

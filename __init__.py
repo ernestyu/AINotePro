@@ -2,7 +2,7 @@
 AINotePro - Anki plugin
 Author: Ernest
 Version: 1.0
-Description: An Anki plugin with multi-tab AI configuration dialog.
+Description: An Anki plugin with a layered architecture (UI/Core/Services).
 """
 import os
 import sys  # ✅ 确保 `sys` 被正确导入
@@ -19,17 +19,22 @@ from aqt.qt import QAction, qconnect
 from aqt.browser import Browser
 from aqt.utils import showInfo
 
-# 再导入插件自己的模块
-from .ainotepro.ainotepro_gui import show_ainotepro_dialog
+# 新的 UI 模块
+from .ainotepro.ui.main_dialog import MainDialog
+from .ainotepro.ui.editor_button import add_ainotepro_button
+from .ainotepro.ui.config_dialog import ConfigDialog
+
+# 兼容的移除窗口
 from .ainotepro.remove import RemoveDialog
 
 
 def open_ainotepro_config_in_browser(browser: Browser):
-    """弹出 AINotePro 多标签配置界面"""
+    """Open the AINotePro main dialog (uses selected notes from Browser)."""
     if not browser:
         showInfo("Please open the browser first.")
         return
-    show_ainotepro_dialog(browser)
+    dlg = MainDialog(parent=None, browser=browser)
+    dlg.exec()
 
 def open_remove_dialog(browser: Browser):
     """弹出 Remove Field Content 窗口"""
@@ -76,3 +81,12 @@ def on_browser_will_show(browser: Browser):
         add_browser_menu(browser)
     except Exception as e:
         print(f"Error adding AiNotePro menu: {e}")
+
+
+# 为编辑器添加按钮
+try:
+    from anki.hooks import addHook  # PyQt5-era API
+    addHook("setupEditorButtons", add_ainotepro_button)
+except Exception:
+    # On newer Anki, the above still works via compatibility; keep silent if not available
+    pass

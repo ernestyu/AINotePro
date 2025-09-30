@@ -1,0 +1,4 @@
+"""
+UI package for AINotePro.
+"""
+
