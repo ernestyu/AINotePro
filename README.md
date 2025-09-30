@@ -33,37 +33,174 @@ The project is built with flexibility and extensibility in mind, supporting both
 The project follows a modern, layered structure that is standard for professional Anki add-ons, ensuring maintainability and ease of extension.
 
 ```
-AINotePro/
-├─ ainotepro/                # Main source code package
-│  ├─ __init__.py           # Add-on entry point: creates menus and hooks into Anki
-│  ├─ config.py             # Manages all user settings via Anki's config system
-│  ├─ core/                 # API Client Layer: Handles direct communication with external APIs
-│  │  ├─ text/
-│  │  │  ├─ base_client.py
-│  │  │  ├─ openai_client.py
-│  │  │  └─ ollama_client.py
-│  │  └─ image/
-│  ├─ logic/                # Business Logic Layer (Services)
-│  │  └─ text_service.py     # Encapsulates the logic for text generation
-│  └─ gui/                  # UI Layer
-│     ├─ main_dialog.py      # The main tabbed dialog window
-│     ├─ text_tab.py         # UI and event handling for the "Text" tab
-│     ├─ image_tab.py        # UI for the "Images" tab
-│     ├─ tts_tab.py          # UI for the "TTS" tab
-│     └─ components/
-│        └─ model_config_gui.py # Reusable UI component for model configuration
-├─ user_data/                # Stores user-specific data like image hosting configs
-├─ libs/                     # Bundled third-party libraries
-├─ manifest.json             # Add-on manifest for Anki 2.1.50+
-├─ config.json               # Default user configuration file
-└─ README.md                 # This documentation
+ainotepro/
+├── __init__.py                # 插件入口，注册钩子和菜单项
+|
+├── core/                      # 核心业务逻辑
+│   ├── __init__.py
+│   ├── manager.py             # 中心任务管理器 (AIManager)
+│   ├── async_task.py          # 异步任务处理器 (QThread)
+│   └── utils.py               # Anki 相关的辅助函数 (如添加媒体文件)
+|
+├── ui/                        # 所有用户界面相关代码 (PyQt)
+│   ├── __init__.py
+│   ├── main_dialog.py         # AI 生成的主对话框
+│   ├── editor_button.py       # 在编辑器上添加按钮的逻辑
+│   └── config_dialog.py       # 插件设置对话框
+|
+├── services/                  # 所有与第三方 AI 服务交互的模块
+│   ├── __init__.py
+│   ├── base.py                # 定义服务提供者的抽象基类 (非常重要!)
+│   ├── provider_factory.py    # 工厂模式，根据配置创建具体服务实例
+│   │
+│   ├── text/                  # 文本生成服务
+│   │   ├── __init__.py
+│   │   ├── openai_text.py
+│   │   ├── anthropic_text.py
+│   │   └── ollama_text.py
+│   │
+│   ├── image/                 # 图像生成服务
+│   │   ├── __init__.py
+│   │   ├── dall_e.py
+│   │   └── sd_webui.py        # 例如本地 Stable Diffusion WebUI
+│   │
+│   └── audio/                 # 音频生成服务
+│       ├── __init__.py
+│       ├── openai_tts.py
+│       └── elevenlabs_tts.py
+|
+├── config/                    # 配置管理
+│   ├── __init__.py
+│   ├── manager.py             # 封装 Anki 的配置读取和写入
+│   └── defaults.py            # 存储默认配置
+|
+├── res/                       # 静态资源
+│   └── icons/
+│       └── ai_icon.png        # 编辑器按钮图标
+|
+├── logs/                      # 日志文件目录（可选，但推荐）
+│   └── ainotepro.log
+|
+├── manifest.json              # Anki 插件包元数据
+└── config.json                # Anki 插件配置项定义
 ```
 
 ## 3. Backend (Add-on Logic) Deep Dive
 
-### Configuration and Initialization
-*   **Centralized Configuration (`config.py`)**: The add-on abandons scattered JSON files in favor of Anki's official `mw.addonManager.getConfig()` and `writeConfig()`. This provides a single source of truth (`config.json`) for all settings, including model endpoints, API keys, and saved prompts. It also allows users to edit settings directly from Anki's add-on configuration screen.
-*   **Entry Point (`__init__.py`)**: This file acts as the sole "plug" into Anki. It uses Anki's hook system (`addHook`) to add a "AI Note Pro..." menu item to the browser's "Edit" menu. It is responsible only for initializing and displaying the main dialog, keeping the core logic decoupled from Anki's UI.
+### 各模块职责详解
+
+#### `__init__.py` (插件入口)
+
+  * **职责**: Anki 加载插件时执行的第一个文件。
+  * **内容**:
+      * 从 `ui.editor_button` 导入函数。
+      * 使用 Anki 的钩子 (hook) `addHook("setupEditorButtons", add_ainotepro_button)` 将按钮添加到编辑器工具栏。
+      * 创建一个菜单项，用于打开配置对话框。
+
+#### `core/` (核心逻辑层)
+
+  * **`manager.py`**: `AIManager` 类
+
+      * **职责**: 业务逻辑的中心枢纽。UI 层不直接调用 `services`，而是通过 `AIManager`。
+      * **方法示例**:
+          * `generate_text_for_field(note, field_name, prompt)`
+          * `generate_image_for_field(note, field_name, prompt)`
+          * `generate_audio_for_field(note, field_name, text)`
+      * **工作流程**:
+        1.  接收来自 UI 的请求（例如，“为当前笔记的‘正面’字段生成一张关于‘苹果’的图片”）。
+        2.  从 `config.manager` 读取当前配置，确定用户选择了哪个图片服务（如 DALL-E）。
+        3.  使用 `services.provider_factory` 创建一个对应的服务实例 (`DalleProvider`)。
+        4.  创建一个 `AsyncTask`，将服务实例和任务数据传给它，并启动任务。
+        5.  监听 `AsyncTask` 的完成信号，获取结果后，使用 `utils.py` 中的函数将媒体文件写入 Anki 并更新字段。
+
+  * **`async_task.py`**: `AsyncTask(QThread)`
+
+      * **职责**: 在后台线程中执行耗时操作（如 API 请求），避免 UI 卡死。
+      * **实现**: 继承 PyQt 的 `QThread`。在 `run()` 方法中执行实际的 AI 服务调用。通过信号/槽机制 (`pyqtSignal`) 将结果（或错误信息）传回主线程。
+
+  * **`utils.py`**:
+
+      * **职责**: 提供与 Anki 交互的原子操作。
+      * **函数示例**:
+          * `add_image_to_media_collection(image_data)`: 保存图片到 Anki 的 `collection.media` 目录并返回文件名。
+          * `add_audio_to_media_collection(audio_data)`: 同上。
+          * `update_field_content(note, field_name, content)`: 安全地更新卡片字段内容。
+
+#### `services/` (服务提供者层)
+
+这是实现插件可扩展性的关键。
+
+  * **`base.py`**:
+
+      * **职责**: 定义所有服务提供者必须遵守的“契约”（接口）。
+      * **实现**: 使用 Python 的 `abc` 模块定义抽象基类。
+        ```python
+        from abc import ABC, abstractmethod
+
+        class TextProvider(ABC):
+            @abstractmethod
+            def generate(self, prompt: str, config: dict) -> str:
+                pass
+
+        class ImageProvider(ABC):
+            @abstractmethod
+            def generate(self, prompt: str, config: dict) -> bytes: # 返回图片二进制数据
+                pass
+
+        class AudioProvider(ABC):
+            @abstractmethod
+            def generate(self, text: str, config: dict) -> bytes: # 返回音频二进制数据
+                pass
+        ```
+
+  * **`provider_factory.py`**:
+
+      * **职责**: 根据配置动态创建服务实例。
+      * **函数示例**: `create_provider(service_type: str, provider_name: str, config: dict)`
+          * 如果 `service_type` 是 "text"，`provider_name` 是 "openai"，它就会 `from .text.openai_text import OpenAITextProvider` 并返回一个 `OpenAITextProvider` 的实例。
+
+  * **子目录 (`text/`, `image/`, `audio/`)**:
+
+      * 每个文件实现一个具体服务，继承自 `base.py` 中对应的抽象类。
+      * 例如，`ollama_text.py` 中的 `OllamaTextProvider` 会实现 `generate` 方法，其内部逻辑是使用 `requests` 库向本地 Ollama API 发送请求。
+
+#### `ui/` (用户界面层)
+
+  * **`editor_button.py`**:
+
+      * 包含一个函数 `add_ainotepro_button(buttons, editor)`，它会创建一个 `QAction` 或 `QPushButton`，并将其添加到编辑器的工具栏 `buttons` 列表中。
+      * 按钮的点击事件会连接到 `main_dialog.py` 中用于显示主窗口的函数。
+
+  * **`main_dialog.py`**: `MainDialog(QDialog)`
+
+      * **职责**: 提供一个统一的、多模态的输入界面。
+      * **UI 组件**:
+          * 一个下拉菜单选择服务类型（文本、图像、音频）。
+          * 一个下拉菜单根据类型选择具体的服务提供者（如 OpenAI, Ollama）。
+          * 一个大的 `QTextEdit` 用于输入 Prompt。
+          * 一个 "Generate" 按钮。
+          * 一个状态栏或标签，用于显示“生成中...”或错误信息。
+      * **逻辑**:
+          * 当用户点击 "Generate" 时，它会收集所有信息（服务类型、提供者、Prompt、当前笔记和字段），然后调用 `core.manager.AIManager` 的相应方法来处理请求。它**不直接调用 API**。
+
+  * **`config_dialog.py`**: `ConfigDialog(QDialog)`
+
+      * **职责**: 提供一个图形界面让用户输入 API 密钥、选择模型、设置本地服务器地址等。
+      * **逻辑**: 保存设置时，调用 `config.manager` 中的函数将配置写入 Anki 的配置文件系统。
+
+#### `config/` (配置层)
+
+  * **`manager.py`**:
+
+      * **职责**: 封装 Anki 的配置 API，为插件的其他部分提供简单的接口。
+      * **实现**: 使用 `aqt.mw.addonManager.getConfig(__name__)` 和 `aqt.mw.addonManager.writeConfig(__name__, data)`。
+      * **函数**: `get_config()`, `save_config(data)`, `get_provider_config('openai')`。
+
+  * **`defaults.py`**:
+
+      * 只包含一个 Python 字典，定义了所有配置项的默认值。当用户第一次使用插件时，会加载这些默认值。
+
+-----
 
 ### Core Workflow: Text Generation
 
