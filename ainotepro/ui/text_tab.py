@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from aqt import mw
 from aqt.qt import (
-    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton,
+    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, QSlider, Qt, QProgressDialog,
     QMessageBox, QCheckBox
 )
@@ -17,7 +17,7 @@ from ..config.manager import ConfigManager
 from ..services.provider_factory import create_provider
 from ..core.utils import update_field_content
 
-
+# Note: PROMPT_FILE is separate from user_config.json as prompts can be shared/versioned.
 USER_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "user_data", "gen_text")
 PROMPT_FILE = os.path.join(USER_DATA_DIR, "prompt.json")
 
@@ -36,6 +36,99 @@ def _save_prompts(data: Dict[str, str]) -> None:
     os.makedirs(USER_DATA_DIR, exist_ok=True)
     with open(PROMPT_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+class GenerationWorker(QObject):
+    """
+    Runs the generation task in a separate thread to avoid blocking the UI.
+    """
+    progressUpdated = pyqtSignal(int)
+    finished = pyqtSignal(str)
+
+    def __init__(self, params: Dict):
+        super().__init__()
+        self.params = params
+        self._is_cancelled = False
+
+    def run(self):
+        """The main workhorse method that runs in the background."""
+        try:
+            # Unpack parameters
+            items = self.params["items"]
+            provider = self.params["provider"]
+            prompt_tpl = self.params["prompt_tpl"]
+            dst = self.params["dst"]
+            cfg_all = self.params["cfg_all"]
+            base_cfg = self.params["base_cfg"]
+
+            concurrency_cfg = cfg_all.get("concurrency", {})
+            USER_MAX_BATCH_SIZE = int(concurrency_cfg.get("openai_batch_max_size"))
+            BATCH_MAX_LEN = int(concurrency_cfg.get("openai_batch_max_prompt_len"))
+            OLLAMA_WORKERS = int(concurrency_cfg.get("ollama_workers"))
+
+            print(f"[AINotePro] Concurrency limits: max_batch_size={USER_MAX_BATCH_SIZE}, max_prompt_len={BATCH_MAX_LEN}")
+
+            # Determine effective batch size
+            effective_batch_size = USER_MAX_BATCH_SIZE
+            prompt_len = len(prompt_tpl)
+            if prompt_len > 0:
+                len_based_batch_size = max(1, BATCH_MAX_LEN // prompt_len)
+                effective_batch_size = min(USER_MAX_BATCH_SIZE, len_based_batch_size)
+            print(f"[AINotePro] Using effective batch size: {effective_batch_size}")
+
+            processed = 0
+            while processed < len(items):
+                if self._is_cancelled:
+                    break
+
+                chunk = items[processed : processed + effective_batch_size]
+                inputs = [t for (_, t) in chunk]
+                
+                # Prepare config for the batch/fallback
+                cfg = {**base_cfg, "instruction": prompt_tpl}
+
+                try:
+                    outputs = provider.generate_batch(inputs, cfg)
+                except Exception as e:
+                    print(f"[AINotePro][Batch] provider error: {e}. Falling back to concurrent per-item generation for this chunk.")
+                    import concurrent.futures as _fut
+                    outputs = [None] * len(inputs)
+                    
+                    def do_generate(idx, text):
+                        prompt = prompt_tpl.replace("{Source Field}", text)
+                        seq_cfg = cfg.copy(); del seq_cfg["instruction"]
+                        try:
+                            return (idx, provider.generate(prompt, seq_cfg))
+                        except Exception as e_inner:
+                            print(f"[AINotePro][Seq Fallback] Item {idx} failed: {e_inner}")
+                            return (idx, f"[Error] {e_inner}")
+
+                    with _fut.ThreadPoolExecutor(max_workers=4) as ex:
+                        future_to_idx = {ex.submit(do_generate, i, s): i for i, s in enumerate(inputs)}
+                        for future in _fut.as_completed(future_to_idx):
+                            idx, result = future.result()
+                            outputs[idx] = result
+
+                # Align and write back
+                for (nid, _src), out in zip(chunk, outputs):
+                    if self._is_cancelled:
+                        break
+                    try:
+                        note = mw.col.get_note(nid)
+                        update_field_content(note, dst, out)
+                    except Exception as e:
+                        print(f"[Note {nid}] write failed: {e}")
+                    processed += 1
+                    self.progressUpdated.emit(processed)
+
+            self.finished.emit("Generation complete.")
+
+        except Exception as e:
+            import traceback
+            print("[AINotePro] Unhandled error in worker thread:", traceback.format_exc())
+            self.finished.emit(f"An error occurred: {e}")
+
+    def cancel(self):
+        self._is_cancelled = True
 
 
 class TextTab(QWidget):
@@ -230,6 +323,10 @@ class TextTab(QWidget):
         self.base_url_edit.setText(cfg.get("base_url", ""))
         self.api_key_edit.setText(cfg.get("api_key", ""))
         self.model_combo.setEditText(cfg.get("model", ""))
+        # Also update temperature slider from config
+        temp = cfg.get("temperature", 0.7)
+        self.temperature_slider.setValue(int(temp * 100))
+        self.temperature_value.setText(f"{temp:.2f}")
 
     def _refresh_models(self) -> None:
         st = "text"; pv = self._service_map()
@@ -338,19 +435,7 @@ class TextTab(QWidget):
             showWarning("No valid source text to process.")
             return
 
-        # Read concurrency config
-        try:
-            cfg_all = self.cfg.get_all()
-            BATCH_SIZE = int((cfg_all.get("concurrency", {}) or {}).get("openai_batch_size", 20))
-            OLLAMA_WORKERS = int((cfg_all.get("concurrency", {}) or {}).get("ollama_workers", 4))
-        except Exception:
-            BATCH_SIZE = 20
-            OLLAMA_WORKERS = 4
         total = len(items)
-        try:
-            mw.progress.start(label=f"Generating {total} items...", max=total)
-        except Exception:
-            pass
 
         processed = 0
         # Ollama: run concurrent per-item requests for performance
@@ -383,56 +468,41 @@ class TextTab(QWidget):
             showInfo("Batch generation complete.")
             return
 
-        while processed < total:
-            chunk = items[processed: processed + BATCH_SIZE]
-            inputs = [t for (_, t) in chunk]
-            cfg = {
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": model,
-                "temperature": temp,
-                "instruction": prompt_tpl,
-            }
-            try:
-                outputs = provider.generate_batch(inputs, cfg)
-            except Exception as e:
-                print("[AINotePro][Batch] provider error:", e)
-                # fallback sequential with detailed logging
-                outputs = [None] * len(inputs)
-                for i, s in enumerate(inputs):
-                    try:
-                        prompt = prompt_tpl.replace("{Source Field}", s)
-                        print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
-                        outputs[i] = provider.generate(prompt, cfg)
-                    except Exception as e_inner:
-                        print(f"[AINotePro][Seq Fallback] item failed: {e_inner}")
+        # For OpenAI/DeepSeek, run in a background thread with a progress dialog
+        progress = QProgressDialog("Generating content...", "Cancel", 0, total, self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0) # Show immediately
+        progress.setValue(0)
 
-            # Align and write back
-            if len(outputs) != len(chunk):
-                print("[AINotePro][Batch] size mismatch, falling back per-item.")
-                outputs = []
-                for s in inputs:
-                    prompt = prompt_tpl.replace("{Source Field}", s)
-                    print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
-                    outputs.append(provider.generate(prompt, cfg))
+        # Setup worker and thread
+        self.thread = QThread()
+        params = {
+            "items": items,
+            "provider": provider,
+            "prompt_tpl": prompt_tpl,
+            "dst": dst,
+            "cfg_all": self.cfg.get_all(),
+            "base_cfg": {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp},
+        }
+        self.worker = GenerationWorker(params)
+        self.worker.moveToThread(self.thread)
 
-            for (nid, _src), out in zip(chunk, outputs):
-                try:
-                    note = mw.col.get_note(nid)
-                    update_field_content(note, dst, out)
-                except Exception as e:
-                    print(f"[Note {nid}] write failed: {e}")
-                processed += 1
-                try:
-                    mw.progress.update(value=processed)
-                except Exception:
-                    pass
+        # Connect signals
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.progressUpdated.connect(progress.setValue)
+        progress.canceled.connect(self.worker.cancel)
 
-        try:
-            mw.progress.finish()
-        except Exception:
-            pass
-        showInfo("Batch generation complete.")
+        def on_finish(message):
+            progress.setValue(total)
+            showInfo(message)
+
+        self.worker.finished.connect(on_finish)
+
+        # Start the thread
+        self.thread.start()
 
     # Helpers
     def _extract_and_upload_image(self, html_content: str) -> Optional[str]:
