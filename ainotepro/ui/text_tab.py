@@ -68,11 +68,22 @@ class GenerationWorker(QObject):
             print(f"[AINotePro] Concurrency limits: max_batch_size={USER_MAX_BATCH_SIZE}, max_prompt_len={BATCH_MAX_LEN}")
 
             # Determine effective batch size
+            # It considers the prompt template length AND the average input length.
             effective_batch_size = USER_MAX_BATCH_SIZE
-            prompt_len = len(prompt_tpl)
-            if prompt_len > 0:
-                len_based_batch_size = max(1, BATCH_MAX_LEN // prompt_len)
+            base_prompt_len = len(prompt_tpl)
+            if base_prompt_len > 0 and items:
+                # Calculate average length of input strings
+                avg_input_len = sum(len(t) for _, t in items) / len(items)
+                # Estimate per-item cost: prompt template + input text + JSON overhead (quotes, commas, etc.)
+                per_item_cost = base_prompt_len + avg_input_len + 10  # Add 10 for JSON chars
+                
+                if per_item_cost > 0:
+                    len_based_batch_size = max(1, int(BATCH_MAX_LEN // per_item_cost))
+                else:
+                    len_based_batch_size = USER_MAX_BATCH_SIZE
+
                 effective_batch_size = min(USER_MAX_BATCH_SIZE, len_based_batch_size)
+
             print(f"[AINotePro] Using effective batch size: {effective_batch_size}")
 
             processed = 0
