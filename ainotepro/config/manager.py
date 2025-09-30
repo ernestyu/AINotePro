@@ -40,12 +40,13 @@ def _get_default_config() -> Dict[str, Any]:
 def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
     """
     Recursively merges source dict into destination dict.
-    If a key exists in both, and both values are dicts, it merges them.
-    Otherwise, the value from the destination dict takes precedence.
+    - If a key exists in both and both values are dicts, it merges them recursively.
+    - If a key exists in source but not in destination, it's added to destination.
+    - If a key exists in both but values are not both dicts, destination's value is kept.
     """
     for key, value in source.items():
         if isinstance(value, dict) and key in destination and isinstance(destination[key], dict):
-            destination[key] = _deep_merge_dicts(value, destination[key])
+            _deep_merge_dicts(value, destination.setdefault(key, {}))
         elif key not in destination:
             destination[key] = value
     return destination

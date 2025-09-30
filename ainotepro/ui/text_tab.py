@@ -189,7 +189,7 @@ class TextTab(QWidget):
         # pack API key field and lock button into an inner row to eliminate the gap
         api_row = QHBoxLayout(); api_row.setContentsMargins(0, 0, 0, 0); api_row.setSpacing(4)
         api_row.addWidget(self.api_key_edit, 1)
-        self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("馃敀")
+        self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("🔒")
         self.toggle_password_button.setFixedWidth(28)
         self.toggle_password_button.clicked.connect(self._toggle_pw)
         api_row.addWidget(self.toggle_password_button, 0)
