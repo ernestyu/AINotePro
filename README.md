@@ -1,36 +1,18 @@
-# AINotePro: Your All-in-One AI Assistant for Anki
+### 1\. 项目核心理念
 
-## 1. Project Overview
+在设计文件结构之前，我们先确立几个核心设计理念：
 
-**AINotePro** is a powerful, multi-modal Anki add-on designed to seamlessly integrate advanced AI capabilities directly into your note creation and editing workflow. It acts as a versatile assistant, allowing you to generate text, images, and audio from various AI services, all within a unified and intuitive interface inside the Anki browser.
+1.  **UI 与逻辑分离**: 用户界面 (UI) 的代码只负责展示和接收用户输入，不应包含任何业务逻辑（如调用 API）。
+2.  **服务抽象化**: 无论后端是 OpenAI, Anthropic, 还是本地的 Ollama, 对于核心逻辑来说，它们都应该提供一个统一的接口。例如，所有文本生成服务都应该有一个 `generate_text(prompt)` 方法。这通过“策略模式”或“抽象基类”实现。
+3.  **配置驱动**: 插件的所有行为（使用哪个模型、API 密钥、本地服务器地址等）都应该由用户配置决定，而不是硬编码在代码里。
+4.  **异步处理**: AI 服务的网络请求可能会很慢，为了不冻结 Anki 的主界面，所有耗时操作都必须在后台线程中异步执行。
+5.  **统一的管理者 (Manager)**: 有一个中心协调器，负责接收来自 UI 的请求，根据配置选择合适的服务，执行任务，并将结果返回给 UI。
 
-The project is built with flexibility and extensibility in mind, supporting both popular commercial APIs and local, self-hosted models.
+-----
 
-### Core Features
-*   **Multi-Modal Generation**: A single tool to handle Text, Text-to-Speech (TTS), and Image generation for your Anki notes.
-*   **Flexible AI Service Integration**:
-    *   **Text**: Natively supports any OpenAI-compatible API (e.g., OpenAI, DeepSeek, Groq, Moonshot) and local models via Ollama.
-    *   **Image**: Supports services like Pollinations.ai for creative image generation.
-    *   **Audio**: Integrates with services like Edge-TTS for high-quality speech synthesis.
-*   **Advanced Text Generation**:
-    *   Map generation from any source field to any destination field.
-    *   Full control over prompts, with a built-in prompt management system (save, load, delete).
-    *   Adjustable creativity via a temperature slider.
-*   **Vision-Powered Content Creation**: Can analyze an image within a note field, upload it to a configured image host, and use a vision-capable model to generate a description, analysis, or any other text-based content.
-*   **Integrated & Modular UI**: A clean, tabbed dialog accessible from the Anki browser provides a central hub for all AI operations.
-*   **Persistent & Centralized Configuration**: Utilizes Anki's native add-on configuration system (`config.json`) to manage all user settings, including API endpoints, keys, and saved prompts, allowing for easy editing via Anki's standard configuration dialog.
+### 2\. 建议的文件目录结构
 
-### Technology Stack
-*   **Core Framework**: Anki Add-on SDK
-*   **UI Toolkit**: PyQt (via Anki's `aqt.qt` wrapper)
-*   **Language**: Python 3.9+
-*   **Networking**: `requests` (for robust API communication)
-*   **Key Libraries**: `openai` (for vision models)
-*   **Architecture**: A clean, layered architecture separating UI (`gui`), business logic (`logic`), and API communication (`core`).
-
-## 2. Project Structure
-
-The project follows a modern, layered structure that is standard for professional Anki add-ons, ensuring maintainability and ease of extension.
+这是一个推荐的目录结构。Anki 插件本质上是一个 Python 包，所以我们会按照标准的 Python 项目结构来组织。
 
 ```
 ainotepro/
@@ -85,9 +67,9 @@ ainotepro/
 └── config.json                # Anki 插件配置项定义
 ```
 
-## 3. Backend (Add-on Logic) Deep Dive
+-----
 
-### 各模块职责详解
+### 3\. 各模块职责详解
 
 #### `__init__.py` (插件入口)
 
@@ -202,75 +184,31 @@ ainotepro/
 
 -----
 
-### Core Workflow: Text Generation
+### 4\. 工作流程示例 (生成图片)
 
-The text generation process is a prime example of the project's layered architecture.
+1.  **用户操作**: 用户在 Anki 编辑器中点击 AINotePro 图标。
+2.  **UI 响应**: `editor_button.py` 的逻辑触发，`main_dialog.py` 中的 `MainDialog` 实例被创建并显示。
+3.  **用户输入**: 用户选择“图像” -\> “DALL-E”，输入 "a red apple on a book"，然后点击“生成”。
+4.  **UI -\> Core**: `MainDialog` 捕获到点击事件，调用 `AIManager.generate_image_for_field(current_note, 'Front', 'a red apple on a book')`。
+5.  **Core (Manager)**:
+    a. `AIManager` 从 `config.manager` 获取 DALL-E 的 API 密钥等配置。
+    b. `AIManager` 调用 `provider_factory.create_provider('image', 'dalle', config)`，获得一个 `DalleImageProvider` 实例。
+    c. `AIManager` 创建一个 `AsyncTask`，将这个实例和 prompt 交给它，并启动线程。UI 此时可以显示“正在生成图片...”。
+6.  **Core (Async Task) -\> Service**:
+    a. `AsyncTask` 在后台线程中调用 `DalleImageProvider.generate()` 方法。
+    b. `DalleImageProvider` 使用 `requests` 或 `openai` 库向 OpenAI API 发送请求。
+7.  **Service -\> Core (Async Task)**: API 返回图片数据（二进制流）。`AsyncTask` 接收到数据后，发出一个 `task_finished` 信号，并将数据作为参数传递。
+8.  **Core (Manager) -\> UI**:
+    a. `AIManager` 中连接到该信号的槽函数被触发。
+    b. `AIManager` 调用 `utils.add_image_to_media_collection()`，将图片数据存入 Anki 媒体库，并获得文件名（如 `paste-123.jpg`）。
+    c. `AIManager` 调用 `utils.update_field_content()`，将 `<img src="paste-123.jpg">` 这段 HTML 插入到指定字段。
+    d. `MainDialog` 收到任务完成的通知，关闭加载提示，并可能显示“成功！”的消息，然后关闭对话框。
 
-1.  **User Interaction (GUI Layer - `gui/text_tab.py`)**:
-    *   The user selects a service (e.g., "DeepSeek"), chooses a model, writes a prompt, and selects source/destination fields.
-    *   When the "Generate" button is clicked, the `on_generate_text` method gathers all the necessary information from the UI widgets (API key, base URL, model name, temperature, prompt, etc.).
-    *   Crucially, the UI layer does **not** know how to talk to DeepSeek or Ollama. It simply packages the configuration and user input.
+这个架构将各部分职责明确分开，当你未来想增加一个新的 AI 服务时（例如，添加 Midjourney 作为图片生成器），你只需要：
 
-2.  **Business Logic (Logic Layer - `logic/text_service.py`)**:
-    *   The UI layer calls `text_service.generate_text()`, passing the service name ("DeepSeek") and the configuration dictionary.
-    *   The `TextGenerationService` acts as a dispatcher. Its internal `_get_client` factory method inspects the `service_name`.
-    *   Since "DeepSeek" is OpenAI-compatible, the factory instantiates and returns an `OpenAIClient` object, initialized with the user's base URL and API key. If the service were "Ollama", it would return an `OllamaClient`.
+1.  在 `services/image/` 目录下创建一个 `midjourney.py` 文件。
+2.  在其中创建一个 `MidjourneyImageProvider` 类，并实现 `generate` 方法。
+3.  更新 `provider_factory.py` 以识别 "midjourney"。
+4.  在 `ui/config_dialog.py` 和 `ui/main_dialog.py` 中添加相应的选项。
 
-3.  **API Communication (Core Layer - `core/text/openai_client.py`)**:
-    *   The `text_service` then calls the `generate_chat` method on the returned client instance.
-    *   The `OpenAIClient` is a "pure" class. Its only responsibility is to construct the correct JSON payload and headers for the OpenAI Chat Completions API specification.
-    *   It uses the `requests` library to make the HTTP POST request, handles timeouts, and checks for HTTP errors.
-    *   Upon receiving a successful response, it parses the JSON, extracts the generated text from `choices[0].message.content`, and returns it as a simple string.
-    *   If any network or parsing error occurs, it raises a specific exception (e.g., `ConnectionError`, `ValueError`), which is caught by the UI layer to display a user-friendly warning.
-
-4.  **Result Handling (GUI Layer - `gui/text_tab.py`)**:
-    *   The UI layer receives the generated string (or an error message) from the service.
-    *   It then updates the destination field of the current Anki note and instructs Anki to save the changes (`note.col.update_note(note)`).
-
-This separation of concerns makes the system extremely robust and extensible. To add a new OpenAI-compatible provider, no new files are needed; one only needs to add its name to the dropdown in the UI.
-
-### Vision Workflow: Image-to-Text
-
-1.  **Image Detection and Upload**: When "Enable Image Source" is checked, the `on_generate_text` method finds the `<img>` tag in the source field.
-2.  It uses Anki's API (`mw.col.media.dir()`) to locate the image file in the `collection.media` folder.
-3.  The image is then uploaded to a user-configured image hosting platform (e.g., PStorage) via the `upload_to_img_hosting` utility, which returns a public URL.
-4.  **API Call**: The `generate_with_img` function is called, passing the image URL and the user's prompt to a vision-capable model API (e.g., Claude 3, GPT-4 Vision).
-5.  The returned text is then placed in the destination field, completing the image-to-text workflow.
-
-## 4. How to Run & Develop
-
-As this is an Anki add-on, it is run by placing the `AINotePro` folder inside your Anki `addons21` directory.
-
-### Prerequisites
-*   Anki 2.1.49+
-*   Python 3.9+ (typically bundled with Anki)
-
-### Development Setup
-1.  **Locate your Anki `addons21` folder**. You can find this from within Anki by going to `Tools > Add-ons > View Files`.
-2.  **Clone the repository** directly into this folder:
-    ```bash
-    cd /path/to/your/addons21
-    git clone https://github.com/ernestyu/AINotePro.git
-    ```
-3.  **Install Dependencies (if any)**: If the add-on requires external Python libraries not bundled in `libs/`, you would install them into a virtual environment and copy them. For this project, most dependencies are intended to be bundled.
-4.  **Restart Anki**: Anki will load the add-on on startup.
-5.  **Access the Tool**: Open the Anki Browser, select one or more notes, and go to `Edit > AI Note Pro...` to open the main dialog.
-
-### Making Changes
-*   You can edit the Python files directly in the `AINotePro/ainotepro/` directory.
-*   To see your changes, you must restart Anki.
-*   For faster development, you can use an external IDE like VS Code or PyCharm and configure it to recognize Anki's bundled Python environment for features like code completion.
-
-## 5. Future Roadmap & Extension Suggestions
-
-*   **Asynchronous Operations**: For long-running AI generations, implement `aqt.task.run_in_background` to prevent the Anki UI from freezing. This would involve moving the core service calls into background threads and using a callback to update the UI upon completion.
-*   **Full GUI/Logic Separation for All Tabs**: Apply the same layered architecture (GUI, Logic, Core) to the "Images" and "TTS" tabs to further improve code structure and maintainability.
-*   **Unit Testing**: Add unit tests for the `logic` and `core` layers. These pure Python modules can be tested independently of the Anki environment, ensuring their reliability.
-*   **Advanced Prompt Templating**: Allow users to create and manage more complex prompt templates with multiple placeholders, not just `{Source Field}`.
-*   **Configuration Profiles**: Allow users to save and load entire configuration "profiles" (e.g., a "Translation Profile" with specific models and prompts vs. a "Summarization Profile").
-
-```
-
-<!--
-[PROMPT_SUGGESTION]Please apply the proposed directory structure changes (renaming `ui` to `gui`, `services` to `logic`, etc.) to the project.[/PROMPT_SUGGESTION]
-[PROMPT_SUGGESTION]Now, refactor the image generation and TTS features to follow the same layered architecture as the text generation feature.[/PROMPT_SUGGESTION]
+核心的 `AIManager` 和 `AsyncTask` 代码完全不需要改动。这就是低耦合、高内聚设计带来的好处。

@@ -27,7 +27,13 @@ class OpenAITextProvider(TextProvider):
     def list_models(self, config: Dict) -> List[str]:
         try:
             url = f"{self._base(config)}/models"
-            r = requests.get(url, headers=self._headers(config), timeout=8)
+            headers = self._headers(config)
+            safe_key = (config or {}).get("api_key")
+            if safe_key:
+                safe_key = safe_key[:6] + "…" + safe_key[-4:]
+            print(f"[AINotePro] GET {url}")
+            print(f"[AINotePro] headers: Authorization: Bearer {safe_key or '(none)'}")
+            r = requests.get(url, headers=headers, timeout=12)
             r.raise_for_status()
             data = r.json()
             models = data.get("data", [])
@@ -47,7 +53,19 @@ class OpenAITextProvider(TextProvider):
         }
 
         url = f"{self._base(config)}/chat/completions"
-        r = requests.post(url, json=body, headers=self._headers(config), timeout=60)
+        headers = self._headers(config)
+        safe_key = (config or {}).get("api_key")
+        if safe_key:
+            safe_key = safe_key[:6] + "…" + safe_key[-4:]
+        print(f"[AINotePro] POST {url}")
+        print(f"[AINotePro] headers: Authorization: Bearer {safe_key or '(none)'}")
+        try:
+            import json as _json
+            print("[AINotePro] body:", _json.dumps({k: (v if k != 'messages' else f"{len(v)} messages") for k, v in body.items()}, ensure_ascii=False))
+        except Exception:
+            pass
+
+        r = requests.post(url, json=body, headers=headers, timeout=60)
         r.raise_for_status()
         data = r.json()
         choices = data.get("choices", [])
@@ -71,7 +89,14 @@ class OpenAITextProvider(TextProvider):
         }
 
         url = f"{self._base(config)}/chat/completions"
-        r = requests.post(url, json=body, headers=self._headers(config), timeout=90)
+        headers = self._headers(config)
+        print(f"[AINotePro] POST {url} (vision)")
+        try:
+            import json as _json
+            print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "stream": body.get("stream"), "content_parts": len(body.get("messages", [{}])[0].get("content", []))}, ensure_ascii=False))
+        except Exception:
+            pass
+        r = requests.post(url, json=body, headers=headers, timeout=90)
         r.raise_for_status()
         data = r.json()
         choices = data.get("choices", [])

@@ -7,7 +7,7 @@ from typing import Dict, Optional
 
 from aqt import mw
 from aqt.qt import (
-    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QLineEdit, QToolButton,
+    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton,
     QPushButton, QFrame, QTextEdit, QSizePolicy, QSlider, Qt, QProgressDialog,
     QMessageBox, QCheckBox
 )
@@ -63,40 +63,59 @@ class TextTab(QWidget):
         gen_row.addWidget(self.service_combo)
         layout.addLayout(gen_row)
 
-        # Base URL
-        row = QHBoxLayout(); row.addWidget(QLabel("Base URL"))
-        self.base_url_edit = QLineEdit(); self.base_url_edit.setPlaceholderText("https://api.example.com")
-        row.addWidget(self.base_url_edit); layout.addLayout(row)
+        # Use a grid so left edges are aligned and buttons dock to the right
+        grid = QGridLayout()
+        grid.setColumnStretch(0, 0)  # label column
+        grid.setColumnStretch(1, 1)  # main control column expands
+        grid.setColumnStretch(2, 0)
+        grid.setColumnStretch(3, 0)
 
-        # API Key + toggle
-        row = QHBoxLayout(); row.addWidget(QLabel("API Key"))
+        # Base URL
+        grid.addWidget(QLabel("Base URL"), 0, 0)
+        self.base_url_edit = QLineEdit(); self.base_url_edit.setPlaceholderText("https://api.example.com")
+        grid.addWidget(self.base_url_edit, 0, 1, 1, 3)
+
+        # API Key + lock button at far right
+        grid.addWidget(QLabel("API Key"), 1, 0)
         self.api_key_edit = QLineEdit()
         try:
             self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         except Exception:
             self.api_key_edit.setEchoMode(QLineEdit.Password)
+        # pack API key field and lock button into an inner row to eliminate the gap
+        api_row = QHBoxLayout(); api_row.setContentsMargins(0, 0, 0, 0); api_row.setSpacing(4)
+        api_row.addWidget(self.api_key_edit, 1)
         self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("🔒")
+        self.toggle_password_button.setFixedWidth(28)
         self.toggle_password_button.clicked.connect(self._toggle_pw)
-        row.addWidget(self.api_key_edit); row.addWidget(self.toggle_password_button); layout.addLayout(row)
+        api_row.addWidget(self.toggle_password_button, 0)
+        api_wrap = QWidget(); api_wrap.setLayout(api_row)
+        grid.addWidget(api_wrap, 1, 1, 1, 3)
 
-        # Available Model + Refresh/Check
-        row = QHBoxLayout(); row.addWidget(QLabel("Available Model"))
+        # Available Model + right-aligned small buttons
+        grid.addWidget(QLabel("Available Model"), 2, 0)
         self.model_combo = QComboBox(); self.model_combo.setEditable(True)
-        self.refresh_button = QPushButton("Refresh")
-        self.test_button = QPushButton("Check")
+        self.model_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
+        grid.addWidget(self.model_combo, 2, 1)
+        self.refresh_button = QToolButton(); self.refresh_button.setText("Refresh"); self.refresh_button.setFixedWidth(80)
+        self.test_button = QToolButton(); self.test_button.setText("Check"); self.test_button.setFixedWidth(80)
         self.refresh_button.clicked.connect(self._refresh_models)
         self.test_button.clicked.connect(self._test_model)
-        row.addWidget(self.model_combo); row.addWidget(self.refresh_button); row.addWidget(self.test_button)
-        layout.addLayout(row)
+        grid.addWidget(self.refresh_button, 2, 2)
+        grid.addWidget(self.test_button, 2, 3)
 
-        # Temperature
-        temp_row = QHBoxLayout()
-        self.temperature_label = QLabel("Temperature")
+        # Temperature row: keep label aligned at col 0
+        grid.addWidget(QLabel("Temperature"), 3, 0)
+        temp_box = QHBoxLayout()
         self.temperature_slider = QSlider(Qt.Orientation.Horizontal); self.temperature_slider.setRange(0, 100); self.temperature_slider.setValue(70)
         self.temperature_value = QLabel("0.70")
         self.temperature_slider.valueChanged.connect(lambda v: self.temperature_value.setText(f"{v/100:.2f}"))
-        temp_row.addWidget(self.temperature_label); temp_row.addWidget(self.temperature_slider); temp_row.addWidget(self.temperature_value)
-        layout.addLayout(temp_row)
+        temp_box.addWidget(self.temperature_slider)
+        temp_box.addWidget(self.temperature_value)
+        temp_wrap = QWidget(); temp_wrap.setLayout(temp_box)
+        grid.addWidget(temp_wrap, 3, 1, 1, 3)
+
+        layout.addLayout(grid)
 
         # Separator
         sep = QFrame(); sep.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); sep.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))
@@ -213,10 +232,15 @@ class TextTab(QWidget):
         self.model_combo.setEditText(cfg.get("model", ""))
 
     def _refresh_models(self) -> None:
-        st = "text"; pv = self._service_map(); cfg = self.cfg.get_provider_config(st, pv)
+        st = "text"; pv = self._service_map()
+        # Use current UI values rather than stored config
+        base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
+        cfg = {"base_url": base_url, "api_key": api_key}
+        print(f"[AINotePro] Refresh models clicked. service={pv}, base_url={base_url}")
         provider = create_provider(st, pv, cfg)
         try:
             models = provider.list_models(cfg) or []
+            print(f"[AINotePro] Refresh fetched {len(models)} models.")
             if models:
                 cur = self.model_combo.currentText()
                 self.model_combo.clear(); self.model_combo.addItems(models)
@@ -224,7 +248,15 @@ class TextTab(QWidget):
                     i = self.model_combo.findText(cur)
                     if i >= 0: self.model_combo.setCurrentIndex(i)
                     else: self.model_combo.setEditText(cur)
+            # persist current provider config
+            self.cfg.set_provider_config(st, pv, {
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": self.model_combo.currentText().strip(),
+                "temperature": self.temperature_slider.value() / 100.0,
+            })
         except Exception as e:
+            print(f"[AINotePro] Refresh models failed: {e}")
             showWarning(f"Failed to fetch models: {e}")
 
     def _test_model(self) -> None:
@@ -232,11 +264,14 @@ class TextTab(QWidget):
         base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
         model = self.model_combo.currentText().strip(); temp = self.temperature_slider.value()/100.0
         st = "text"; pv = self._service_map(); cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
+        print(f"[AINotePro] Check clicked. service={pv}, model={model}, base_url={base_url}, temp={temp}")
         provider = create_provider(st, pv, cfg)
         try:
             content = provider.generate("hello", cfg)
+            print("[AINotePro] Check OK. Got response length:", len(content or ""))
             showInfo(f"Test result:\n{content[:200]}")
         except Exception as e:
+            print(f"[AINotePro] Check failed: {e}")
             showWarning(f"Test failed: {e}")
 
     # Public slot called by parent dialog
