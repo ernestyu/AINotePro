@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import edge_tts
 
@@ -54,7 +54,7 @@ def _ensure_run(coro):
         return asyncio.run(coro)
 
 
-_VOICES_CACHE: List[dict] | None = None
+_VOICES_CACHE: Optional[List[dict]] = None
 
 
 def _get_all_voices_cached() -> List[dict]:

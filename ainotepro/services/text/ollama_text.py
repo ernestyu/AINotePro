@@ -23,11 +23,19 @@ class OllamaTextProvider(TextProvider):
         print(f"[AINotePro] POST {url}")
         try:
             import json as _json
-            print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "messages": len(body.get("messages", [])), "stream": body.get("stream")}, ensure_ascii=False))
+            first_msg = body.get("messages", [{}])[0].get("content", "")
+            preview = (first_msg[:200] + "…") if len(first_msg) > 200 else first_msg
+            print("[AINotePro] body:", _json.dumps({
+                "model": body.get("model"),
+                "messages": len(body.get("messages", [])),
+                "stream": body.get("stream"),
+                "content_preview": preview,
+            }, ensure_ascii=False))
         except Exception:
             pass
 
-        r = requests.post(url, json=body, timeout=120)
+        timeout = int((config or {}).get("timeout", 300))
+        r = requests.post(url, json=body, timeout=timeout)
         r.raise_for_status()
         data = r.json() or {}
         msg = (data.get("message") or {}).get("content", "")
@@ -38,7 +46,7 @@ class OllamaTextProvider(TextProvider):
         url = f"{self._base(config)}/api/tags"
         print(f"[AINotePro] GET {url}")
         try:
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, timeout=int((config or {}).get("timeout", 30)))
             r.raise_for_status()
             data = r.json() or {}
             models = data.get("models", [])
@@ -52,6 +60,30 @@ class OllamaTextProvider(TextProvider):
             return names
         except Exception:
             return []
+
+    def generate_batch(self, inputs: list[str], config: Dict) -> list[str]:
+        # Ollama does not provide a true multi-input batch endpoint that returns
+        # an array mapped to inputs. Perform sequential generation here, but make
+        # sure to apply the instruction (Prompt Preview) by replacing {Source Field}
+        # for each input. This guarantees prompts are honored.
+        instruction = (config or {}).get("instruction", "")
+        total = len(inputs)
+        print(f"[AINotePro][Batch] Ollama: sequential per-item, items={total}")
+        results: list[str] = []
+        for i, s in enumerate(inputs, 1):
+            prompt = instruction.replace("{Source Field}", s)
+            # Log both the raw input and prompt preview so issues are easy to spot
+            ip = (s[:120] + "…") if len(s) > 120 else s
+            pp = (prompt[:200] + "…") if len(prompt) > 200 else prompt
+            try:
+                print(f"[AINotePro][Ollama Seq] {i}/{total} input=\"{ip}\" prompt_preview=\"{pp}\"")
+            except Exception:
+                pass
+            try:
+                results.append(self.generate(prompt, config))
+            except Exception as e:
+                results.append(f"[Error] {e}")
+        return results
 
 
 def _remove_think(s: str) -> str:

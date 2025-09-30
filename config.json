@@ -43,6 +43,10 @@
   },
   "ui": {
     "last_service_tab": "text"
+  },
+  "concurrency": {
+    "openai_batch_size": 20,
+    "ollama_workers": 4
   }
 }
 

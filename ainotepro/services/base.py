@@ -18,6 +18,16 @@ class TextProvider(ABC):
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         raise NotImplementedError("Provider does not support vision input")
 
+    # Optional: batch generation; default falls back to sequential calls
+    def generate_batch(self, inputs: list[str], config: Dict) -> list[str]:
+        results: list[str] = []
+        for s in inputs:
+            try:
+                results.append(self.generate(s, config))
+            except Exception as e:
+                results.append(f"[Error] {e}")
+        return results
+
 
 class ImageProvider(ABC):
     @abstractmethod

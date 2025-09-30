@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import os
@@ -85,7 +85,7 @@ class TextTab(QWidget):
         # pack API key field and lock button into an inner row to eliminate the gap
         api_row = QHBoxLayout(); api_row.setContentsMargins(0, 0, 0, 0); api_row.setSpacing(4)
         api_row.addWidget(self.api_key_edit, 1)
-        self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("🔒")
+        self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("馃敀")
         self.toggle_password_button.setFixedWidth(28)
         self.toggle_password_button.clicked.connect(self._toggle_pw)
         api_row.addWidget(self.toggle_password_button, 0)
@@ -130,7 +130,7 @@ class TextTab(QWidget):
         pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("Prompt List:"))
         self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True)
         pr_row.addWidget(self.prompt_list_combo); layout.addLayout(pr_row)
-        btn_row = QHBoxLayout(); self.save_button = QPushButton("💾 Save Prompt"); self.load_button = QPushButton("📂 Load Prompt"); self.delete_button = QPushButton("❌ Delete Prompt")
+        btn_row = QHBoxLayout(); self.save_button = QPushButton("Save Prompt"); self.load_button = QPushButton("Load Prompt"); self.delete_button = QPushButton("Delete Prompt")
         self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
         btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button); layout.addLayout(btn_row)
 
@@ -140,7 +140,7 @@ class TextTab(QWidget):
 
         # Image input toggle + button
         img_row = QHBoxLayout(); self.image_checkbox = QCheckBox("Enable Image Source"); self.image_checkbox.stateChanged.connect(self._on_img_toggle)
-        self.image_input_button = QPushButton("🖼 Image Hosting Platform"); self.image_input_button.setEnabled(False)
+        self.image_input_button = QPushButton("Image Hosting Platform"); self.image_input_button.setEnabled(False)
         img_row.addWidget(self.image_checkbox); img_row.addWidget(self.image_input_button); layout.addLayout(img_row)
 
         # Destination Field
@@ -292,20 +292,17 @@ class TextTab(QWidget):
             showWarning("Source/Destination field is not set."); return
 
         st = "text"; pv = self._service_map(); provider = create_provider(st, pv, {})
-        progress = QProgressDialog("Generating responses...", "Cancel", 0, len(note_ids), self); progress.setWindowTitle("Generating"); progress.show()
-
-        for i, nid in enumerate(note_ids):
-            if progress.wasCanceled():
-                showInfo("Operation canceled."); break
-            note = mw.col.get_note(nid)
-            if src not in note: continue
-
-            # prepare config per note
-            cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
-
-            # image-assisted?
-            content: Optional[str] = None
-            if self.image_checkbox.isChecked():
+        # If image-assisted is enabled, fall back to per-note flow for correctness
+        if self.image_checkbox.isChecked():
+            try:
+                mw.progress.start(label="Generating responses...", max=len(note_ids))
+            except Exception:
+                pass
+            for i, nid in enumerate(note_ids):
+                note = mw.col.get_note(nid)
+                if src not in note: continue
+                cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
+                content: Optional[str] = None
                 img_url = self._extract_and_upload_image(note[src])
                 if img_url:
                     try:
@@ -313,20 +310,126 @@ class TextTab(QWidget):
                     except Exception as e:
                         print(f"[Note {nid}] vision failed: {e}")
                         content = None
-
-            if content is None:
-                user_text = (note[src] or "").strip()
-                if not user_text: continue
-                prompt = prompt_tpl.replace("{Source Field}", user_text)
+                if content:
+                    update_field_content(note, dst, content)
                 try:
-                    content = provider.generate(prompt, cfg)
-                except Exception as e:
-                    print(f"[Note {nid}] text failed: {e}")
-                    continue
+                    mw.progress.update(value=i+1)
+                except Exception:
+                    pass
+            try:
+                mw.progress.finish()
+            except Exception:
+                pass
+            showInfo("Generation complete.")
+            return
 
-            update_field_content(note, dst, content)
-            progress.setValue(i+1)
-        progress.close(); showInfo("Generation complete.")
+        # Batch mode for plain text generation: collect inputs
+        items: list[tuple[int, str]] = []
+        for nid in note_ids:
+            note = mw.col.get_note(nid)
+            if src not in note:
+                continue
+            user_text = (note[src] or "").strip()
+            if not user_text:
+                continue
+            items.append((nid, user_text))
+
+        if not items:
+            showWarning("No valid source text to process.")
+            return
+
+        # Read concurrency config
+        try:
+            cfg_all = self.cfg.get_all()
+            BATCH_SIZE = int((cfg_all.get("concurrency", {}) or {}).get("openai_batch_size", 20))
+            OLLAMA_WORKERS = int((cfg_all.get("concurrency", {}) or {}).get("ollama_workers", 4))
+        except Exception:
+            BATCH_SIZE = 20
+            OLLAMA_WORKERS = 4
+        total = len(items)
+        try:
+            mw.progress.start(label=f"Generating {total} items...", max=total)
+        except Exception:
+            pass
+
+        processed = 0
+        # Ollama: run concurrent per-item requests for performance
+        if self.service_combo.currentText() == "Ollama":
+            import concurrent.futures as _fut
+            cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
+            with _fut.ThreadPoolExecutor(max_workers=OLLAMA_WORKERS) as ex:
+                futures = []
+                for nid, text in items:
+                    prompt = prompt_tpl.replace("{Source Field}", text)
+                    prev = (prompt[:200] + "...") if len(prompt) > 200 else prompt
+                    print("[AINotePro][Ollama Seq] prompt:", prev)
+                    futures.append(ex.submit(lambda n,s: (n, provider.generate(s, cfg)), nid, prompt))
+                for fut in _fut.as_completed(futures):
+                    nid, out = fut.result()
+                    try:
+                        note = mw.col.get_note(nid)
+                        update_field_content(note, dst, out)
+                    except Exception as e:
+                        print(f"[Note {nid}] write failed: {e}")
+                    processed += 1
+                    try:
+                        mw.progress.update(value=processed)
+                    except Exception:
+                        pass
+            try:
+                mw.progress.finish()
+            except Exception:
+                pass
+            showInfo("Batch generation complete.")
+            return
+
+        while processed < total:
+            chunk = items[processed: processed + BATCH_SIZE]
+            inputs = [t for (_, t) in chunk]
+            cfg = {
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": model,
+                "temperature": temp,
+                "instruction": prompt_tpl,
+            }
+            try:
+                outputs = provider.generate_batch(inputs, cfg)
+            except Exception as e:
+                print("[AINotePro][Batch] provider error:", e)
+                # fallback sequential with detailed logging
+                outputs = []
+                for s in inputs:
+                    prompt = prompt_tpl.replace("{Source Field}", s)
+                    print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
+                    outputs.append(provider.generate(prompt, cfg))
+
+            # Align and write back
+            if len(outputs) != len(chunk):
+                print("[AINotePro][Batch] size mismatch, falling back per-item.")
+                outputs = []
+                for s in inputs:
+                    prompt = prompt_tpl.replace("{Source Field}", s)
+                    print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
+                    outputs.append(provider.generate(prompt, cfg))
+
+            for (nid, _src), out in zip(chunk, outputs):
+                try:
+                    note = mw.col.get_note(nid)
+                    update_field_content(note, dst, out)
+                except Exception as e:
+                    print(f"[Note {nid}] write failed: {e}")
+                processed += 1
+                try:
+                    mw.progress.update(value=processed)
+                except Exception:
+                    pass
+
+        try:
+            mw.progress.finish()
+        except Exception:
+            pass
+        showInfo("Batch generation complete.")
 
     # Helpers
     def _extract_and_upload_image(self, html_content: str) -> Optional[str]:
@@ -376,3 +479,4 @@ class TextTab(QWidget):
         if data.get("status") == 200 and data.get("original", {}).get("url"):
             return data["original"]["url"]
         return None
+

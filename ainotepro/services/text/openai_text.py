@@ -104,3 +104,47 @@ class OpenAITextProvider(TextProvider):
             raise ValueError("No choices returned from API (vision)")
         return (choices[0]["message"].get("content") or "").strip()
 
+    def generate_batch(self, inputs: list[str], config: Dict) -> list[str]:
+        import json as _json
+        instruction = (config or {}).get("instruction", "")
+        temperature = (config or {}).get("temperature", 0.7)
+        body = {
+            "model": (config or {}).get("model") or "gpt-4o-mini",
+            "temperature": temperature,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "You will be given an array of input strings. For each item, apply the instruction to produce one output string.\n"
+                        "Return ONLY a JSON array of strings of the same length, in the same order, without any commentary.\n\n"
+                        f"Instruction:\n{instruction}\n\nInput array (JSON):\n{_json.dumps(inputs, ensure_ascii=False)}"
+                    ),
+                }
+            ],
+            "stream": False,
+        }
+
+        url = f"{self._base(config)}/chat/completions"
+        headers = self._headers(config)
+        print(f"[AINotePro][Batch] POST {url} items={len(inputs)} temp={temperature}")
+        try:
+            r = requests.post(url, json=body, headers=headers, timeout=120)
+            r.raise_for_status()
+            data = r.json()
+            content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            try:
+                arr = _json.loads(content)
+                if isinstance(arr, list) and len(arr) == len(inputs):
+                    return [str(x) if not isinstance(x, str) else x for x in arr]
+            except Exception:
+                pass
+            # Fallback: split by lines
+            lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
+            if len(lines) == len(inputs):
+                return lines
+            raise ValueError("Batch parse failed")
+        except Exception as e:
+            print("[AINotePro][Batch] openai-compatible failed:", e)
+            # Fallback to sequential
+            return super().generate_batch(inputs, config)
+
