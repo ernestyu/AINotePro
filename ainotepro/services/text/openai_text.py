@@ -128,6 +128,13 @@ class OpenAITextProvider(TextProvider):
         headers = self._headers(config)
         print(f"[AINotePro][Batch] POST {url} items={len(inputs)} temp={temperature}")
         try:
+            # Log a preview of the batch payload
+            content_preview = (body.get("messages", [{}])[0].get("content", "") or "")
+            preview = (content_preview[:400] + "...") if len(content_preview) > 400 else content_preview
+            print(f"[AINotePro][Batch] body preview: {preview}")
+        except Exception:
+            pass
+        try:
             r = requests.post(url, json=body, headers=headers, timeout=120)
             r.raise_for_status()
             data = r.json()
@@ -145,6 +152,12 @@ class OpenAITextProvider(TextProvider):
             raise ValueError("Batch parse failed")
         except Exception as e:
             print("[AINotePro][Batch] openai-compatible failed:", e)
-            # Fallback to sequential
-            return super().generate_batch(inputs, config)
-
+            # Fallback to sequential, but correctly apply the instruction to each item.
+            # The original super().generate_batch(inputs, config) call was incorrect
+            # because it didn't re-apply the prompt template.
+            print("[AINotePro][Batch] Falling back to sequential generation...")
+            outputs = []
+            for s in inputs:
+                prompt = instruction.replace("{Source Field}", s)
+                outputs.append(self.generate(prompt, config))
+            return outputs

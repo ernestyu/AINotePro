@@ -398,11 +398,14 @@ class TextTab(QWidget):
             except Exception as e:
                 print("[AINotePro][Batch] provider error:", e)
                 # fallback sequential with detailed logging
-                outputs = []
-                for s in inputs:
-                    prompt = prompt_tpl.replace("{Source Field}", s)
-                    print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
-                    outputs.append(provider.generate(prompt, cfg))
+                outputs = [None] * len(inputs)
+                for i, s in enumerate(inputs):
+                    try:
+                        prompt = prompt_tpl.replace("{Source Field}", s)
+                        print("[AINotePro][Seq Fallback] prompt:", (prompt[:200] + "...") if len(prompt) > 200 else prompt)
+                        outputs[i] = provider.generate(prompt, cfg)
+                    except Exception as e_inner:
+                        print(f"[AINotePro][Seq Fallback] item failed: {e_inner}")
 
             # Align and write back
             if len(outputs) != len(chunk):
@@ -479,4 +482,3 @@ class TextTab(QWidget):
         if data.get("status") == 200 and data.get("original", {}).get("url"):
             return data["original"]["url"]
         return None
-
