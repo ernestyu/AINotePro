@@ -8,9 +8,7 @@ from ...gen_audio.models.edge_tts.tts_handler import generate_tts_audio
 
 class EdgeTTSProvider:
     def generate(self, text: str, config: Dict) -> bytes:
-        # Use the existing async routine, but wait synchronously for completion by running event loop.
-        # We generate to a temp file then read back into bytes for unified interface.
-        import asyncio
+        # Generate to a temp file synchronously, then read bytes.
         import tempfile
 
         voice = (config or {}).get("voice", "en-US-AriaNeural")
@@ -21,18 +19,11 @@ class EdgeTTSProvider:
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tf:
             tmp_path = tf.name
 
-        async def _run():
-            await generate_tts_audio(text, voice, speed, volume, pitch, tmp_path)
-
+        print(f"[AINotePro][TTS Provider] begin voice={voice} speed={speed} volume={volume} pitch={pitch} path={tmp_path}")
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                # If there is a running loop (inside Anki), schedule and wait
-                fut = asyncio.run_coroutine_threadsafe(_run(), loop)
-                fut.result()
-            except RuntimeError:
-                asyncio.run(_run())
-
+            generate_tts_audio(text, voice, speed, volume, pitch, tmp_path)
+            size = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
+            print(f"[AINotePro][TTS Provider] file_ready size={size}")
             with open(tmp_path, "rb") as f:
                 data = f.read()
             return data

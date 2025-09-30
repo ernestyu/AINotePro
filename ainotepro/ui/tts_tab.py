@@ -213,7 +213,8 @@ class TTSTab(QWidget):
         voice = voice_combo.currentData() or voice_combo.currentText().strip() or "en-US-AriaNeural"
         provider = create_provider("audio", "edge_tts", {})
         try:
-            print(f"[AINotePro][TTS Preview] voice={voice}, text_len={len(text)}")
+            preview_snippet = (text[:60] + "…") if len(text) > 60 else text
+            print(f"[AINotePro][TTS Preview] voice={voice}, text_len={len(text)}, text=\"{preview_snippet}\"")
             data = provider.generate(text, {"voice": voice, "speed": 0, "volume": 0, "pitch": 0})
             # play via Anki after writing to temp media
             fname = add_audio_to_media_collection(data, "preview.mp3")

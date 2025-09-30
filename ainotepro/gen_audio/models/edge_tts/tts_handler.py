@@ -54,6 +54,23 @@ def _ensure_run(coro):
         return asyncio.run(coro)
 
 
+_VOICES_CACHE: List[dict] | None = None
+
+
+def _get_all_voices_cached() -> List[dict]:
+    global _VOICES_CACHE
+    if _VOICES_CACHE is not None:
+        return _VOICES_CACHE
+    voices = _ensure_run(_load_voices_async())
+    _VOICES_CACHE = voices
+    try:
+        from edge_tts import __version__ as _v
+        print(f"[AINotePro][TTS] edge-tts version: {_v}, voices={len(voices)}")
+    except Exception:
+        print(f"[AINotePro][TTS] voices={len(voices)}")
+    return voices
+
+
 def get_voices(tts_model: str, language_code: str, gender: str) -> List[str]:
     """Return voice names for a given language code and gender.
 
@@ -61,7 +78,7 @@ def get_voices(tts_model: str, language_code: str, gender: str) -> List[str]:
     gender: 'Female' or 'Male'
     """
     try:
-        voices = _ensure_run(_load_voices_async())
+        voices = _get_all_voices_cached()
         out: List[str] = []
         for v in voices:
             # v example keys: 'Name', 'Gender', 'Locale', ...
