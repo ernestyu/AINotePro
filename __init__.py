@@ -19,22 +19,20 @@ from aqt.qt import QAction, qconnect
 from aqt.browser import Browser
 from aqt.utils import showInfo
 
-# 新的 UI 模块
-from .ainotepro.ui.main_dialog import MainDialog
+# 使用原始三标签布局的对话框
+from .ainotepro.ainotepro_gui import show_ainotepro_dialog
 from .ainotepro.ui.editor_button import add_ainotepro_button
-from .ainotepro.ui.config_dialog import ConfigDialog
 
 # 兼容的移除窗口
 from .ainotepro.remove import RemoveDialog
 
 
 def open_ainotepro_config_in_browser(browser: Browser):
-    """Open the AINotePro main dialog (uses selected notes from Browser)."""
+    """打开原始的三标签 AINotePro 对话框（保持原始布局）。"""
     if not browser:
         showInfo("Please open the browser first.")
         return
-    dlg = MainDialog(parent=None, browser=browser)
-    dlg.exec()
+    show_ainotepro_dialog(browser)
 
 def open_remove_dialog(browser: Browser):
     """弹出 Remove Field Content 窗口"""
