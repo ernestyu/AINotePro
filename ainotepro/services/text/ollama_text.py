@@ -65,22 +65,15 @@ class OllamaTextProvider(TextProvider):
         # Ollama does not provide a true multi-input batch endpoint that returns
         # an array mapped to inputs. Perform sequential generation here, but make
         # sure to apply the instruction (Prompt Preview) by replacing {Source Field}
-        # for each input. This guarantees prompts are honored.
-        instruction = (config or {}).get("instruction", "")
+        # for each input. This is now handled by the caller (GenerationWorker)
+        # which prepares the final prompt for each item.
         total = len(inputs)
         print(f"[AINotePro][Batch] Ollama: sequential per-item, items={total}")
         results: list[str] = []
         for i, s in enumerate(inputs, 1):
-            prompt = instruction.replace("{Source Field}", s)
-            # Log both the raw input and prompt preview so issues are easy to spot
-            ip = (s[:120] + "…") if len(s) > 120 else s
-            pp = (prompt[:200] + "…") if len(prompt) > 200 else prompt
             try:
-                print(f"[AINotePro][Ollama Seq] {i}/{total} input=\"{ip}\" prompt_preview=\"{pp}\"")
-            except Exception:
-                pass
-            try:
-                results.append(self.generate(prompt, config))
+                # The 's' here is expected to be the fully-formed prompt.
+                results.append(self.generate(s, config))
             except Exception as e:
                 results.append(f"[Error] {e}")
         return results
@@ -90,4 +83,3 @@ def _remove_think(s: str) -> str:
     import re
 
     return re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL).strip()
-
