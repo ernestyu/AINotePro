@@ -24,7 +24,7 @@ class ImageTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        title = QLabel('<div style="font-size:14px; font-weight:bold; font-style:italic;">Insert AI-generated images into the selected note</div>')
+        title = QLabel('<div style="font-size:14px; font-weight:900;">Insert AI-generated images into the selected note</div>')
         layout.addWidget(title)
 
         sep = QFrame(); sep.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); sep.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))

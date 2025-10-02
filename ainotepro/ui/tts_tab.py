@@ -29,7 +29,7 @@ class TTSTab(QWidget):
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
-        title = QLabel('<div style="font-size:14px; font-weight:bold; font-style:italic;">Configure Text-to-Speech (TTS) Settings</div>')
+        title = QLabel('<div style="font-size:14px; font-weight:900;">Configure Text-to-Speech (TTS) Settings</div>')
         fixed_policy = getattr(QSizePolicy, "Fixed", QSizePolicy.Policy.Fixed)
         title.setSizePolicy(fixed_policy, fixed_policy)
         layout.addWidget(title)

@@ -172,12 +172,12 @@ class TextTab(QWidget):
         layout = QVBoxLayout(self)
 
         # Title
-        title = QLabel('<div style="font-size:14px; font-weight:bold; font-style:italic;">Insert AI-generated content into the selected note</div>')
+        title = QLabel('<div style="font-size:14px; font-weight:900;">Insert AI-generated content into the selected note</div>')
         layout.addWidget(title)
 
         # Generate using
         gen_row = QHBoxLayout()
-        gen_row.addWidget(QLabel("Generate using"))
+        gen_row.addWidget(QLabel("<b>Generate using</b>"))
         self.service_combo = QComboBox(); self.service_combo.addItems(["Open AI", "DeepSeek", "Ollama"]) 
         self.service_combo.currentTextChanged.connect(self._populate_provider_cfg)
         gen_row.addWidget(self.service_combo)
@@ -191,12 +191,12 @@ class TextTab(QWidget):
         grid.setColumnStretch(3, 0)
 
         # Base URL
-        grid.addWidget(QLabel("Base URL"), 0, 0)
+        grid.addWidget(QLabel("<b>Base URL</b>"), 0, 0)
         self.base_url_edit = QLineEdit(); self.base_url_edit.setPlaceholderText("https://api.example.com")
         grid.addWidget(self.base_url_edit, 0, 1, 1, 3)
 
         # API Key + lock button at far right
-        grid.addWidget(QLabel("API Key"), 1, 0)
+        grid.addWidget(QLabel("<b>API Key</b>"), 1, 0)
         self.api_key_edit = QLineEdit()
         try:
             self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -213,7 +213,7 @@ class TextTab(QWidget):
         grid.addWidget(api_wrap, 1, 1, 1, 3)
 
         # Available Model + right-aligned small buttons
-        grid.addWidget(QLabel("Available Model"), 2, 0)
+        grid.addWidget(QLabel("<b>Available Model</b>"), 2, 0)
         self.model_combo = QComboBox(); self.model_combo.setEditable(True)
         self.model_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
         grid.addWidget(self.model_combo, 2, 1)
@@ -225,7 +225,7 @@ class TextTab(QWidget):
         grid.addWidget(self.test_button, 2, 3)
 
         # Temperature row: keep label aligned at col 0
-        grid.addWidget(QLabel("Temperature"), 3, 0)
+        grid.addWidget(QLabel("<b>Temperature</b>"), 3, 0)
         temp_box = QHBoxLayout()
         self.temperature_slider = QSlider(Qt.Orientation.Horizontal); self.temperature_slider.setRange(0, 100); self.temperature_slider.setValue(70)
         self.temperature_value = QLabel("0.70")
@@ -242,14 +242,15 @@ class TextTab(QWidget):
         layout.addWidget(sep)
 
         # Prompt preview
-        layout.addWidget(QLabel("Prompt Preview"))
-        self.prompt_edit = QTextEdit(); self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding))
+        layout.addWidget(QLabel("<b>Prompt Preview</b>"))
+        self.prompt_edit = QTextEdit(); self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)); 
+        self.prompt_edit.setPlaceholderText('Prompt中必须包含“{Source Field}”占位符，以便正确替换和生成内容。')
         layout.addWidget(self.prompt_edit)
 
         # Prompt list + buttons
-        pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("Prompt List:"))
+        pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("<b>Prompt List:</b>"))
         self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True); pr_row.addWidget(self.prompt_list_combo)
-        pr_row.addWidget(QLabel("搜索:"))
+        pr_row.addWidget(QLabel("<b>Search:</b>"))
         self.prompt_search_edit = QLineEdit(); self.prompt_search_edit.setPlaceholderText("输入关键词过滤...")
         self.prompt_search_edit.textChanged.connect(self._filter_prompts)
         pr_row.addWidget(self.prompt_search_edit)
@@ -259,7 +260,7 @@ class TextTab(QWidget):
         btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button); layout.addLayout(btn_row)
 
         # Source Field
-        srow = QHBoxLayout(); srow.addWidget(QLabel("Source Field:"))
+        srow = QHBoxLayout(); srow.addWidget(QLabel("<b>Source Field:</b>"))
         self.source_field_combo = QComboBox(); srow.addWidget(self.source_field_combo); layout.addLayout(srow)
 
         # Image input toggle + button
@@ -268,7 +269,7 @@ class TextTab(QWidget):
         img_row.addWidget(self.image_checkbox); img_row.addWidget(self.image_input_button); layout.addLayout(img_row)
 
         # Destination Field
-        drow = QHBoxLayout(); drow.addWidget(QLabel("Destination Field:"))
+        drow = QHBoxLayout(); drow.addWidget(QLabel("<b>Destination Field:</b>"))
         self.destination_field_combo = QComboBox(); drow.addWidget(self.destination_field_combo); layout.addLayout(drow)
 
         self.setLayout(layout)

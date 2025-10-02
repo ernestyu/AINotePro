@@ -17,8 +17,8 @@ class RemoveDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # **标题（加大字体、加粗、居中）**
-        self.title_label = QLabel("<div style='font-size:18px; font-weight:bold; text-align:center;'>"
-                                  "Remove field's content from selected Notes.</div>")
+        self.title_label = QLabel("<div style='font-size:18px; font-weight:900; text-align:center;'>"
+                                  "Remove field\'s content from selected Notes.</div>")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)  # ✅ 居中对齐
         layout.addWidget(self.title_label)
 
