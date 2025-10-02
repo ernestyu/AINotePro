@@ -162,6 +162,7 @@ class TextTab(QWidget):
         super().__init__(parent)
         self.browser = browser
         self.cfg = ConfigManager()
+        self.all_prompts: Dict[str, str] = {}
 
         self._build_ui()
         self._load_note_fields()
@@ -247,8 +248,12 @@ class TextTab(QWidget):
 
         # Prompt list + buttons
         pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("Prompt List:"))
-        self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True)
-        pr_row.addWidget(self.prompt_list_combo); layout.addLayout(pr_row)
+        self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True); pr_row.addWidget(self.prompt_list_combo)
+        pr_row.addWidget(QLabel("搜索:"))
+        self.prompt_search_edit = QLineEdit(); self.prompt_search_edit.setPlaceholderText("输入关键词过滤...")
+        self.prompt_search_edit.textChanged.connect(self._filter_prompts)
+        pr_row.addWidget(self.prompt_search_edit)
+        layout.addLayout(pr_row)
         btn_row = QHBoxLayout(); self.save_button = QPushButton("Save Prompt"); self.load_button = QPushButton("Load Prompt"); self.delete_button = QPushButton("Delete Prompt")
         self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
         btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button); layout.addLayout(btn_row)
@@ -283,11 +288,20 @@ class TextTab(QWidget):
 
     # Data loaders
     def _load_prompt_list(self):
-        prompts = _load_prompts()
-        self.prompt_list_combo.clear()
-        for k in prompts.keys():
-            self.prompt_list_combo.addItem(k)
+        self.all_prompts = _load_prompts()
+        self._filter_prompts()
 
+    def _filter_prompts(self):
+        search_text = self.prompt_search_edit.text().lower()
+        current_selection = self.prompt_list_combo.currentText()
+        self.prompt_list_combo.clear()
+        for name, content in self.all_prompts.items():
+            if search_text in name.lower() or search_text in content.lower():
+                self.prompt_list_combo.addItem(name)
+        
+        idx = self.prompt_list_combo.findText(current_selection)
+        if idx != -1:
+            self.prompt_list_combo.setCurrentIndex(idx)
     def _load_note_fields(self):
         try:
             if not self.browser:
@@ -311,8 +325,8 @@ class TextTab(QWidget):
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
             return
         data = _load_prompts(); data[name] = self.prompt_edit.toPlainText(); _save_prompts(data)
-        if self.prompt_list_combo.findText(name) < 0:
-            self.prompt_list_combo.addItem(name)
+        self.all_prompts = data
+        self._filter_prompts()
         showInfo("Prompt saved.")
 
     def _on_load_prompt(self):
@@ -334,8 +348,8 @@ class TextTab(QWidget):
         data = _load_prompts();
         if name in data:
             del data[name]; _save_prompts(data)
-            idx = self.prompt_list_combo.findText(name); 
-            if idx >= 0: self.prompt_list_combo.removeItem(idx)
+            self.all_prompts = data
+            self._filter_prompts()
             self.prompt_edit.clear(); showInfo("Prompt deleted.")
 
     # Provider config
