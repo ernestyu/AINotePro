@@ -533,12 +533,6 @@ class TextTab(QWidget):
             showInfo("Generation complete.")
             return
 
-        # Run generation in a background thread with a progress dialog for all providers
-        progress = QProgressDialog("Generating content...", "Cancel", 0, len(items), self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0) # Show immediately
-        progress.setValue(0)
-
         # Batch mode for plain text generation: collect inputs
         items: list[tuple[int, str]] = []
         for nid in note_ids:
@@ -553,6 +547,13 @@ class TextTab(QWidget):
         if not items:
             showWarning("No valid source text to process.")
             return
+
+        # Run generation in a background thread with a progress dialog for all providers
+        progress = QProgressDialog("Generating content...", "Cancel", 0, len(items), self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0) # Show immediately
+        progress.setValue(0)
+
         # Setup worker and thread for all providers
         self.thread = QThread()
         params = {
