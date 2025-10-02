@@ -8,8 +8,8 @@ from typing import Dict, Optional
 from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
-    QPushButton, QFrame, QTextEdit, QSizePolicy, QSlider, Qt, QProgressDialog,
-    QMessageBox, QCheckBox
+    QPushButton, QFrame, QTextEdit, QSizePolicy, QSlider, Qt, QProgressDialog, QFileDialog, QMessageBox, QCheckBox,
+    QIcon, QStyle
 )
 from aqt.utils import showInfo, showWarning
 
@@ -255,9 +255,31 @@ class TextTab(QWidget):
         self.prompt_search_edit.textChanged.connect(self._filter_prompts)
         pr_row.addWidget(self.prompt_search_edit)
         layout.addLayout(pr_row)
-        btn_row = QHBoxLayout(); self.save_button = QPushButton("Save Prompt"); self.load_button = QPushButton("Load Prompt"); self.delete_button = QPushButton("Delete Prompt")
+
+        # Get standard icons
+        style = self.style()
+        save_icon = style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        load_icon = style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+        delete_icon = style.standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
+        import_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
+        export_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp)
+        online_icon = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+
+        btn_row = QHBoxLayout()
+        self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
+        self.load_button = QPushButton(" Load"); self.load_button.setIcon(load_icon)
+        self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
         self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
-        btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button); layout.addLayout(btn_row)
+        btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button)
+        btn_row.addStretch(1)
+        self.import_button = QPushButton(" Import"); self.import_button.setIcon(import_icon)
+        self.export_button = QPushButton(" Export"); self.export_button.setIcon(export_icon)
+        self.online_button = QPushButton(" Online"); self.online_button.setIcon(online_icon)
+        self.import_button.clicked.connect(self._on_import_prompt)
+        self.export_button.clicked.connect(self._on_export_prompt)
+        self.online_button.clicked.connect(lambda: showInfo("This feature is coming soon!"))
+        btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button); btn_row.addWidget(self.online_button)
+        layout.addLayout(btn_row)
 
         # Separator
         sep2 = QFrame(); sep2.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); sep2.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))
@@ -265,7 +287,7 @@ class TextTab(QWidget):
 
         # Fields row
         fields_row = QHBoxLayout()
-        fields_row.addWidget(QLabel("<b>Source Field:</b>"))
+        fields_row.addWidget(QLabel("<b>Source Field:</b>"), 0)
         self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
         self.image_checkbox = QCheckBox("Enable Image Source"); fields_row.addWidget(self.image_checkbox, 0)
         fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
@@ -347,6 +369,51 @@ class TextTab(QWidget):
             self.all_prompts = data
             self._filter_prompts()
             self.prompt_edit.clear(); showInfo("Prompt deleted.")
+
+    def _on_import_prompt(self):
+        file_path, _ = QFileDialog.getOpenFileName(self, "Import Prompts", "", "JSON Files (*.json)")
+        if not file_path:
+            return
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                new_prompts = json.load(f)
+            if not isinstance(new_prompts, dict):
+                showWarning("Invalid prompt file format. Expected a JSON object."); return
+
+            current_prompts = _load_prompts()
+            conflicts = [k for k in new_prompts if k in current_prompts]
+            if conflicts:
+                if QMessageBox.question(self, "Confirm Overwrite", 
+                                        f"The following prompts already exist: {', '.join(conflicts)}. Overwrite them?",
+                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
+                    # Don't overwrite, just import non-conflicting ones
+                    for k in conflicts:
+                        del new_prompts[k]
+            
+            current_prompts.update(new_prompts)
+            _save_prompts(current_prompts)
+            self.all_prompts = current_prompts
+            self._filter_prompts()
+            showInfo(f"Successfully imported {len(new_prompts)} prompts.")
+
+        except Exception as e:
+            showWarning(f"Failed to import prompts: {e}")
+
+    def _on_export_prompt(self):
+        name = self.prompt_list_combo.currentText().strip()
+        if not name:
+            showWarning("Please select a prompt to export."); return
+        
+        content = self.prompt_edit.toPlainText()
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export Prompt", f"{name}.json", "JSON Files (*.json)")
+        if not file_path:
+            return
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump({name: content}, f, ensure_ascii=False, indent=2)
+            showInfo(f"Prompt '{name}' exported successfully.")
+        except Exception as e:
+            showWarning(f"Failed to export prompt: {e}")
 
     # Provider config
     def _service_map(self) -> str:
