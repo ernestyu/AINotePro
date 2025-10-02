@@ -259,23 +259,22 @@ class TextTab(QWidget):
         self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
         btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button); layout.addLayout(btn_row)
 
-        # Source Field
-        srow = QHBoxLayout(); srow.addWidget(QLabel("<b>Source Field:</b>"))
-        self.source_field_combo = QComboBox(); srow.addWidget(self.source_field_combo); layout.addLayout(srow)
+        # Separator
+        sep2 = QFrame(); sep2.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); sep2.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))
+        layout.addWidget(sep2)
 
-        # Image input toggle + button
-        img_row = QHBoxLayout(); self.image_checkbox = QCheckBox("Enable Image Source"); self.image_checkbox.stateChanged.connect(self._on_img_toggle)
-        self.image_input_button = QPushButton("Image Hosting Platform"); self.image_input_button.setEnabled(False)
-        img_row.addWidget(self.image_checkbox); img_row.addWidget(self.image_input_button); layout.addLayout(img_row)
-
-        # Destination Field
-        drow = QHBoxLayout(); drow.addWidget(QLabel("<b>Destination Field:</b>"))
-        self.destination_field_combo = QComboBox(); drow.addWidget(self.destination_field_combo); layout.addLayout(drow)
+        # Fields row
+        fields_row = QHBoxLayout()
+        fields_row.addWidget(QLabel("<b>Source Field:</b>"))
+        self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
+        self.image_checkbox = QCheckBox("Enable Image Source"); fields_row.addWidget(self.image_checkbox, 0)
+        fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
+        self.destination_field_combo = QComboBox(); fields_row.addWidget(self.destination_field_combo, 1)
+        layout.addLayout(fields_row)
 
         self.setLayout(layout)
         self._populate_provider_cfg()
 
-    # UI helpers
     def _toggle_pw(self):
         mode = self.api_key_edit.echoMode()
         try:
@@ -284,10 +283,6 @@ class TextTab(QWidget):
         except Exception:
             self.api_key_edit.setEchoMode(QLineEdit.Normal if mode != QLineEdit.Normal else QLineEdit.Password)
 
-    def _on_img_toggle(self):
-        self.image_input_button.setEnabled(bool(self.image_checkbox.isChecked()))
-
-    # Data loaders
     def _load_prompt_list(self):
         self.all_prompts = _load_prompts()
         self._filter_prompts()
@@ -463,6 +458,12 @@ class TextTab(QWidget):
             showInfo("Generation complete.")
             return
 
+        # Run generation in a background thread with a progress dialog for all providers
+        progress = QProgressDialog("Generating content...", "Cancel", 0, len(items), self)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0) # Show immediately
+        progress.setValue(0)
+
         # Batch mode for plain text generation: collect inputs
         items: list[tuple[int, str]] = []
         for nid in note_ids:
@@ -477,13 +478,6 @@ class TextTab(QWidget):
         if not items:
             showWarning("No valid source text to process.")
             return
-
-        # Run generation in a background thread with a progress dialog for all providers
-        progress = QProgressDialog("Generating content...", "Cancel", 0, len(items), self)
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setMinimumDuration(0) # Show immediately
-        progress.setValue(0)
-
         # Setup worker and thread for all providers
         self.thread = QThread()
         params = {
