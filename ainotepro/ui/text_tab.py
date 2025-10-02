@@ -266,12 +266,6 @@ class TextTab(QWidget):
         online_icon = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
         btn_row = QHBoxLayout()
-        self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
-        self.load_button = QPushButton(" Load"); self.load_button.setIcon(load_icon)
-        self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
-        self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
-        btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button)
-        btn_row.addStretch(1)
         self.import_button = QPushButton(" Import"); self.import_button.setIcon(import_icon)
         self.export_button = QPushButton(" Export"); self.export_button.setIcon(export_icon)
         self.online_button = QPushButton(" Online"); self.online_button.setIcon(online_icon)
@@ -279,6 +273,12 @@ class TextTab(QWidget):
         self.export_button.clicked.connect(self._on_export_prompt)
         self.online_button.clicked.connect(lambda: showInfo("This feature is coming soon!"))
         btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button); btn_row.addWidget(self.online_button)
+        btn_row.addStretch(1)
+        self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
+        self.load_button = QPushButton(" Load"); self.load_button.setIcon(load_icon)
+        self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
+        self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
+        btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button)
         layout.addLayout(btn_row)
 
         # Separator
@@ -311,10 +311,18 @@ class TextTab(QWidget):
 
     def _filter_prompts(self):
         search_text = self.prompt_search_edit.text().lower()
+        keywords = [k for k in search_text.split() if k]
         current_selection = self.prompt_list_combo.currentText()
         self.prompt_list_combo.clear()
+
         for name, content in self.all_prompts.items():
-            if search_text in name.lower() or search_text in content.lower():
+            # If no keywords, show all prompts
+            if not keywords:
+                self.prompt_list_combo.addItem(name)
+                continue
+            # All keywords must be present in either name or content
+            full_text_to_search = (name.lower() + " " + content.lower())
+            if all(keyword in full_text_to_search for keyword in keywords):
                 self.prompt_list_combo.addItem(name)
         
         idx = self.prompt_list_combo.findText(current_selection)
