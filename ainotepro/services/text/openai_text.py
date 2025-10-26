@@ -76,6 +76,11 @@ class OpenAITextProvider(TextProvider):
         if not choices:
             raise ValueError("No choices returned from API")
         content = (choices[0].get("message", {}).get("content") or "").strip()
+        # Safely extract content
+        choices = (data or {}).get("choices", [])
+        if not choices or not isinstance(choices, list): return ""
+        message = choices[0].get("message", {})
+        content = (message.get("content", "") or "").strip()
         print(f"[AINotePro] Response content: {(content[:400] + '...') if len(content) > 400 else content}")
         return clean_html_output(remove_think_tags(content))
 
@@ -109,5 +114,10 @@ class OpenAITextProvider(TextProvider):
         if not choices:
             raise ValueError("No choices returned from API (vision)")
         content = (choices[0].get("message", {}).get("content") or "").strip()
+        # Safely extract content
+        choices = (data or {}).get("choices", [])
+        if not choices or not isinstance(choices, list): return ""
+        message = choices[0].get("message", {})
+        content = (message.get("content", "") or "").strip()
         print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
         return clean_html_output(remove_think_tags(content))
