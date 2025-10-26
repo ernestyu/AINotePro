@@ -61,92 +61,55 @@ class GenerationWorker(QObject):
             base_cfg = self.params["base_cfg"]
 
             concurrency_cfg = cfg_all.get("concurrency", {})
-            provider_name = self.params.get("provider_name", "openai")
+            # The batching logic is removed in favor of a simpler, more robust concurrent model.
+            # We will use a thread pool to process items concurrently.
+            max_workers = int(concurrency_cfg.get("ollama_workers", 4)) # Re-use ollama_workers for general concurrency
+            print(f"[AINotePro] Using concurrent generation with max_workers={max_workers}")
 
-            # Batching is mainly for OpenAI-compatible APIs. Ollama is handled sequentially.
-            if provider_name == "ollama":
-                USER_MAX_BATCH_SIZE = 1
-            else:
-                USER_MAX_BATCH_SIZE = int(concurrency_cfg.get("openai_batch_max_size", 20))
-            BATCH_MAX_LEN = int(concurrency_cfg.get("openai_batch_max_prompt_len", 4096 * 10))
+            import concurrent.futures as _fut
+            
+            # A dictionary to store results as they complete, using nid as key.
+            results_map = {}
 
-            print(f"[AINotePro] Concurrency limits: max_batch_size={USER_MAX_BATCH_SIZE}, max_prompt_len={BATCH_MAX_LEN}")
-
-            # Determine effective batch size
-            # It considers the prompt template length AND the average input length.
-            effective_batch_size = USER_MAX_BATCH_SIZE
-            base_prompt_len = len(prompt_tpl)
-            if base_prompt_len > 0 and items:
-                # Calculate average length of input strings
-                avg_input_len = sum(len(t) for _, t in items) / len(items)
-                # Estimate per-item cost: prompt template + input text + JSON overhead (quotes, commas, etc.)
-                per_item_cost = base_prompt_len + avg_input_len + 10  # Add 10 for JSON chars
-                
-                if per_item_cost > 0:
-                    len_based_batch_size = max(1, int(BATCH_MAX_LEN // per_item_cost))
-                else:
-                    len_based_batch_size = USER_MAX_BATCH_SIZE
-
-                effective_batch_size = min(USER_MAX_BATCH_SIZE, len_based_batch_size)
-
-            print(f"[AINotePro] Using effective batch size: {effective_batch_size}")
-
-            processed = 0
-            while processed < len(items):
+            def do_generate(nid, text):
+                """Generates content for a single item."""
                 if self._is_cancelled:
-                    break
-
-                chunk = items[processed : processed + effective_batch_size]
-                inputs = [t for (_, t) in chunk]
+                    return (nid, "[Cancelled]")
                 
-                outputs = []
-                if provider_name == "ollama":
-                    # For Ollama, the `generate_batch` method expects a list of fully-formed prompts.
-                    # We prepare them here.
-                    prompts = [prompt_tpl.replace("{Source Field}", text) for text in inputs]
-                    try:
-                        # The provider's batch method will handle sequential execution.
-                        outputs = provider.generate_batch(prompts, base_cfg)
-                    except Exception as e:
-                        print(f"[AINotePro][Ollama Batch] provider error: {e}")
-                        outputs = [f"[Error] {e}"] * len(inputs)
-                else:
-                    # OpenAI-compatible providers use batching
-                    cfg = {**base_cfg, "instruction": prompt_tpl}
-                    try:
-                        outputs = provider.generate_batch(inputs, cfg)
-                    except Exception as e:
-                        print(f"[AINotePro][Batch] provider error: {e}. Falling back to concurrent per-item generation for this chunk.")
-                        import concurrent.futures as _fut
-                        outputs = [None] * len(inputs)
-                        
-                        def do_generate(idx, text):
-                            prompt = prompt_tpl.replace("{Source Field}", text).replace("{Source}", text)
-                            seq_cfg = {k: v for k, v in cfg.items() if k != "instruction"}
-                            try:
-                                return (idx, provider.generate(prompt, seq_cfg))
-                            except Exception as e_inner:
-                                return (idx, f"[Error] {e_inner}")
+                # Prepare the prompt for this specific item.
+                prompt = prompt_tpl.replace("{Source Field}", text).replace("{Source}", text)
+                
+                # For OpenAI-compatible providers, the 'instruction' key is not used in single generation.
+                # For Ollama, base_cfg is used directly.
+                # This creates a clean config for the `generate` call.
+                seq_cfg = {k: v for k, v in base_cfg.items() if k != "instruction"}
+                
+                try:
+                    # The provider's `generate` method handles the API call for a single item.
+                    return (nid, provider.generate(prompt, seq_cfg))
+                except Exception as e_inner:
+                    return (nid, f"[Error] {e_inner}")
 
-                        with _fut.ThreadPoolExecutor(max_workers=4) as ex:
-                            future_to_idx = {ex.submit(do_generate, i, s): i for i, s in enumerate(inputs)}
-                            for future in _fut.as_completed(future_to_idx):
-                                idx, result = future.result()
-                                outputs[idx] = result
+            with _fut.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Map future to nid to process results correctly.
+                future_to_nid = {executor.submit(do_generate, nid, text): nid for nid, text in items}
 
-                # Align and write back
-                for (nid, _src), out in zip(chunk, outputs):
+                for future in _fut.as_completed(future_to_nid):
                     if self._is_cancelled:
+                        # Cancel remaining futures
+                        for f in future_to_nid:
+                            f.cancel()
                         break
-                    try:
-                        note = mw.col.get_note(nid)
-                        update_field_content(note, dst, out)
-                    except Exception as e:
-                        print(f"[Note {nid}] write failed: {e}")
-                    processed += 1
-                    self.progressUpdated.emit(processed)
+                    
+                    nid, result = future.result()
+                    results_map[nid] = result
+                    
+                    # Update note and progress as each task finishes.
+                    note = mw.col.get_note(nid)
+                    update_field_content(note, dst, result)
+                    self.progressUpdated.emit(len(results_map))
 
-            self.finished.emit("Generation complete.")
+            self.finished.emit("Generation complete." if not self._is_cancelled else "Generation cancelled.")
 
         except Exception as e:
             import traceback

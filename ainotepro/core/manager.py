@@ -52,8 +52,9 @@ class AIManager:
                 prompt = (req.prompt or "").replace("{Source Field}", src_val)
                 content = provider.generate(prompt=prompt, config=provider_cfg)
 
-            update_field_content(note, req.destination_field, content)
-            count += 1
+            if content and content.strip():
+                update_field_content(note, req.destination_field, content)
+                count += 1
 
         mw.reset()
         return count
@@ -104,4 +105,3 @@ class AIManager:
 
         mw.reset()
         return count
-

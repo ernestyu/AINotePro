@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import requests
 from typing import Dict, List
-
-from ..base import TextProvider
+from ..base import TextProvider, remove_think_tags, clean_html_output
 
 
 class OpenAITextProvider(TextProvider):
@@ -76,7 +75,9 @@ class OpenAITextProvider(TextProvider):
         choices = data.get("choices", [])
         if not choices:
             raise ValueError("No choices returned from API")
-        return (choices[0]["message"].get("content") or "").strip()
+        content = (choices[0].get("message", {}).get("content") or "").strip()
+        print(f"[AINotePro] Response content: {(content[:400] + '...') if len(content) > 400 else content}")
+        return clean_html_output(remove_think_tags(content))
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         body = {
@@ -107,54 +108,6 @@ class OpenAITextProvider(TextProvider):
         choices = data.get("choices", [])
         if not choices:
             raise ValueError("No choices returned from API (vision)")
-        return (choices[0]["message"].get("content") or "").strip()
-
-    def generate_batch(self, inputs: list[str], config: Dict) -> list[str]:
-        import json as _json
-        instruction = (config or {}).get("instruction", "")
-        temperature = (config or {}).get("temperature", 0.7)
-        body = {
-            "model": (config or {}).get("model") or "gpt-4o-mini",
-            "temperature": temperature,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": (
-                        "You will be given an array of input strings. For each item, apply the instruction to produce one output string.\n"
-                        "Return ONLY a JSON array of strings of the same length, in the same order, without any commentary.\n\n"
-                        f"Instruction:\n{instruction}\n\nInput array (JSON):\n{_json.dumps(inputs, ensure_ascii=False)}"
-                    ),
-                }
-            ],
-            "stream": False,
-        }
-
-        url = f"{self._base(config)}/chat/completions"
-        headers = self._headers(config)
-        print(f"[AINotePro][Batch] POST {url} items={len(inputs)} temp={temperature} model={body.get('model')}")
-        try:
-            r = requests.post(url, json=body, headers=headers, timeout=120)
-            r.raise_for_status()
-            content = (r.json().get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-            if content.startswith("```") and content.endswith("```"):
-                # Find the first newline and the last backtick block
-                first_newline = content.find('\n')
-                last_backticks = content.rfind('```')
-                if first_newline != -1 and last_backticks != -1:
-                    content = content[first_newline + 1 : last_backticks].strip()
-
-            try:
-                arr = _json.loads(content)
-                if isinstance(arr, list) and len(arr) == len(inputs):
-                    return [str(x) if not isinstance(x, str) else x for x in arr]
-            except Exception:
-                pass
-            # Fallback: split by lines
-            lines = [ln.strip() for ln in content.splitlines() if ln.strip()]
-            if len(lines) == len(inputs):
-                return lines
-            raise ValueError("Batch parse failed")
-        except Exception as e:
-            print("[AINotePro][Batch] openai-compatible failed:", e)
-            # Let the caller handle the fallback.
-            raise e
+        content = (choices[0].get("message", {}).get("content") or "").strip()
+        print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+        return clean_html_output(remove_think_tags(content))

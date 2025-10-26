@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import requests
 from typing import Dict
-
-from ..base import TextProvider
+from ..base import TextProvider, remove_think_tags, clean_html_output
 
 
 class OllamaTextProvider(TextProvider):
@@ -39,7 +38,9 @@ class OllamaTextProvider(TextProvider):
         r.raise_for_status()
         data = r.json() or {}
         msg = (data.get("message") or {}).get("content", "")
-        return _remove_think((msg or "").strip())
+        content = (msg or "").strip()
+        print(f"[AINotePro] Response content: {(content[:400] + '...') if len(content) > 400 else content}")
+        return clean_html_output(remove_think_tags(content))
 
     def list_models(self, config: Dict) -> list[str]:
         # Ollama tags endpoint
@@ -60,23 +61,6 @@ class OllamaTextProvider(TextProvider):
             return names
         except Exception:
             return []
-
-    def generate_batch(self, inputs: list[str], config: Dict) -> list[str]:
-        # Ollama does not provide a true multi-input batch endpoint that returns
-        # an array mapped to inputs. Perform sequential generation here, but make
-        # sure to apply the instruction (Prompt Preview) by replacing {Source Field}
-        # for each input. This is now handled by the caller (GenerationWorker)
-        # which prepares the final prompt for each item.
-        total = len(inputs)
-        print(f"[AINotePro][Batch] Ollama: sequential per-item, items={total}")
-        results: list[str] = []
-        for i, s in enumerate(inputs, 1):
-            try:
-                # The 's' here is expected to be the fully-formed prompt.
-                results.append(self.generate(s, config))
-            except Exception as e:
-                results.append(f"[Error] {e}")
-        return results
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         # Use OpenAI-compatible vision format, as it's more widely supported by models
@@ -122,10 +106,6 @@ class OllamaTextProvider(TextProvider):
         r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
         r.raise_for_status()
         data = r.json() or {}
-        return (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-
-
-def _remove_think(s: str) -> str:
-    import re
-
-    return re.sub(r"<think>.*?</think>", "", s, flags=re.DOTALL).strip()
+        content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+        print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+        return clean_html_output(remove_think_tags(content))
