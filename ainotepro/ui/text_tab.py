@@ -501,7 +501,7 @@ class TextTab(QWidget):
 
         st = "text"; pv = self._service_map(); provider = create_provider(st, pv, {})
         # If image-assisted is enabled, fall back to per-note flow for correctness
-        if self.image_checkbox.isChecked():
+        if self.image_checkbox and self.image_checkbox.isChecked():
             try:
                 mw.progress.start(label="Generating responses...", max=len(note_ids))
             except Exception:
@@ -512,15 +512,20 @@ class TextTab(QWidget):
                 src_text = (note[src] or "").strip()
                 cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
                 content: Optional[str] = None
-                img_url = self._extract_and_upload_image(src_text)
-                if img_url:
+                img_data_uri = self._extract_and_encode_image_as_data_uri(src_text)
+                if img_data_uri:
+                    print(f"[AINotePro] Image encoded as Data URI successfully. Length: {len(img_data_uri)}")
                     try:
                         final_prompt = prompt_tpl.replace("{Source Field}", src_text).replace("{Source}", src_text)
-                        content = provider.generate_with_image(img_url, final_prompt, cfg)
+                        content = provider.generate_with_image(img_data_uri, final_prompt, cfg)
                     except Exception as e:
                         print(f"[Note {nid}] vision failed: {e}")
                         content = None
                 if content:
+                    update_field_content(note, dst, content)
+                elif img_data_uri and not content:
+                    # If image was uploaded but generation failed, still update with a placeholder or error
+                    content = f"[AINotePro] Vision generation failed for the provided image."
                     update_field_content(note, dst, content)
                 try:
                     mw.progress.update(value=i+1)
@@ -586,50 +591,43 @@ class TextTab(QWidget):
         self.thread.start()
 
     # Helpers
-    def _extract_and_upload_image(self, html_content: str) -> Optional[str]:
+    def _extract_and_encode_image_as_data_uri(self, html_content: str) -> Optional[str]:
+        """
+        Extracts the first image from HTML, reads it, and encodes it as a Base64 Data URI.
+        This avoids uploading and is compatible with local models like Ollama.
+        """
+        import base64
+        import mimetypes
+
         m = re.search(r'<img\s+src=["\']([^"\']+)["\']', html_content or "")
         if not m:
             return None
         src = m.group(1)
         media_dir = mw.col.media.dir(); path = os.path.join(media_dir, src)
         if not os.path.exists(path):
+            print(f"[AINotePro] Image file not found in media collection: {src}")
             return None
-        # read hosting config
-        api_key, upload_url = self._get_hosting_cfg()
-        if not api_key or not upload_url:
-            return None
+        
         try:
-            return self._upload_to_img_hosting(path, api_key, upload_url)
-        except Exception:
+            with open(path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            mime_type, _ = mimetypes.guess_type(path)
+            if not mime_type:
+                mime_type = "image/png" # Default if type can't be guessed
+            
+            return f"data:{mime_type};base64,{base64_image}"
+        except Exception as e:
+            print(f"[AINotePro] Failed to encode image to Base64 Data URI: {e}")
             return None
 
-    def _get_hosting_cfg(self) -> tuple[Optional[str], Optional[str]]:
-        settings_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "user_data", "gen_text", "img_hosting.json"))
-        try:
-            if not os.path.exists(settings_file):
-                return None, None
-            with open(settings_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            last_used = data.get("last_used", {}); svc = last_used.get("service")
-            if not svc or svc not in data:
-                cand = [k for k in data.keys() if k != "last_used"]
-                svc = cand[0] if cand else None
-            if not svc:
-                return None, None
-            cfg = data.get(svc) or {}
-            return cfg.get("api_key"), cfg.get("upload_url")
-        except Exception:
-            return None, None
-
-    def _upload_to_img_hosting(self, image_path: str, api_key: str, upload_url: str) -> Optional[str]:
-        import base64, json, requests
-        with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8").replace("\n", "")
-        payload = {"key": api_key, "source": b64, "filename": os.path.basename(image_path)}
-        r = requests.post(upload_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload), timeout=30)
-        if r.status_code != 200:
-            return None
-        data = r.json()
-        if data.get("status") == 200 and data.get("original", {}).get("url"):
-            return data["original"]["url"]
-        return None
+    def save_settings(self) -> None:
+        """Saves the current UI settings for the selected provider to the config file."""
+        st = "text"; pv = self._service_map()
+        self.cfg.set_provider_config(st, pv, {
+            "base_url": self.base_url_edit.text().strip(),
+            "api_key": self.api_key_edit.text().strip(),
+            "model": self.model_combo.currentText().strip(),
+            "temperature": self.temperature_slider.value() / 100.0,
+        })
+        print(f"[AINotePro] Saved settings for Text/{pv}")

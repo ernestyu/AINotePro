@@ -78,6 +78,52 @@ class OllamaTextProvider(TextProvider):
                 results.append(f"[Error] {e}")
         return results
 
+    def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
+        # Use OpenAI-compatible vision format, as it's more widely supported by models
+        # and Ollama's own server. The image_url is already a data URI.
+        # The endpoint should be the OpenAI-compatible one.
+        base = self._base(config)
+        # Some users might have /v1 in their base URL, some might not.
+        # Some might use /api. We'll try to be smart.
+        if "/api" in base:
+            # If they are using the native endpoint, switch to the compatible one for vision
+            url = base.replace("/api", "") + "/v1/chat/completions"
+        elif not base.endswith("/v1"):
+            url = base + "/v1/chat/completions"
+        else:
+            url = base + "/chat/completions"
+            
+        body = {
+            "model": (config or {}).get("model") or "llava",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": image_url # Pass the full data URI
+                            }
+                        }
+                    ]
+                }
+            ],
+            "stream": False,
+            "temperature": (config or {}).get("temperature", 0.7),
+        }
+        print(f"[AINotePro] POST {url} (vision)")
+        try:
+            import json as _json
+            print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "stream": body.get("stream"), "content_parts": len(body.get("messages", [{}])[0].get("content", []))}, ensure_ascii=False))
+        except Exception:
+            pass
+        
+        r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
+        r.raise_for_status()
+        data = r.json() or {}
+        return (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+
 
 def _remove_think(s: str) -> str:
     import re

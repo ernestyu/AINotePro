@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Optional
 
@@ -10,6 +11,7 @@ from aqt.qt import (
 )
 from aqt.utils import showInfo, showWarning
 
+from ..config.manager import ConfigManager
 from ..services.provider_factory import create_provider
 from ..core.utils import add_image_to_media_collection, update_field_content
 
@@ -18,6 +20,7 @@ class ImageTab(QWidget):
     def __init__(self, parent=None, browser=None):
         super().__init__(parent)
         self.browser = browser
+        self.cfg = ConfigManager()
         self._build_ui()
         self._load_fields()
 
@@ -135,3 +138,14 @@ class ImageTab(QWidget):
             return out_name
         except Exception:
             return filename
+
+    def save_settings(self) -> None:
+        """Saves the current UI settings for the selected provider to the config file."""
+        provider_name = "pollinations" if self.generate_combo.currentText() == "Pollinations" else "dalle"
+        st = "image"; pv = provider_name
+        self.cfg.set_provider_config(st, pv, {
+            "base_url": self.base_url_edit.text().strip(),
+            "api_key": self.api_key_edit.text().strip(),
+            "model": self.model_combo.currentText().strip(),
+        })
+        print(f"[AINotePro] Saved settings for Image/{pv}")

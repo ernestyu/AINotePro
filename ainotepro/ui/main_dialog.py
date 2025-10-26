@@ -296,3 +296,16 @@ class MainDialog(QDialog):
             return cfg.get("api_key"), cfg.get("upload_url")
         except Exception:
             return None, None
+
+    def closeEvent(self, event) -> None:
+        """
+        Override the close event to save settings from all tabs.
+        This assumes the dialog holds references to tab widgets.
+        """
+        print("[AINotePro] Main dialog closing, saving all settings...")
+        # This is a guess based on a likely tabbed structure.
+        # If the tabs are named differently, these lines need adjustment.
+        if hasattr(self, 'text_tab') and hasattr(self.text_tab, 'save_settings'): self.text_tab.save_settings()
+        if hasattr(self, 'image_tab') and hasattr(self.image_tab, 'save_settings'): self.image_tab.save_settings()
+        if hasattr(self, 'tts_tab') and hasattr(self.tts_tab, 'save_settings'): self.tts_tab.save_settings()
+        super().closeEvent(event)
