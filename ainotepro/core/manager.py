@@ -7,7 +7,7 @@ from aqt import mw
 
 from ..config.manager import ConfigManager
 from ..services.provider_factory import create_provider
-from .utils import add_image_to_media_collection, add_audio_to_media_collection, update_field_content
+from .utils import add_image_to_media_collection, add_audio_to_media_collection, get_field_content, update_field_content
 
 
 @dataclass
@@ -99,7 +99,7 @@ class AIManager:
             audio_bytes = provider.generate(text=text, config=provider_cfg)
             stored = add_audio_to_media_collection(audio_bytes, filename_hint=f"ainotepro-{nid}.mp3")
             # Append [sound:...] tag
-            new_val = f"{note.get(req.destination_field, '')} [sound:{stored}]".strip()
+            new_val = f"{get_field_content(note, req.destination_field, '')} [sound:{stored}]".strip()
             update_field_content(note, req.destination_field, new_val)
             count += 1
 

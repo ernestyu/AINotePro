@@ -13,7 +13,7 @@ from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager
 from ..services.provider_factory import create_provider
-from ..core.utils import add_image_to_media_collection, update_field_content
+from ..core.utils import add_image_to_media_collection, get_field_content, update_field_content
 
 
 class ImageTab(QWidget):
@@ -108,7 +108,7 @@ class ImageTab(QWidget):
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled(): break
             note = mw.col.get_note(nid)
-            prompt = (note.get(prompt_field, "") or "").strip()
+            prompt = (get_field_content(note, prompt_field, "") or "").strip()
             if not prompt:
                 continue
             cfg = {"base_url": base_url, "api_key": api_key, "model": model}

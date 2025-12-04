@@ -23,6 +23,7 @@ from aqt.qt import (
 from aqt.utils import showInfo, showWarning
 
 from ..core.manager import AIManager, GenerationRequest
+from ..core.utils import get_field_content
 from ..core.async_task import AsyncTask
 from ..config.manager import ConfigManager
 
@@ -257,7 +258,7 @@ class MainDialog(QDialog):
     def _extract_and_upload_image(self, nid: int, field_name: str) -> Optional[str]:
         try:
             note = mw.col.get_note(nid)
-            html = note.get(field_name, "")
+            html = get_field_content(note, field_name, "")
             # extract src
             m = re.search(r'<img\s+src=["\']([^"\']+)["\']', html)
             if not m:

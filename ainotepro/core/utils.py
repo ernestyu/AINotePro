@@ -11,8 +11,11 @@ def add_binary_to_media_collection(data: bytes, filename_hint: str) -> str:
     """
     if not data:
         raise ValueError("No data to save to media collection")
-    # mw.col.media.writeData returns the stored filename
-    stored_name = mw.col.media.writeData(filename_hint, data)
+    media = mw.col.media
+    if hasattr(media, "write_data"):
+        stored_name = media.write_data(filename_hint, data)
+    else:
+        stored_name = media.writeData(filename_hint, data)
     return stored_name
 
 
@@ -22,6 +25,14 @@ def add_image_to_media_collection(image_data: bytes, filename_hint: str = "gener
 
 def add_audio_to_media_collection(audio_data: bytes, filename_hint: str = "generated.mp3") -> str:
     return add_binary_to_media_collection(audio_data, filename_hint)
+
+
+def get_field_content(note, field_name: str, default: str = "") -> str:
+    """Safely read a note field, returning a default when the field is missing or None."""
+    if field_name in note:
+        val = note[field_name]
+        return val if val is not None else default
+    return default
 
 
 def update_field_content(note, field_name: str, content: str) -> None:

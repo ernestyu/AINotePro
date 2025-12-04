@@ -13,7 +13,7 @@ from ..config.manager import ConfigManager
 from ..gen_audio.models.edge_tts.tts_handler import get_languages, get_voices
 
 from ..services.provider_factory import create_provider
-from ..core.utils import add_audio_to_media_collection, update_field_content
+from ..core.utils import add_audio_to_media_collection, get_field_content, update_field_content
 
 
 class TTSTab(QWidget):
@@ -236,19 +236,20 @@ class TTSTab(QWidget):
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled(): break
             note = mw.col.get_note(nid)
-            text = (note.get(src, "") or "").strip()
+            text = (get_field_content(note, src, "") or "").strip()
             if not text: continue
             # pick first enabled voice
             voice = "en-US-AriaNeural"; speed = volume = pitch = 0
             for block in self.voice_blocks:
                 if block["enable"].isChecked():
-                    voice = block["voice"].currentText().strip() or voice
+                    # Prefer the stored short name in item data; fall back to the visible text or default
+                    voice = block["voice"].currentData() or block["voice"].currentText().strip() or voice
                     speed = block["speed"].value(); volume = block["volume"].value(); pitch = block["pitch"].value();
                     break
             try:
                 data = provider.generate(text, {"voice": voice, "speed": speed, "volume": volume, "pitch": pitch})
                 fname = add_audio_to_media_collection(data, f"ainotepro-{nid}.mp3")
-                new_val = f"{note.get(dst, '')} [sound:{fname}]".strip()
+                new_val = f"{get_field_content(note, dst, '')} [sound:{fname}]".strip()
                 update_field_content(note, dst, new_val)
             except Exception as e:
                 print(f"[Note {nid}] TTS failed: {e}")
