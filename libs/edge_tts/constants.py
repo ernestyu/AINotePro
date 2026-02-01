@@ -1,14 +1,21 @@
 """Constants for the edge_tts package."""
 
+import os
+import re
+
 BASE_URL = "speech.platform.bing.com/consumer/speech/synthesize/readaloud"
-TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+_TOKEN_ENV = os.getenv("EDGE_TTS_TRUSTED_CLIENT_TOKEN", "").strip()
+TRUSTED_CLIENT_TOKEN = _TOKEN_ENV or "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
 
 WSS_URL = f"wss://{BASE_URL}/edge/v1?TrustedClientToken={TRUSTED_CLIENT_TOKEN}"
 VOICE_LIST = f"https://{BASE_URL}/voices/list?trustedclienttoken={TRUSTED_CLIENT_TOKEN}"
 
 DEFAULT_VOICE = "en-US-EmmaMultilingualNeural"
 
-CHROMIUM_FULL_VERSION = "130.0.2849.68"
+_VER_ENV = os.getenv("EDGE_TTS_CHROMIUM_FULL_VERSION", "").strip()
+CHROMIUM_FULL_VERSION = (
+    _VER_ENV if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", _VER_ENV) else "140.0.3485.14"
+)
 CHROMIUM_MAJOR_VERSION = CHROMIUM_FULL_VERSION.split(".", maxsplit=1)[0]
 SEC_MS_GEC_VERSION = f"1-{CHROMIUM_FULL_VERSION}"
 BASE_HEADERS = {

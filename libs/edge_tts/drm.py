@@ -5,6 +5,7 @@ used in all API requests to Microsoft Edge's online text-to-speech service."""
 import hashlib
 from datetime import datetime as dt
 from datetime import timezone as tz
+from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import aiohttp
@@ -62,7 +63,23 @@ class DRM:
         Returns:
             Optional[float]: Unix timestamp of the parsed date string, or None if parsing failed.
         """
+        # Prefer the stdlib parser which handles RFC 2822/1123 dates reliably on Windows.
         try:
+            parsed = parsedate_to_datetime(date)
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=tz.utc)
+                return parsed.astimezone(tz.utc).timestamp()
+        except Exception:
+            pass
+        # Fallbacks: avoid %Z locale issues by normalizing common GMT/UTC tokens.
+        try:
+            if date.endswith(" GMT"):
+                date = date[:-4] + " +0000"
+                return dt.strptime(date, "%a, %d %b %Y %H:%M:%S %z").timestamp()
+            if date.endswith(" UTC"):
+                date = date[:-4] + " +0000"
+                return dt.strptime(date, "%a, %d %b %Y %H:%M:%S %z").timestamp()
             return (
                 dt.strptime(date, "%a, %d %b %Y %H:%M:%S %Z")
                 .replace(tzinfo=tz.utc)
