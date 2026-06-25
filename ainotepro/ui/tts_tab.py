@@ -17,9 +17,10 @@ from ..core.utils import add_audio_to_media_collection, get_field_content, updat
 
 
 class TTSTab(QWidget):
-    def __init__(self, parent=None, browser=None):
+    def __init__(self, parent=None, browser=None, note_ids=None):
         super().__init__(parent)
         self.browser = browser
+        self.note_ids = list(note_ids or [])
         self.cfg = ConfigManager()
         self._build_ui()
         self._load_fields()
@@ -101,16 +102,22 @@ class TTSTab(QWidget):
 
     def _load_fields(self) -> None:
         try:
-            if not self.browser:
+            note_ids = self._selected_note_ids()
+            if not note_ids:
                 return
-            sel = self.browser.selectedNotes();
-            if not sel:
-                return
-            n = mw.col.get_note(sel[0])
+            n = mw.col.get_note(note_ids[0])
             names = [f["name"] for f in n.note_type()["flds"]]
             self.src_combo.clear(); self.dst_combo.clear(); self.src_combo.addItems(names); self.dst_combo.addItems(names)
         except Exception:
             pass
+
+    def _selected_note_ids(self) -> list[int]:
+        if self.browser:
+            try:
+                return list(self.browser.selectedNotes())
+            except Exception:
+                return []
+        return list(self.note_ids)
 
     def _load_languages(self) -> None:
         try:
@@ -225,9 +232,7 @@ class TTSTab(QWidget):
 
     # Called by parent dialog
     def on_generate_tts(self) -> None:
-        if not self.browser:
-            showWarning("Browser is not ready."); return
-        note_ids = self.browser.selectedNotes()
+        note_ids = self._selected_note_ids()
         if not note_ids:
             showWarning("No notes selected."); return
         src = self.src_combo.currentText(); dst = self.dst_combo.currentText()

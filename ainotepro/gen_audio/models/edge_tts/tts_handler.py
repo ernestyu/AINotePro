@@ -1,8 +1,6 @@
 import asyncio
 from typing import Dict, List, Optional
 
-import edge_tts
-
 
 # Minimal language map (code -> full name) for UI display
 LANGUAGE_MAP: Dict[str, str] = {
@@ -96,6 +94,8 @@ def get_voices(tts_model: str, language_code: str, gender: str) -> List[str]:
 
 
 async def _save_tts_async(text: str, voice: str, speed: int, volume: int, pitch: int, output_path: str) -> None:
+    import edge_tts
+
     speed_str = f"+{speed}%" if speed >= 0 else f"{speed}%"
     volume_str = f"+{volume}%" if volume >= 0 else f"{volume}%"
     pitch_str = f"+{pitch}Hz" if pitch >= 0 else f"{pitch}Hz"

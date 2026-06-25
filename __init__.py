@@ -19,7 +19,7 @@ from aqt.qt import QAction, qconnect
 from aqt.browser import Browser
 from aqt.utils import showInfo
 
-# 使用原始三标签布局的对话框
+# 使用当前的 Text/TTS 标签布局对话框
 from .ainotepro.ainotepro_gui import show_ainotepro_dialog
 from .ainotepro.ui.editor_button import add_ainotepro_button
 
@@ -28,7 +28,7 @@ from .ainotepro.remove import RemoveDialog
 
 
 def open_ainotepro_config_in_browser(browser: Browser):
-    """打开原始的三标签 AINotePro 对话框（保持原始布局）。"""
+    """打开 AINotePro 对话框。"""
     if not browser:
         showInfo("Please open the browser first.")
         return

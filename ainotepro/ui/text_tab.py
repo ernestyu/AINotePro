@@ -121,9 +121,10 @@ class GenerationWorker(QObject):
 
 
 class TextTab(QWidget):
-    def __init__(self, parent=None, browser=None):
+    def __init__(self, parent=None, browser=None, note_ids=None):
         super().__init__(parent)
         self.browser = browser
+        self.note_ids = list(note_ids or [])
         self.cfg = ConfigManager()
         self.all_prompts: Dict[str, str] = {}
 
@@ -293,17 +294,23 @@ class TextTab(QWidget):
             self.prompt_list_combo.setCurrentIndex(idx)
     def _load_note_fields(self):
         try:
-            if not self.browser:
+            note_ids = self._selected_note_ids()
+            if not note_ids:
                 return
-            sel = self.browser.selectedNotes()
-            if not sel:
-                return
-            n = mw.col.get_note(sel[0])
+            n = mw.col.get_note(note_ids[0])
             names = [f["name"] for f in n.note_type()["flds"]]
             self.source_field_combo.clear(); self.destination_field_combo.clear()
             self.source_field_combo.addItems(names); self.destination_field_combo.addItems(names)
         except Exception:
             pass
+
+    def _selected_note_ids(self) -> list[int]:
+        if self.browser:
+            try:
+                return list(self.browser.selectedNotes())
+            except Exception:
+                return []
+        return list(self.note_ids)
 
     # Prompt ops
     def _on_save_prompt(self):
@@ -447,9 +454,7 @@ class TextTab(QWidget):
 
     # Public slot called by parent dialog
     def on_generate_text(self) -> None:
-        if not self.browser:
-            showWarning("Browser is not ready."); return
-        note_ids = self.browser.selectedNotes()
+        note_ids = self._selected_note_ids()
         if not note_ids:
             showWarning("No notes selected."); return
 

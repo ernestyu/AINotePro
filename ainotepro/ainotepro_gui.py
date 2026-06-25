@@ -1,4 +1,4 @@
-"""Main tabbed dialog (Text / TTS / Images)."""
+"""Main tabbed dialog (Text / TTS)."""
 
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
@@ -8,13 +8,13 @@ from aqt.utils import openLink
 
 from .ui.text_tab import TextTab
 from .ui.tts_tab import TTSTab
-from .ui.image_tab import ImageTab
 
 
 class AiNoteProConfigDialog(QDialog):
-    def __init__(self, parent=None, browser=None):
+    def __init__(self, parent=None, browser=None, note_ids=None):
         super().__init__(parent)
         self.browser = browser
+        self.note_ids = list(note_ids or [])
         self.setWindowTitle("AINotePro")
         self.resize(800, 600)
 
@@ -23,7 +23,7 @@ class AiNoteProConfigDialog(QDialog):
         # Top info
         top_label = QLabel(
             '<div style="text-align:center; font-size:14px; margin: 10px 0; font-style:italic;">'
-            'Enhance your Anki notes with AI-generated text, speech, and images!'
+            'Enhance your Anki notes with AI-generated text and speech!'
             '</div>'
             '<div style="text-align:right; font-size:11px; margin: 10px 0; font-style:italic;">'
             'AINotePro v1.0    '
@@ -37,9 +37,8 @@ class AiNoteProConfigDialog(QDialog):
         main_layout.addWidget(self.tab_widget)
 
         self.tabs = {
-            "Text": TextTab(parent=self, browser=browser),
-            "TTS": TTSTab(parent=self, browser=browser),
-            "Images": ImageTab(parent=self, browser=browser),
+            "Text": TextTab(parent=self, browser=browser, note_ids=self.note_ids),
+            "TTS": TTSTab(parent=self, browser=browser, note_ids=self.note_ids),
         }
         for name, tab in self.tabs.items():
             self.tab_widget.addTab(tab, name)
@@ -72,12 +71,13 @@ class AiNoteProConfigDialog(QDialog):
         main_layout.addLayout(bottom_layout)
 
     def on_generate(self):
-        mapping = {
-            0: self.tabs["Text"].on_generate_text,
-            1: self.tabs["TTS"].on_generate_tts,
-            2: self.tabs["Images"].on_generate_images,
-        }
-        fn = mapping.get(self.tab_widget.currentIndex())
+        current_tab = self.tab_widget.currentWidget()
+        fn = None
+        for handler_name in ("on_generate_text", "on_generate_tts"):
+            candidate = getattr(current_tab, handler_name, None)
+            if callable(candidate):
+                fn = candidate
+                break
         if fn:
             fn()
 
@@ -89,6 +89,6 @@ class AiNoteProConfigDialog(QDialog):
         openLink("https://github.com/ernestyu/AINotePro/wiki")
 
 
-def show_ainotepro_dialog(browser=None):
-    dlg = AiNoteProConfigDialog(parent=None, browser=browser)
+def show_ainotepro_dialog(browser=None, note_ids=None):
+    dlg = AiNoteProConfigDialog(parent=None, browser=browser, note_ids=note_ids)
     dlg.exec()
