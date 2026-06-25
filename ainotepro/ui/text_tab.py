@@ -3,7 +3,9 @@
 import json
 import os
 import re
-from typing import Dict, Optional
+from html import unescape
+from typing import Any, Dict, Optional
+from urllib.parse import unquote, urlparse
 
 from aqt import mw
 from aqt.qt import (
@@ -17,25 +19,90 @@ from ..config.manager import ConfigManager
 from ..services.provider_factory import create_provider
 from ..core.utils import update_field_content
 
-# Note: PROMPT_FILE is separate from user_config.json as prompts can be shared/versioned.
-USER_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "user_data", "gen_text")
-PROMPT_FILE = os.path.join(USER_DATA_DIR, "prompt.json")
+# Keep a prompt.json for import/export style sharing, but also mirror prompts into
+# user_config.json so they survive the normal add-on settings flow.
+ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+USER_DATA_DIR = os.path.join(ADDON_ROOT, "user_data")
+PROMPT_DIR = os.path.join(USER_DATA_DIR, "gen_text")
+PROMPT_FILE = os.path.join(PROMPT_DIR, "prompt.json")
+USER_CONFIG_FILE = os.path.join(USER_DATA_DIR, "user_config.json")
+ROOT_CONFIG_FILE = os.path.join(ADDON_ROOT, "config.json")
+DEFAULT_PROMPTS = {
+    "Default": "Translate the following text to English: {Source Field}",
+}
 
 
-def _load_prompts() -> Dict[str, str]:
+def _read_json_file(path: str) -> Dict[str, Any]:
     try:
-        if os.path.exists(PROMPT_FILE):
-            with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception:
-        pass
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        print(f"[AINotePro] Failed to read JSON from {path}: {e}")
     return {}
 
 
-def _save_prompts(data: Dict[str, str]) -> None:
-    os.makedirs(USER_DATA_DIR, exist_ok=True)
-    with open(PROMPT_FILE, "w", encoding="utf-8") as f:
+def _write_json_file(path: str, data: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _extract_prompts(data: Dict[str, Any]) -> Dict[str, str]:
+    text_cfg = data.get("text", {})
+    prompts = text_cfg.get("prompts", {}) if isinstance(text_cfg, dict) else {}
+    if not isinstance(prompts, dict):
+        return {}
+    return {str(k): str(v) for k, v in prompts.items()}
+
+
+def _load_prompts() -> Dict[str, str]:
+    prompts: Dict[str, str] = dict(DEFAULT_PROMPTS)
+
+    root_cfg = _read_json_file(ROOT_CONFIG_FILE)
+    prompts.update(_extract_prompts(root_cfg))
+
+    user_cfg = _read_json_file(USER_CONFIG_FILE)
+    prompts.update(_extract_prompts(user_cfg))
+
+    prompt_file_data = _read_json_file(PROMPT_FILE)
+    if prompt_file_data:
+        prompts.update({str(k): str(v) for k, v in prompt_file_data.items()})
+
+    return prompts
+
+
+def _save_prompts(data: Dict[str, str]) -> None:
+    data = {str(k): str(v) for k, v in data.items()}
+    _write_json_file(PROMPT_FILE, data)
+
+    user_cfg = _read_json_file(USER_CONFIG_FILE)
+    text_cfg = user_cfg.setdefault("text", {})
+    if not isinstance(text_cfg, dict):
+        text_cfg = {}
+        user_cfg["text"] = text_cfg
+    text_cfg["prompts"] = data
+    _write_json_file(USER_CONFIG_FILE, user_cfg)
+
+
+def _get_last_used_prompt() -> str:
+    user_cfg = _read_json_file(USER_CONFIG_FILE)
+    text_cfg = user_cfg.get("text", {})
+    if isinstance(text_cfg, dict):
+        return str(text_cfg.get("last_used_prompt", "Default"))
+    return "Default"
+
+
+def _set_last_used_prompt(name: str) -> None:
+    user_cfg = _read_json_file(USER_CONFIG_FILE)
+    text_cfg = user_cfg.setdefault("text", {})
+    if not isinstance(text_cfg, dict):
+        text_cfg = {}
+        user_cfg["text"] = text_cfg
+    text_cfg["last_used_prompt"] = name
+    _write_json_file(USER_CONFIG_FILE, user_cfg)
 
 class GenerationWorker(QObject):
     """
@@ -127,6 +194,7 @@ class TextTab(QWidget):
         self.note_ids = list(note_ids or [])
         self.cfg = ConfigManager()
         self.all_prompts: Dict[str, str] = {}
+        self._is_updating_prompt_combo = False
 
         self._build_ui()
         self._load_note_fields()
@@ -212,11 +280,12 @@ class TextTab(QWidget):
         layout.addWidget(self.prompt_edit)
 
         # Prompt list + buttons
-        pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("<b>Prompt List:</b>"))
+        pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("<b>Prompt Name:</b>"))
         self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True); pr_row.addWidget(self.prompt_list_combo)
+        self.prompt_list_combo.setToolTip("Select an existing prompt or type a new name before saving.")
         pr_row.addWidget(QLabel("<b>Search:</b>"))
         self.prompt_search_edit = QLineEdit(); self.prompt_search_edit.setPlaceholderText("输入关键词过滤...")
-        self.prompt_search_edit.textChanged.connect(self._filter_prompts)
+        self.prompt_search_edit.textChanged.connect(lambda _text: self._filter_prompts())
         pr_row.addWidget(self.prompt_search_edit)
         layout.addLayout(pr_row)
 
@@ -233,15 +302,18 @@ class TextTab(QWidget):
         self.import_button = QPushButton(" Import"); self.import_button.setIcon(import_icon)
         self.export_button = QPushButton(" Export"); self.export_button.setIcon(export_icon)
         self.online_button = QPushButton(" Online"); self.online_button.setIcon(online_icon)
+        self.online_button.setEnabled(False)
+        self.online_button.setToolTip("Online shared prompts are not available yet.")
         self.import_button.clicked.connect(self._on_import_prompt)
         self.export_button.clicked.connect(self._on_export_prompt)
-        self.online_button.clicked.connect(lambda: showInfo("This feature is coming soon!"))
         btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button); btn_row.addWidget(self.online_button)
         btn_row.addStretch(1)
         self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
+        self.save_button.setToolTip("Save the current Prompt Preview under the Prompt Name.")
         self.load_button = QPushButton(" Load"); self.load_button.setIcon(load_icon)
         self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
         self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
+        self.prompt_list_combo.currentIndexChanged.connect(self._on_prompt_selection_changed)
         btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button)
         layout.addLayout(btn_row)
 
@@ -271,12 +343,13 @@ class TextTab(QWidget):
 
     def _load_prompt_list(self):
         self.all_prompts = _load_prompts()
-        self._filter_prompts()
+        self._filter_prompts(preferred_name=_get_last_used_prompt(), load_selected=True)
 
-    def _filter_prompts(self):
+    def _filter_prompts(self, preferred_name: Optional[str] = None, load_selected: bool = False):
         search_text = self.prompt_search_edit.text().lower()
         keywords = [k for k in search_text.split() if k]
-        current_selection = self.prompt_list_combo.currentText()
+        current_selection = preferred_name or self.prompt_list_combo.currentText()
+        self._is_updating_prompt_combo = True
         self.prompt_list_combo.clear()
 
         for name, content in self.all_prompts.items():
@@ -292,6 +365,66 @@ class TextTab(QWidget):
         idx = self.prompt_list_combo.findText(current_selection)
         if idx != -1:
             self.prompt_list_combo.setCurrentIndex(idx)
+        elif current_selection:
+            self.prompt_list_combo.setEditText(current_selection)
+        self._is_updating_prompt_combo = False
+        if load_selected:
+            self._load_prompt_by_name(self.prompt_list_combo.currentText().strip(), show_missing=False)
+
+    def _refresh_prompt_combo_after_save(self, name: str) -> None:
+        self._is_updating_prompt_combo = True
+        try:
+            if self.prompt_search_edit.text():
+                self.prompt_search_edit.blockSignals(True)
+                self.prompt_search_edit.clear()
+                self.prompt_search_edit.blockSignals(False)
+            self.prompt_list_combo.clear()
+            for prompt_name in self.all_prompts:
+                self.prompt_list_combo.addItem(prompt_name)
+            idx = self.prompt_list_combo.findText(name)
+            if idx < 0:
+                self.prompt_list_combo.addItem(name)
+                idx = self.prompt_list_combo.findText(name)
+            if idx >= 0:
+                self.prompt_list_combo.setCurrentIndex(idx)
+            else:
+                self.prompt_list_combo.setEditText(name)
+        finally:
+            try:
+                self.prompt_search_edit.blockSignals(False)
+            except Exception:
+                pass
+            self._is_updating_prompt_combo = False
+
+    def _prompt_name_text(self) -> str:
+        try:
+            editor = self.prompt_list_combo.lineEdit()
+            if editor:
+                return editor.text().strip()
+        except Exception:
+            pass
+        return self.prompt_list_combo.currentText().strip()
+
+    def _on_prompt_selection_changed(self, _index: int) -> None:
+        if self._is_updating_prompt_combo:
+            return
+        self._load_prompt_by_name(self.prompt_list_combo.currentText().strip(), show_missing=False)
+
+    def _load_prompt_by_name(self, name: str, show_missing: bool = True) -> bool:
+        if not name:
+            if show_missing:
+                showWarning("Prompt name cannot be empty.")
+            return False
+        data = _load_prompts()
+        if name not in data:
+            if show_missing:
+                showWarning("Prompt not found.")
+            return False
+        self.prompt_edit.setPlainText(data[name])
+        self.all_prompts = data
+        _set_last_used_prompt(name)
+        return True
+
     def _load_note_fields(self):
         try:
             note_ids = self._selected_note_ids()
@@ -314,28 +447,28 @@ class TextTab(QWidget):
 
     # Prompt ops
     def _on_save_prompt(self):
-        name = self.prompt_list_combo.currentText().strip()
+        name = self._prompt_name_text()
         if not name:
             showWarning("Prompt name cannot be empty."); return
+        content = self.prompt_edit.toPlainText()
+        if not content.strip():
+            showWarning("Prompt Preview is empty."); return
         if QMessageBox.question(self, "Confirm Save", "Save this prompt?",
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
             return
-        data = _load_prompts(); data[name] = self.prompt_edit.toPlainText(); _save_prompts(data)
+        data = _load_prompts(); data[name] = content; _save_prompts(data)
         self.all_prompts = data
-        self._filter_prompts()
-        showInfo("Prompt saved.")
+        _set_last_used_prompt(name)
+        self._refresh_prompt_combo_after_save(name)
+        self.prompt_edit.setPlainText(content)
+        showInfo(f"Prompt saved: {name}")
 
     def _on_load_prompt(self):
-        name = self.prompt_list_combo.currentText().strip()
-        if not name:
-            showWarning("Prompt name cannot be empty."); return
-        data = _load_prompts();
-        if name not in data:
-            showWarning("Prompt not found."); return
-        self.prompt_edit.setPlainText(data[name])
+        name = self._prompt_name_text()
+        self._load_prompt_by_name(name)
 
     def _on_delete_prompt(self):
-        name = self.prompt_list_combo.currentText().strip()
+        name = self._prompt_name_text()
         if not name:
             showWarning("Prompt name cannot be empty."); return
         if QMessageBox.question(self, "Confirm Delete", "Delete this prompt?",
@@ -345,8 +478,12 @@ class TextTab(QWidget):
         if name in data:
             del data[name]; _save_prompts(data)
             self.all_prompts = data
-            self._filter_prompts()
-            self.prompt_edit.clear(); showInfo("Prompt deleted.")
+            next_name = next(iter(data), "")
+            _set_last_used_prompt(next_name)
+            self._filter_prompts(preferred_name=next_name, load_selected=bool(next_name))
+            if not next_name:
+                self.prompt_edit.clear()
+            showInfo("Prompt deleted.")
 
     def _on_import_prompt(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Prompts", "", "JSON Files (*.json)")
@@ -378,7 +515,7 @@ class TextTab(QWidget):
             showWarning(f"Failed to import prompts: {e}")
 
     def _on_export_prompt(self):
-        name = self.prompt_list_combo.currentText().strip()
+        name = self._prompt_name_text()
         if not name:
             showWarning("Please select a prompt to export."); return
         
@@ -470,6 +607,8 @@ class TextTab(QWidget):
         st = "text"; pv = self._service_map(); provider = create_provider(st, pv, {})
         # If image-assisted is enabled, fall back to per-note flow for correctness
         if self.image_checkbox and self.image_checkbox.isChecked():
+            updated = 0
+            failures: list[str] = []
             try:
                 mw.progress.start(label="Generating responses...", max=len(note_ids))
             except Exception:
@@ -480,21 +619,28 @@ class TextTab(QWidget):
                 src_text = (note[src] or "").strip()
                 cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
                 content: Optional[str] = None
-                img_data_uri = self._extract_and_encode_image_as_data_uri(src_text)
-                if img_data_uri:
-                    print(f"[AINotePro] Image encoded as Data URI successfully. Length: {len(img_data_uri)}")
+                image_ref, image_error = self._extract_image_reference(src_text)
+                if image_ref:
+                    print(f"[AINotePro] Image reference prepared successfully. Length: {len(image_ref)}")
                     try:
-                        final_prompt = prompt_tpl.replace("{Source Field}", src_text).replace("{Source}", src_text)
-                        content = provider.generate_with_image(img_data_uri, final_prompt, cfg)
+                        image_prompt_text = self._html_to_prompt_text(src_text)
+                        final_prompt = prompt_tpl.replace("{Source Field}", image_prompt_text).replace("{Source}", image_prompt_text)
+                        content = provider.generate_with_image(image_ref, final_prompt, cfg)
                     except Exception as e:
-                        print(f"[Note {nid}] vision failed: {e}")
+                        msg = f"Note {nid}: vision request failed: {e}"
+                        failures.append(msg)
+                        print(f"[AINotePro] {msg}")
                         content = None
-                if content:
+                else:
+                    msg = f"Note {nid}: {image_error or 'No image found in source field'}"
+                    failures.append(msg)
+                    print(f"[AINotePro] {msg}")
+
+                if content and content.strip():
                     update_field_content(note, dst, content)
-                elif img_data_uri and not content:
-                    # If image was uploaded but generation failed, still update with a placeholder or error
-                    content = f"[AINotePro] Vision generation failed for the provided image."
-                    update_field_content(note, dst, content)
+                    updated += 1
+                elif image_ref:
+                    failures.append(f"Note {nid}: model returned empty content")
                 try:
                     mw.progress.update(value=i+1)
                 except Exception:
@@ -503,7 +649,14 @@ class TextTab(QWidget):
                 mw.progress.finish()
             except Exception:
                 pass
-            showInfo("Generation complete.")
+            if updated:
+                summary = f"Generation complete. Updated {updated} notes."
+                if failures:
+                    summary += f"\n\nSkipped/failed: {len(failures)}\n" + "\n".join(failures[:5])
+                showInfo(summary)
+            else:
+                detail = "\n".join(failures[:8]) if failures else "No image source was found."
+                showWarning(f"Image OCR generation produced no content.\n\n{detail}")
             return
 
         # Batch mode for plain text generation: collect inputs
@@ -559,23 +712,43 @@ class TextTab(QWidget):
         self.thread.start()
 
     # Helpers
-    def _extract_and_encode_image_as_data_uri(self, html_content: str) -> Optional[str]:
-        """
-        Extracts the first image from HTML, reads it, and encodes it as a Base64 Data URI.
-        This avoids uploading and is compatible with local models like Ollama.
-        """
+    def _html_to_prompt_text(self, html_content: str) -> str:
+        text = re.sub(r"<img\b[^>]*>", "", html_content or "", flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = unescape(text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _extract_image_reference(self, html_content: str) -> tuple[Optional[str], Optional[str]]:
+        """Return a URL/data URI suitable for a vision model, or an error message."""
         import base64
         import mimetypes
 
-        m = re.search(r'<img\s+src=["\']([^"\']+)["\']', html_content or "")
+        m = re.search(r"<img\b[^>]*\bsrc\s*=\s*(?:\"([^\"]+)\"|'([^']+)'|([^\\s>]+))", html_content or "", re.IGNORECASE)
         if not m:
-            return None
-        src = m.group(1)
-        media_dir = mw.col.media.dir(); path = os.path.join(media_dir, src)
+            return None, "No <img src=...> tag found in source field"
+
+        raw_src = unescape((m.group(1) or m.group(2) or m.group(3) or "").strip())
+        if not raw_src:
+            return None, "Image tag has an empty src attribute"
+
+        if raw_src.startswith("data:image/"):
+            return raw_src, None
+
+        parsed = urlparse(raw_src)
+        if parsed.scheme in ("http", "https"):
+            return raw_src, None
+
+        if parsed.scheme == "file":
+            path = unquote(parsed.path)
+        else:
+            src = unquote(raw_src.split("?", 1)[0].split("#", 1)[0])
+            src = src.lstrip("/")
+            path = os.path.join(mw.col.media.dir(), src)
+
         if not os.path.exists(path):
-            print(f"[AINotePro] Image file not found in media collection: {src}")
-            return None
-        
+            return None, f"Image file not found: {raw_src}"
+
         try:
             with open(path, "rb") as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
@@ -584,10 +757,9 @@ class TextTab(QWidget):
             if not mime_type:
                 mime_type = "image/png" # Default if type can't be guessed
             
-            return f"data:{mime_type};base64,{base64_image}"
+            return f"data:{mime_type};base64,{base64_image}", None
         except Exception as e:
-            print(f"[AINotePro] Failed to encode image to Base64 Data URI: {e}")
-            return None
+            return None, f"Failed to encode image as Base64: {e}"
 
     def save_settings(self) -> None:
         """Saves the current UI settings for the selected provider to the config file."""

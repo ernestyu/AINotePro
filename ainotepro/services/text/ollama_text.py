@@ -63,20 +63,36 @@ class OllamaTextProvider(TextProvider):
             return []
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
-        # Use OpenAI-compatible vision format, as it's more widely supported by models
-        # and Ollama's own server. The image_url is already a data URI.
-        # The endpoint should be the OpenAI-compatible one.
         base = self._base(config)
-        # Some users might have /v1 in their base URL, some might not.
-        # Some might use /api. We'll try to be smart.
+        if image_url.startswith("data:image/") and ";base64," in image_url:
+            image_b64 = image_url.split(";base64,", 1)[1]
+            url = f"{base}/api/chat"
+            body = {
+                "model": (config or {}).get("model") or "llava",
+                "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
+                "stream": False,
+                "options": {"temperature": (config or {}).get("temperature", 0.7)},
+            }
+            print(f"[AINotePro] POST {url} (ollama vision)")
+            r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
+            try:
+                r.raise_for_status()
+            except Exception:
+                error_text = r.text[:1000]
+                print(f"[AINotePro] Ollama vision request failed with HTTP {r.status_code}: {error_text}")
+                raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
+            data = r.json() or {}
+            content = ((data.get("message") or {}).get("content") or "").strip()
+            print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+            return clean_html_output(remove_think_tags(content))
+
         if "/api" in base:
-            # If they are using the native endpoint, switch to the compatible one for vision
             url = base.replace("/api", "") + "/v1/chat/completions"
         elif not base.endswith("/v1"):
             url = base + "/v1/chat/completions"
         else:
             url = base + "/chat/completions"
-            
+
         body = {
             "model": (config or {}).get("model") or "llava",
             "messages": [
@@ -104,7 +120,12 @@ class OllamaTextProvider(TextProvider):
             pass
         
         r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except Exception:
+            error_text = r.text[:1000]
+            print(f"[AINotePro] OpenAI-compatible Ollama vision request failed with HTTP {r.status_code}: {error_text}")
+            raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
         data = r.json() or {}
         content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
         print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")

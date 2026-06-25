@@ -17,6 +17,10 @@ def _get_default_config() -> Dict[str, Any]:
             "openai": {"base_url": "https://api.openai.com", "api_key": "", "model": "gpt-4o-mini", "temperature": 0.7},
             "deepseek": {"base_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat", "temperature": 0.7},
             "ollama": {"base_url": "http://localhost:11434", "api_key": "ollama", "model": "llama3", "temperature": 0.7},
+            "prompts": {
+                "Default": "Translate the following text to English: {Source Field}",
+            },
+            "last_used_prompt": "Default",
         },
         "image": {
             "provider": "dalle",
@@ -86,9 +90,15 @@ class ConfigManager:
 
     def set_provider_config(self, service_type: str, provider_name: str, provider_cfg: Dict[str, Any]):
         """Sets the config for a specific provider and saves it."""
+        self.config = self._load_config()
         if service_type not in self.config: self.config[service_type] = {}
         if provider_name not in self.config[service_type]: self.config[service_type][provider_name] = {}
         self.config[service_type][provider_name].update(provider_cfg)
+        self._save_config()
+
+    def save_all(self, data: Dict[str, Any]):
+        """Replaces the full config and saves it."""
+        self.config = _deep_merge_dicts(_get_default_config(), data)
         self._save_config()
 
     def _save_config(self):

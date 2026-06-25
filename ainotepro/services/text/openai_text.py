@@ -87,12 +87,13 @@ class OpenAITextProvider(TextProvider):
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         body = {
             "model": (config or {}).get("model") or "gpt-4o-mini",
+            "temperature": (config or {}).get("temperature", 0.7),
             "messages": [
                 {
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": image_url}},
                         {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_url}},
                     ],
                 }
             ],
@@ -108,7 +109,12 @@ class OpenAITextProvider(TextProvider):
         except Exception:
             pass
         r = requests.post(url, json=body, headers=headers, timeout=90)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except Exception:
+            error_text = r.text[:1000]
+            print(f"[AINotePro] Vision request failed with HTTP {r.status_code}: {error_text}")
+            raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
         data = r.json()
         choices = data.get("choices", [])
         if not choices:
