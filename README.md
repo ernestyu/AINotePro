@@ -1,214 +1,141 @@
-### 1\. 项目核心理念
+# AINotePro
 
-在设计文件结构之前，我们先确立几个核心设计理念：
+AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
-1.  **UI 与逻辑分离**: 用户界面 (UI) 的代码只负责展示和接收用户输入，不应包含任何业务逻辑（如调用 API）。
-2.  **服务抽象化**: 无论后端是 OpenAI, Anthropic, 还是本地的 Ollama, 对于核心逻辑来说，它们都应该提供一个统一的接口。例如，所有文本生成服务都应该有一个 `generate_text(prompt)` 方法。这通过“策略模式”或“抽象基类”实现。
-3.  **配置驱动**: 插件的所有行为（使用哪个模型、API 密钥、本地服务器地址等）都应该由用户配置决定，而不是硬编码在代码里。
-4.  **异步处理**: AI 服务的网络请求可能会很慢，为了不冻结 Anki 的主界面，所有耗时操作都必须在后台线程中异步执行。
-5.  **统一的管理者 (Manager)**: 有一个中心协调器，负责接收来自 UI 的请求，根据配置选择合适的服务，执行任务，并将结果返回给 UI。
+## Features
 
------
+- Generate text from a source field and write the result to a destination field.
+- Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
+- Save, load, delete, import, and export prompt templates.
+- Use OpenAI-compatible chat completion providers, including OpenAI, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Together, Perplexity, Gemini-compatible endpoint, LM Studio, LocalAI, and Ollama.
+- Refresh available models when the provider exposes a models endpoint.
+- Remember the last provider settings and the last model that generated successfully.
+- Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
+- Generate MP3 audio with Edge TTS and append Anki `[sound:...]` references to the selected destination field.
+- Process one selected note or multiple selected notes from the Browser.
 
-### 2\. 建议的文件目录结构
+## Requirements
 
-这是一个推荐的目录结构。Anki 插件本质上是一个 Python 包，所以我们会按照标准的 Python 项目结构来组织。
+- Anki 26.05 or newer is the tested target for the current release.
+- Internet access is required for remote AI providers and Edge TTS.
+- A compatible API key is required for paid or hosted LLM providers.
+- Ollama, LM Studio, and LocalAI require a local server to be running before generation.
+- Image OCR requires a vision-capable model and an endpoint that accepts OpenAI-style `image_url` message parts. Some servers expose the same model name in a text-only endpoint; in that case OCR will fail even if another UI can use a vision variant.
 
+## Installation
+
+### From AnkiWeb
+
+1. Open Anki.
+2. Go to `Tools > Add-ons > Get Add-ons`.
+3. Paste the AnkiWeb code for AINotePro.
+4. Restart Anki.
+
+The AnkiWeb code will be available after the add-on is published.
+
+### From a local `.ankiaddon` file
+
+1. Download the `.ankiaddon` package.
+2. Double-click it, or use `Tools > Add-ons > Install from file`.
+3. Restart Anki.
+
+## Basic Usage
+
+1. Open the Browse window and select one or more notes.
+2. Open `AINotePro > Add Context to selected Field...`, or click the AINotePro editor toolbar button.
+3. Choose the `Text` tab.
+4. Select a provider, enter its Base URL and API key, and choose or type a model name.
+5. Write a prompt. Use `{Source Field}` where the selected source field content should be inserted.
+6. Choose the source and destination fields.
+7. Click `Generate`.
+
+For TTS:
+
+1. Open the `TTS` tab.
+2. Select a language and enable at least one voice.
+3. Choose source and destination fields.
+4. Click `Generate`.
+
+AINotePro appends generated audio to the destination field as an Anki sound reference.
+
+## Prompt Templates
+
+Prompt templates are stored in the add-on's `user_data` folder. They can also be mirrored into the add-on configuration file so normal settings saves do not erase them.
+
+Use the prompt name field to select an existing prompt or type a new name. `Save` stores the current prompt text under that name. `Load` replaces the prompt editor with the selected template. `Delete` removes the selected template.
+
+The `Online` prompt sharing button is currently disabled; shared prompt publishing is not implemented in this release.
+
+## Provider Notes
+
+AINotePro uses OpenAI-compatible HTTP requests for most text providers. A provider entry is a convenience preset for Base URL and default model; it does not guarantee that every account, region, or server exposes the same model list.
+
+Common Base URL examples:
+
+| Provider | Default Base URL | Default Model |
+| --- | --- | --- |
+| OpenAI | `https://api.openai.com` | `gpt-4o-mini` |
+| DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
+| OpenRouter | `https://openrouter.ai/api` | `openai/gpt-4o-mini` |
+| DashScope/Qwen | `https://dashscope.aliyuncs.com/compatible-mode` | `qwen-plus` |
+| Moonshot/Kimi | `https://api.moonshot.cn` | `moonshot-v1-8k` |
+| Zhipu GLM | `https://open.bigmodel.cn/api/paas` | `glm-4-flash` |
+| SiliconFlow | `https://api.siliconflow.cn` | `Qwen/Qwen2.5-7B-Instruct` |
+| Groq | `https://api.groq.com/openai` | `llama-3.1-8b-instant` |
+| Together | `https://api.together.xyz` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` |
+| Perplexity | `https://api.perplexity.ai` | `sonar` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-1.5-flash` |
+| LM Studio | `http://localhost:1234` | user-defined |
+| LocalAI | `http://localhost:8080` | user-defined |
+| Ollama | `http://localhost:11434` | `llama3` |
+
+If `Refresh` returns no models, type the model name manually. Many OpenAI-compatible servers do not provide a complete `/models` response.
+
+## Privacy
+
+AINotePro sends selected note field content to the provider you configure. If image source mode is enabled, images in the source field may be read from your Anki media folder, encoded as Base64 data, and sent to the configured model endpoint. Audio generation sends selected text to Edge TTS.
+
+Do not use the add-on with private, medical, legal, or confidential notes unless you understand and accept the privacy policy of the selected provider.
+
+API keys and provider settings are stored locally in the add-on's `user_data/user_config.json`.
+
+## Troubleshooting
+
+- If no text appears in the destination field, confirm that the source field is not empty, the prompt contains `{Source Field}` or `{Source}`, and the provider returns non-empty content.
+- If image OCR fails with a server error, confirm that the exact endpoint accepts image inputs, not only text chat completions.
+- If model refresh fails, type the model name manually and use `Check`.
+- If TTS does not append audio, confirm that a voice is enabled and the destination field exists on the selected note type.
+- For local providers, confirm that the local server is running and reachable from Anki.
+
+## Support
+
+Please report bugs and feature requests on GitHub:
+
+https://github.com/ernestyu/AINotePro/issues
+
+When reporting a bug, include:
+
+- Anki version and operating system.
+- Provider name, Base URL, and model name. Do not include API keys.
+- Whether the issue happens from the Browse menu, editor toolbar button, or both.
+- The exact error message from Anki, if any.
+
+## Development
+
+The add-on entry point is `__init__.py`. The current user-facing dialog lives in `ainotepro/ainotepro_gui.py`, with tab implementations in `ainotepro/ui/text_tab.py` and `ainotepro/ui/tts_tab.py`.
+
+Run a syntax check before packaging:
+
+```bash
+python3 -m compileall __init__.py ainotepro
 ```
-ainotepro/
-├── __init__.py                # 插件入口，注册钩子和菜单项
-|
-├── core/                      # 核心业务逻辑
-│   ├── __init__.py
-│   ├── manager.py             # 中心任务管理器 (AIManager)
-│   ├── async_task.py          # 异步任务处理器 (QThread)
-│   └── utils.py               # Anki 相关的辅助函数 (如添加媒体文件)
-|
-├── ui/                        # 所有用户界面相关代码 (PyQt)
-│   ├── __init__.py
-│   ├── main_dialog.py         # AI 生成的主对话框
-│   ├── editor_button.py       # 在编辑器上添加按钮的逻辑
-│   └── config_dialog.py       # 插件设置对话框
-|
-├── services/                  # 所有与第三方 AI 服务交互的模块
-│   ├── __init__.py
-│   ├── base.py                # 定义服务提供者的抽象基类 (非常重要!)
-│   ├── provider_factory.py    # 工厂模式，根据配置创建具体服务实例
-│   │
-│   ├── text/                  # 文本生成服务
-│   │   ├── __init__.py
-│   │   ├── openai_text.py
-│   │   ├── anthropic_text.py
-│   │   └── ollama_text.py
-│   │
-│   ├── image/                 # 图像生成服务
-│   │   ├── __init__.py
-│   │   ├── dall_e.py
-│   │   └── sd_webui.py        # 例如本地 Stable Diffusion WebUI
-│   │
-│   └── audio/                 # 音频生成服务
-│       ├── __init__.py
-│       ├── openai_tts.py
-│       └── elevenlabs_tts.py
-|
-├── config/                    # 配置管理
-│   ├── __init__.py
-│   ├── manager.py             # 封装 Anki 的配置读取和写入
-│   └── defaults.py            # 存储默认配置
-|
-├── res/                       # 静态资源
-│   └── icons/
-│       └── ai_icon.png        # 编辑器按钮图标
-|
-├── logs/                      # 日志文件目录（可选，但推荐）
-│   └── ainotepro.log
-|
-├── manifest.json              # Anki 插件包元数据
-└── config.json                # Anki 插件配置项定义
+
+Build a package from the add-on root:
+
+```bash
+find . -name "__pycache__" -type d -prune -exec rm -rf {} +
+zip -r ../AINotePro.ankiaddon * \
+  -x "user_data/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
 ```
 
------
-
-### 3\. 各模块职责详解
-
-#### `__init__.py` (插件入口)
-
-  * **职责**: Anki 加载插件时执行的第一个文件。
-  * **内容**:
-      * 从 `ui.editor_button` 导入函数。
-      * 使用 Anki 的钩子 (hook) `addHook("setupEditorButtons", add_ainotepro_button)` 将按钮添加到编辑器工具栏。
-      * 创建一个菜单项，用于打开配置对话框。
-
-#### `core/` (核心逻辑层)
-
-  * **`manager.py`**: `AIManager` 类
-
-      * **职责**: 业务逻辑的中心枢纽。UI 层不直接调用 `services`，而是通过 `AIManager`。
-      * **方法示例**:
-          * `generate_text_for_field(note, field_name, prompt)`
-          * `generate_image_for_field(note, field_name, prompt)`
-          * `generate_audio_for_field(note, field_name, text)`
-      * **工作流程**:
-        1.  接收来自 UI 的请求（例如，“为当前笔记的‘正面’字段生成一张关于‘苹果’的图片”）。
-        2.  从 `config.manager` 读取当前配置，确定用户选择了哪个图片服务（如 DALL-E）。
-        3.  使用 `services.provider_factory` 创建一个对应的服务实例 (`DalleProvider`)。
-        4.  创建一个 `AsyncTask`，将服务实例和任务数据传给它，并启动任务。
-        5.  监听 `AsyncTask` 的完成信号，获取结果后，使用 `utils.py` 中的函数将媒体文件写入 Anki 并更新字段。
-
-  * **`async_task.py`**: `AsyncTask(QThread)`
-
-      * **职责**: 在后台线程中执行耗时操作（如 API 请求），避免 UI 卡死。
-      * **实现**: 继承 PyQt 的 `QThread`。在 `run()` 方法中执行实际的 AI 服务调用。通过信号/槽机制 (`pyqtSignal`) 将结果（或错误信息）传回主线程。
-
-  * **`utils.py`**:
-
-      * **职责**: 提供与 Anki 交互的原子操作。
-      * **函数示例**:
-          * `add_image_to_media_collection(image_data)`: 保存图片到 Anki 的 `collection.media` 目录并返回文件名。
-          * `add_audio_to_media_collection(audio_data)`: 同上。
-          * `update_field_content(note, field_name, content)`: 安全地更新卡片字段内容。
-
-#### `services/` (服务提供者层)
-
-这是实现插件可扩展性的关键。
-
-  * **`base.py`**:
-
-      * **职责**: 定义所有服务提供者必须遵守的“契约”（接口）。
-      * **实现**: 使用 Python 的 `abc` 模块定义抽象基类。
-        ```python
-        from abc import ABC, abstractmethod
-
-        class TextProvider(ABC):
-            @abstractmethod
-            def generate(self, prompt: str, config: dict) -> str:
-                pass
-
-        class ImageProvider(ABC):
-            @abstractmethod
-            def generate(self, prompt: str, config: dict) -> bytes: # 返回图片二进制数据
-                pass
-
-        class AudioProvider(ABC):
-            @abstractmethod
-            def generate(self, text: str, config: dict) -> bytes: # 返回音频二进制数据
-                pass
-        ```
-
-  * **`provider_factory.py`**:
-
-      * **职责**: 根据配置动态创建服务实例。
-      * **函数示例**: `create_provider(service_type: str, provider_name: str, config: dict)`
-          * 如果 `service_type` 是 "text"，`provider_name` 是 "openai"，它就会 `from .text.openai_text import OpenAITextProvider` 并返回一个 `OpenAITextProvider` 的实例。
-
-  * **子目录 (`text/`, `image/`, `audio/`)**:
-
-      * 每个文件实现一个具体服务，继承自 `base.py` 中对应的抽象类。
-      * 例如，`ollama_text.py` 中的 `OllamaTextProvider` 会实现 `generate` 方法，其内部逻辑是使用 `requests` 库向本地 Ollama API 发送请求。
-
-#### `ui/` (用户界面层)
-
-  * **`editor_button.py`**:
-
-      * 包含一个函数 `add_ainotepro_button(buttons, editor)`，它会创建一个 `QAction` 或 `QPushButton`，并将其添加到编辑器的工具栏 `buttons` 列表中。
-      * 按钮的点击事件会连接到 `main_dialog.py` 中用于显示主窗口的函数。
-
-  * **`main_dialog.py`**: `MainDialog(QDialog)`
-
-      * **职责**: 提供一个统一的、多模态的输入界面。
-      * **UI 组件**:
-          * 一个下拉菜单选择服务类型（文本、图像、音频）。
-          * 一个下拉菜单根据类型选择具体的服务提供者（如 OpenAI, Ollama）。
-          * 一个大的 `QTextEdit` 用于输入 Prompt。
-          * 一个 "Generate" 按钮。
-          * 一个状态栏或标签，用于显示“生成中...”或错误信息。
-      * **逻辑**:
-          * 当用户点击 "Generate" 时，它会收集所有信息（服务类型、提供者、Prompt、当前笔记和字段），然后调用 `core.manager.AIManager` 的相应方法来处理请求。它**不直接调用 API**。
-
-  * **`config_dialog.py`**: `ConfigDialog(QDialog)`
-
-      * **职责**: 提供一个图形界面让用户输入 API 密钥、选择模型、设置本地服务器地址等。
-      * **逻辑**: 保存设置时，调用 `config.manager` 中的函数将配置写入 Anki 的配置文件系统。
-
-#### `config/` (配置层)
-
-  * **`manager.py`**:
-
-      * **职责**: 封装 Anki 的配置 API，为插件的其他部分提供简单的接口。
-      * **实现**: 使用 `aqt.mw.addonManager.getConfig(__name__)` 和 `aqt.mw.addonManager.writeConfig(__name__, data)`。
-      * **函数**: `get_config()`, `save_config(data)`, `get_provider_config('openai')`。
-
-  * **`defaults.py`**:
-
-      * 只包含一个 Python 字典，定义了所有配置项的默认值。当用户第一次使用插件时，会加载这些默认值。
-
------
-
-### 4\. 工作流程示例 (生成图片)
-
-1.  **用户操作**: 用户在 Anki 编辑器中点击 AINotePro 图标。
-2.  **UI 响应**: `editor_button.py` 的逻辑触发，`main_dialog.py` 中的 `MainDialog` 实例被创建并显示。
-3.  **用户输入**: 用户选择“图像” -\> “DALL-E”，输入 "a red apple on a book"，然后点击“生成”。
-4.  **UI -\> Core**: `MainDialog` 捕获到点击事件，调用 `AIManager.generate_image_for_field(current_note, 'Front', 'a red apple on a book')`。
-5.  **Core (Manager)**:
-    a. `AIManager` 从 `config.manager` 获取 DALL-E 的 API 密钥等配置。
-    b. `AIManager` 调用 `provider_factory.create_provider('image', 'dalle', config)`，获得一个 `DalleImageProvider` 实例。
-    c. `AIManager` 创建一个 `AsyncTask`，将这个实例和 prompt 交给它，并启动线程。UI 此时可以显示“正在生成图片...”。
-6.  **Core (Async Task) -\> Service**:
-    a. `AsyncTask` 在后台线程中调用 `DalleImageProvider.generate()` 方法。
-    b. `DalleImageProvider` 使用 `requests` 或 `openai` 库向 OpenAI API 发送请求。
-7.  **Service -\> Core (Async Task)**: API 返回图片数据（二进制流）。`AsyncTask` 接收到数据后，发出一个 `task_finished` 信号，并将数据作为参数传递。
-8.  **Core (Manager) -\> UI**:
-    a. `AIManager` 中连接到该信号的槽函数被触发。
-    b. `AIManager` 调用 `utils.add_image_to_media_collection()`，将图片数据存入 Anki 媒体库，并获得文件名（如 `paste-123.jpg`）。
-    c. `AIManager` 调用 `utils.update_field_content()`，将 `<img src="paste-123.jpg">` 这段 HTML 插入到指定字段。
-    d. `MainDialog` 收到任务完成的通知，关闭加载提示，并可能显示“成功！”的消息，然后关闭对话框。
-
-这个架构将各部分职责明确分开，当你未来想增加一个新的 AI 服务时（例如，添加 Midjourney 作为图片生成器），你只需要：
-
-1.  在 `services/image/` 目录下创建一个 `midjourney.py` 文件。
-2.  在其中创建一个 `MidjourneyImageProvider` 类，并实现 `generate` 方法。
-3.  更新 `provider_factory.py` 以识别 "midjourney"。
-4.  在 `ui/config_dialog.py` 和 `ui/main_dialog.py` 中添加相应的选项。
-
-核心的 `AIManager` 和 `AsyncTask` 代码完全不需要改动。这就是低耦合、高内聚设计带来的好处。
+The generated zip must contain `__init__.py` at the top level. Do not include the parent `AINotePro/` folder inside the archive.

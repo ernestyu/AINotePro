@@ -30,6 +30,27 @@ ROOT_CONFIG_FILE = os.path.join(ADDON_ROOT, "config.json")
 DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
 }
+TEXT_PROVIDER_OPTIONS = [
+    ("OpenAI", "openai"),
+    ("DeepSeek", "deepseek"),
+    ("OpenRouter", "openrouter"),
+    ("DashScope (Qwen)", "dashscope"),
+    ("Moonshot (Kimi)", "moonshot"),
+    ("Zhipu GLM", "zhipu"),
+    ("SiliconFlow", "siliconflow"),
+    ("Groq", "groq"),
+    ("Together", "together"),
+    ("Perplexity", "perplexity"),
+    ("Gemini", "gemini"),
+    ("LM Studio", "lmstudio"),
+    ("LocalAI", "localai"),
+    ("Ollama", "ollama"),
+]
+TEXT_PROVIDER_LABEL_TO_KEY = dict(TEXT_PROVIDER_OPTIONS)
+TEXT_PROVIDER_KEY_TO_LABEL = {key: label for label, key in TEXT_PROVIDER_OPTIONS}
+TEXT_PROVIDER_LABEL_ALIASES = {
+    "Open AI": "openai",
+}
 
 
 def _read_json_file(path: str) -> Dict[str, Any]:
@@ -109,6 +130,7 @@ class GenerationWorker(QObject):
     Runs the generation task in a separate thread to avoid blocking the UI.
     """
     progressUpdated = pyqtSignal(int)
+    resultReady = pyqtSignal(object)
     finished = pyqtSignal(str)
 
     def __init__(self, params: Dict):
@@ -135,8 +157,7 @@ class GenerationWorker(QObject):
 
             import concurrent.futures as _fut
             
-            # A dictionary to store results as they complete, using nid as key.
-            results_map = {}
+            completed = 0
 
             def do_generate(nid, text):
                 """Generates content for a single item."""
@@ -169,12 +190,9 @@ class GenerationWorker(QObject):
                         break
                     
                     nid, result = future.result()
-                    results_map[nid] = result
-                    
-                    # Update note and progress as each task finishes.
-                    note = mw.col.get_note(nid)
-                    update_field_content(note, dst, result)
-                    self.progressUpdated.emit(len(results_map))
+                    completed += 1
+                    self.resultReady.emit((nid, dst, result))
+                    self.progressUpdated.emit(completed)
 
             self.finished.emit("Generation complete." if not self._is_cancelled else "Generation cancelled.")
 
@@ -188,13 +206,16 @@ class GenerationWorker(QObject):
 
 
 class TextTab(QWidget):
-    def __init__(self, parent=None, browser=None, note_ids=None):
+    def __init__(self, parent=None, browser=None, note_ids=None, editor=None):
         super().__init__(parent)
         self.browser = browser
         self.note_ids = list(note_ids or [])
+        self.editor = editor
         self.cfg = ConfigManager()
         self.all_prompts: Dict[str, str] = {}
         self._is_updating_prompt_combo = False
+        self._generation_update_count = 0
+        self._generation_success_count = 0
 
         self._build_ui()
         self._load_note_fields()
@@ -210,7 +231,12 @@ class TextTab(QWidget):
         # Generate using
         gen_row = QHBoxLayout()
         gen_row.addWidget(QLabel("<b>Generate using</b>"))
-        self.service_combo = QComboBox(); self.service_combo.addItems(["Open AI", "DeepSeek", "Ollama"]) 
+        self.service_combo = QComboBox(); self.service_combo.addItems([label for label, _key in TEXT_PROVIDER_OPTIONS])
+        saved_provider = self.cfg.get_all().get("text", {}).get("provider", "openai")
+        saved_label = TEXT_PROVIDER_KEY_TO_LABEL.get(str(saved_provider).lower(), "OpenAI")
+        saved_idx = self.service_combo.findText(saved_label)
+        if saved_idx >= 0:
+            self.service_combo.setCurrentIndex(saved_idx)
         self.service_combo.currentTextChanged.connect(self._populate_provider_cfg)
         gen_row.addWidget(self.service_combo)
         layout.addLayout(gen_row)
@@ -533,7 +559,20 @@ class TextTab(QWidget):
     # Provider config
     def _service_map(self) -> str:
         svc = self.service_combo.currentText()
-        return {"Open AI": "openai", "DeepSeek": "deepseek", "Ollama": "ollama"}.get(svc, "openai")
+        return TEXT_PROVIDER_LABEL_TO_KEY.get(svc, TEXT_PROVIDER_LABEL_ALIASES.get(svc, "openai"))
+
+    def _current_provider_config(self) -> Dict[str, Any]:
+        return {
+            "base_url": self.base_url_edit.text().strip(),
+            "api_key": self.api_key_edit.text().strip(),
+            "model": self.model_combo.currentText().strip(),
+            "temperature": self.temperature_slider.value() / 100.0,
+        }
+
+    def _save_current_provider_config(self) -> None:
+        st = "text"; pv = self._service_map()
+        self.cfg.set_provider_config(st, pv, self._current_provider_config())
+        print(f"[AINotePro] Saved settings for Text/{pv}")
 
     def _populate_provider_cfg(self) -> None:
         st = "text"; pv = self._service_map()
@@ -564,12 +603,7 @@ class TextTab(QWidget):
                     if i >= 0: self.model_combo.setCurrentIndex(i)
                     else: self.model_combo.setEditText(cur)
             # persist current provider config
-            self.cfg.set_provider_config(st, pv, {
-                "base_url": base_url,
-                "api_key": api_key,
-                "model": self.model_combo.currentText().strip(),
-                "temperature": self.temperature_slider.value() / 100.0,
-            })
+            self._save_current_provider_config()
         except Exception as e:
             print(f"[AINotePro] Refresh models failed: {e}")
             showWarning(f"Failed to fetch models: {e}")
@@ -584,6 +618,7 @@ class TextTab(QWidget):
         try:
             content = provider.generate("hello", cfg)
             print("[AINotePro] Check OK. Got response length:", len(content or ""))
+            self._save_current_provider_config()
             showInfo(f"Test result:\n{content[:200]}")
         except Exception as e:
             print(f"[AINotePro] Check failed: {e}")
@@ -650,6 +685,7 @@ class TextTab(QWidget):
             except Exception:
                 pass
             if updated:
+                self._save_current_provider_config()
                 summary = f"Generation complete. Updated {updated} notes."
                 if failures:
                     summary += f"\n\nSkipped/failed: {len(failures)}\n" + "\n".join(failures[:5])
@@ -700,18 +736,75 @@ class TextTab(QWidget):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.worker.progressUpdated.connect(progress.setValue)
+        self.worker.resultReady.connect(self._apply_generated_text_result)
         progress.canceled.connect(self.worker.cancel)
 
         def on_finish(message):
             progress.setValue(len(items))
-            showInfo(message)
+            try:
+                mw.reset()
+            except Exception:
+                pass
+            if self._generation_success_count:
+                self._save_current_provider_config()
+            showInfo(f"{message} Updated {self._generation_update_count} notes.")
 
         self.worker.finished.connect(on_finish)
+        self.thread.finished.connect(lambda: setattr(self, "_generation_update_count", 0))
 
         # Start the thread
+        self._generation_update_count = 0
+        self._generation_success_count = 0
         self.thread.start()
 
     # Helpers
+    def _apply_generated_text_result(self, payload) -> None:
+        nid, dst, result = payload
+        try:
+            editor_note = self._editor_note_for_id(nid)
+            note = editor_note or mw.col.get_note(nid)
+            update_field_content(note, dst, result)
+            self._generation_update_count += 1
+            result_text = str(result or "").strip()
+            if result_text and not result_text.startswith("[Error]") and result_text != "[Cancelled]":
+                self._generation_success_count += 1
+            print(f"[AINotePro] Updated note {nid} field '{dst}' on main thread.")
+            self._refresh_editor_note(nid)
+        except Exception as e:
+            print(f"[AINotePro] Failed to update note {nid} field '{dst}': {e}")
+
+    def _editor_note_for_id(self, nid: int):
+        editor = self.editor
+        if editor is None and self.browser is not None:
+            editor = getattr(self.browser, "editor", None)
+        note = getattr(editor, "note", None) if editor is not None else None
+        if note is None:
+            return None
+        note_id = getattr(note, "id", None)
+        if callable(note_id):
+            note_id = note_id()
+        return note if int(note_id or 0) == int(nid) else None
+
+    def _refresh_editor_note(self, nid: int) -> None:
+        editor = self.editor
+        if editor is None and self.browser is not None:
+            editor = getattr(self.browser, "editor", None)
+        if editor is None or self._editor_note_for_id(nid) is None:
+            return
+        for method_name in ("loadNoteKeepingFocus", "loadNote"):
+            method = getattr(editor, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except TypeError:
+                    try:
+                        method(focusTo=None)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                return
+
     def _html_to_prompt_text(self, html_content: str) -> str:
         text = re.sub(r"<img\b[^>]*>", "", html_content or "", flags=re.IGNORECASE)
         text = re.sub(r"<[^>]+>", " ", text)
@@ -763,11 +856,4 @@ class TextTab(QWidget):
 
     def save_settings(self) -> None:
         """Saves the current UI settings for the selected provider to the config file."""
-        st = "text"; pv = self._service_map()
-        self.cfg.set_provider_config(st, pv, {
-            "base_url": self.base_url_edit.text().strip(),
-            "api_key": self.api_key_edit.text().strip(),
-            "model": self.model_combo.currentText().strip(),
-            "temperature": self.temperature_slider.value() / 100.0,
-        })
-        print(f"[AINotePro] Saved settings for Text/{pv}")
+        self._save_current_provider_config()

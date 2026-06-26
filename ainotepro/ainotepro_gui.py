@@ -11,10 +11,11 @@ from .ui.tts_tab import TTSTab
 
 
 class AiNoteProConfigDialog(QDialog):
-    def __init__(self, parent=None, browser=None, note_ids=None):
+    def __init__(self, parent=None, browser=None, note_ids=None, editor=None):
         super().__init__(parent)
         self.browser = browser
         self.note_ids = list(note_ids or [])
+        self.editor = editor
         self.setWindowTitle("AINotePro")
         self.resize(800, 600)
 
@@ -37,8 +38,8 @@ class AiNoteProConfigDialog(QDialog):
         main_layout.addWidget(self.tab_widget)
 
         self.tabs = {
-            "Text": TextTab(parent=self, browser=browser, note_ids=self.note_ids),
-            "TTS": TTSTab(parent=self, browser=browser, note_ids=self.note_ids),
+            "Text": TextTab(parent=self, browser=browser, note_ids=self.note_ids, editor=editor),
+            "TTS": TTSTab(parent=self, browser=browser, note_ids=self.note_ids, editor=editor),
         }
         for name, tab in self.tabs.items():
             self.tab_widget.addTab(tab, name)
@@ -89,6 +90,6 @@ class AiNoteProConfigDialog(QDialog):
         openLink("https://github.com/ernestyu/AINotePro/wiki")
 
 
-def show_ainotepro_dialog(browser=None, note_ids=None):
-    dlg = AiNoteProConfigDialog(parent=None, browser=browser, note_ids=note_ids)
+def show_ainotepro_dialog(browser=None, note_ids=None, editor=None):
+    dlg = AiNoteProConfigDialog(parent=None, browser=browser, note_ids=note_ids, editor=editor)
     dlg.exec()

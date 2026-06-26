@@ -17,10 +17,11 @@ from ..core.utils import add_audio_to_media_collection, get_field_content, updat
 
 
 class TTSTab(QWidget):
-    def __init__(self, parent=None, browser=None, note_ids=None):
+    def __init__(self, parent=None, browser=None, note_ids=None, editor=None):
         super().__init__(parent)
         self.browser = browser
         self.note_ids = list(note_ids or [])
+        self.editor = editor
         self.cfg = ConfigManager()
         self._build_ui()
         self._load_fields()
@@ -118,6 +119,38 @@ class TTSTab(QWidget):
             except Exception:
                 return []
         return list(self.note_ids)
+
+    def _editor_note_for_id(self, nid: int):
+        editor = self.editor
+        if editor is None and self.browser is not None:
+            editor = getattr(self.browser, "editor", None)
+        note = getattr(editor, "note", None) if editor is not None else None
+        if note is None:
+            return None
+        note_id = getattr(note, "id", None)
+        if callable(note_id):
+            note_id = note_id()
+        return note if int(note_id or 0) == int(nid) else None
+
+    def _refresh_editor_note(self, nid: int) -> None:
+        editor = self.editor
+        if editor is None and self.browser is not None:
+            editor = getattr(self.browser, "editor", None)
+        if editor is None or self._editor_note_for_id(nid) is None:
+            return
+        for method_name in ("loadNoteKeepingFocus", "loadNote"):
+            method = getattr(editor, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except TypeError:
+                    try:
+                        method(focusTo=None)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                return
 
     def _load_languages(self) -> None:
         try:
@@ -238,9 +271,10 @@ class TTSTab(QWidget):
         src = self.src_combo.currentText(); dst = self.dst_combo.currentText()
         provider = create_provider("audio", "edge_tts", {})
         progress = QProgressDialog("Generating TTS...", "Cancel", 0, len(note_ids), self); progress.setWindowTitle("TTS"); progress.show()
+        updated = 0
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled(): break
-            note = mw.col.get_note(nid)
+            note = self._editor_note_for_id(nid) or mw.col.get_note(nid)
             text = (get_field_content(note, src, "") or "").strip()
             if not text: continue
             # pick first enabled voice
@@ -256,7 +290,14 @@ class TTSTab(QWidget):
                 fname = add_audio_to_media_collection(data, f"ainotepro-{nid}.mp3")
                 new_val = f"{get_field_content(note, dst, '')} [sound:{fname}]".strip()
                 update_field_content(note, dst, new_val)
+                self._refresh_editor_note(nid)
+                updated += 1
+                print(f"[AINotePro][TTS] Updated note {nid} field '{dst}' with [sound:{fname}]")
             except Exception as e:
                 print(f"[Note {nid}] TTS failed: {e}")
             progress.setValue(i+1)
-        progress.close(); showInfo("TTS complete.")
+        try:
+            mw.reset()
+        except Exception:
+            pass
+        progress.close(); showInfo(f"TTS complete. Updated {updated} notes.")

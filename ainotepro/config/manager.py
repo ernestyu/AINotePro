@@ -16,6 +16,17 @@ def _get_default_config() -> Dict[str, Any]:
             "provider": "openai",
             "openai": {"base_url": "https://api.openai.com", "api_key": "", "model": "gpt-4o-mini", "temperature": 0.7},
             "deepseek": {"base_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat", "temperature": 0.7},
+            "openrouter": {"base_url": "https://openrouter.ai/api", "api_key": "", "model": "openai/gpt-4o-mini", "temperature": 0.7},
+            "dashscope": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode", "api_key": "", "model": "qwen-plus", "temperature": 0.7},
+            "moonshot": {"base_url": "https://api.moonshot.cn", "api_key": "", "model": "moonshot-v1-8k", "temperature": 0.7},
+            "zhipu": {"base_url": "https://open.bigmodel.cn/api/paas", "api_key": "", "model": "glm-4-flash", "temperature": 0.7},
+            "siliconflow": {"base_url": "https://api.siliconflow.cn", "api_key": "", "model": "Qwen/Qwen2.5-7B-Instruct", "temperature": 0.7},
+            "groq": {"base_url": "https://api.groq.com/openai", "api_key": "", "model": "llama-3.1-8b-instant", "temperature": 0.7},
+            "together": {"base_url": "https://api.together.xyz", "api_key": "", "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "temperature": 0.7},
+            "perplexity": {"base_url": "https://api.perplexity.ai", "api_key": "", "model": "sonar", "temperature": 0.7},
+            "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-1.5-flash", "temperature": 0.7},
+            "lmstudio": {"base_url": "http://localhost:1234", "api_key": "lm-studio", "model": "", "temperature": 0.7},
+            "localai": {"base_url": "http://localhost:8080", "api_key": "", "model": "", "temperature": 0.7},
             "ollama": {"base_url": "http://localhost:11434", "api_key": "ollama", "model": "llama3", "temperature": 0.7},
             "prompts": {
                 "Default": "Translate the following text to English: {Source Field}",
@@ -94,6 +105,7 @@ class ConfigManager:
         if service_type not in self.config: self.config[service_type] = {}
         if provider_name not in self.config[service_type]: self.config[service_type][provider_name] = {}
         self.config[service_type][provider_name].update(provider_cfg)
+        self.config[service_type]["provider"] = provider_name
         self._save_config()
 
     def save_all(self, data: Dict[str, Any]):

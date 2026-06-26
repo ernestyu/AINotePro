@@ -21,7 +21,9 @@ class OpenAITextProvider(TextProvider):
     def _base(self, config: Dict) -> str:
         base = (config or {}).get("base_url", "").rstrip("/")
         # Ensure we do not double-append /v1 when user provided full path
-        return base + ("" if base.endswith("/v1") else "/v1")
+        if base.endswith("/v1") or base.endswith("/v1beta/openai"):
+            return base
+        return base + "/v1"
 
     def list_models(self, config: Dict) -> List[str]:
         try:

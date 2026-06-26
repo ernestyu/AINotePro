@@ -24,7 +24,7 @@ def add_ainotepro_button(buttons: List[Tuple[str, str]], editor: Editor) -> List
     def on_click(clicked_editor=None) -> None:
         active_editor = clicked_editor if hasattr(clicked_editor, "note") else editor
         note_id = _note_id_from_editor(active_editor)
-        show_ainotepro_dialog(browser=None, note_ids=[note_id] if note_id else None)
+        show_ainotepro_dialog(browser=None, note_ids=[note_id] if note_id else None, editor=active_editor)
 
     # Keep signature compatible across Anki versions: use positional args only.
     b = editor.addButton(None, "ainotepro", on_click, "AINotePro: Generate AI content")
