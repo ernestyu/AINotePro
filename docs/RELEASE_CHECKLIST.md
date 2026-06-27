@@ -14,7 +14,7 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Confirm the `Online` prompt button is disabled.
 - Use `Check` for at least one remote provider.
 - Confirm the last successful model is still selected after closing and reopening the dialog.
-- Generate TTS audio and confirm `[sound:...]` is appended to the configured field.
+- Generate audio and confirm `[sound:...]` is appended to the configured field.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.
@@ -93,6 +93,6 @@ Do not upload an archive whose contents are wrapped inside `AINotePro/`.
 ## 6. After upload
 
 - Install the add-on from AnkiWeb in a clean Anki profile.
-- Confirm startup, Browse menu, editor toolbar button, text generation, prompt save/load, and TTS.
+- Confirm startup, Browse menu, editor toolbar button, text generation, prompt save/delete, and audio generation.
 - Add the AnkiWeb code to `README.md`.
 - Tag the release in the source repository.

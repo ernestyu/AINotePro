@@ -1,6 +1,6 @@
 # Privacy Policy
 
-AINotePro does not run its own cloud service. It sends data only to the provider endpoints you configure or to the TTS service used by the add-on.
+AINotePro does not run its own cloud service. It sends data only to the provider endpoints you configure or to the audio generation service used by the add-on.
 
 ## Data sent for text generation
 
@@ -10,7 +10,7 @@ When you generate text, AINotePro sends the selected source field content and pr
 
 When image source mode is enabled, AINotePro may read an image referenced in the selected source field from Anki's media folder, encode it as Base64, and send it to the selected vision-capable LLM endpoint. It also accepts existing `data:image/...;base64,...` image data. The release build refuses to read `file://` images outside Anki's media folder, and remote image URLs are not fetched or forwarded.
 
-## Data sent for TTS
+## Data sent for audio generation
 
 When you generate speech, AINotePro sends the selected source field text to Edge TTS and stores the returned MP3 audio in your Anki media collection.
 

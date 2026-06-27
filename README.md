@@ -1,6 +1,6 @@
 # AINotePro
 
-AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
+AINotePro is an Anki add-on for adding AI-generated text and audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
 ## Features
 
@@ -11,7 +11,7 @@ AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audi
 - Refresh available models when the provider exposes a models endpoint.
 - Remember the last provider settings and the last model that generated successfully.
 - Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
-- Generate MP3 audio with Edge TTS and append Anki `[sound:...]` references to the selected destination field.
+- Generate MP3 audio and append Anki `[sound:...]` references to the selected destination field. The current audio provider is Edge TTS.
 - Process one selected note or multiple selected notes from the Browser.
 
 ## Requirements
@@ -50,9 +50,9 @@ The AnkiWeb code will be available after the add-on is published.
 6. Choose the source and destination fields.
 7. Click `Generate`.
 
-For TTS:
+For Audio:
 
-1. Open the `TTS` tab.
+1. Open the `Audio` tab.
 2. Select a language and enable at least one voice.
 3. Choose source and destination fields.
 4. Click `Generate`.
@@ -63,7 +63,7 @@ AINotePro appends generated audio to the destination field as an Anki sound refe
 
 Prompt templates are stored in the add-on's `user_files` folder. Anki preserves this folder during add-on upgrades, so prompts and local settings are not erased when the add-on is updated.
 
-Use the prompt name field to select an existing prompt or type a new name. `Save` stores the current prompt text under that name. `Load` replaces the prompt editor with the selected template. `Delete` removes the selected template.
+Use the prompt name field to select an existing prompt or type a new name. Selecting a prompt loads it automatically. `Save` stores the current prompt text under that name. `Delete` removes the selected template.
 
 The `Online` prompt sharing button is currently disabled; shared prompt publishing is not implemented in this release.
 
@@ -106,7 +106,7 @@ API keys and provider settings are stored locally in the add-on's `user_files/us
 - If image OCR fails with a server error, confirm that the exact endpoint accepts image inputs, not only text chat completions.
 - If image OCR reports a remote image URL, download the image and add it to Anki media first.
 - If model refresh fails, type the model name manually and use `Check`.
-- If TTS does not append audio, confirm that a voice is enabled and the destination field exists on the selected note type.
+- If audio is not appended, confirm that a voice is enabled and the destination field exists on the selected note type.
 - For local providers, confirm that the local server is running and reachable from Anki.
 
 ## Support

@@ -1,6 +1,6 @@
 # AINotePro - AnkiWeb Description Draft
 
-AINotePro adds AI-assisted text generation and text-to-speech tools to Anki's Browse window and editor.
+AINotePro adds AI-assisted text and audio generation tools to Anki's Browse window and editor.
 
 ## What it does
 
@@ -21,7 +21,7 @@ AINotePro adds AI-assisted text generation and text-to-speech tools to Anki's Br
 
 ## Privacy note
 
-AINotePro sends selected note text to the provider you configure. If image source mode is enabled, images from the selected field may be encoded as Base64 and sent to that provider. The add-on refuses to read `file://` images outside Anki's media folder by default. TTS generation sends selected text to Edge TTS. Please review your provider's privacy policy before using the add-on with sensitive notes.
+AINotePro sends selected note text to the provider you configure. If image source mode is enabled, images from the selected field may be encoded as Base64 and sent to that provider. The add-on refuses to read `file://` images outside Anki's media folder by default. Audio generation sends selected text to Edge TTS. Please review your provider's privacy policy before using the add-on with sensitive notes.
 
 ## Support
 

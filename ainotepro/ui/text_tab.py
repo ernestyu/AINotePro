@@ -291,8 +291,11 @@ class TextTab(QWidget):
 
         # Prompt preview
         layout.addWidget(QLabel("<b>Prompt Preview</b>"))
-        self.prompt_edit = QTextEdit(); self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)); 
-        self.prompt_edit.setPlaceholderText('Prompt中必须包含“{Source Field}”占位符，以便正确替换和生成内容。')
+        self.prompt_edit = QTextEdit()
+        self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred))
+        self.prompt_edit.setMinimumHeight(120)
+        self.prompt_edit.setMaximumHeight(170)
+        self.prompt_edit.setPlaceholderText('Prompt must contain "{Source Field}" so the selected source field can be inserted.')
         layout.addWidget(self.prompt_edit)
 
         # Prompt list + buttons

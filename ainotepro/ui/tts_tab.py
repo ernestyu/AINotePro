@@ -7,7 +7,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
     QLineEdit, QSlider, QGroupBox, QSizePolicy, QToolButton, QFrame, Qt, QProgressDialog,
-    QMessageBox
+    QMessageBox, QScrollArea
 )
 from aqt.utils import showInfo, showWarning
 from ..config.manager import ConfigManager
@@ -30,24 +30,37 @@ class TTSTab(QWidget):
         self._load_settings()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
 
-        title = QLabel('<div style="font-size:14px; font-weight:900;">Configure Text-to-Speech (TTS) Settings</div>')
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        try:
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+        except Exception:
+            scroll.setFrameShape(QFrame.NoFrame)
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        title = QLabel('<div style="font-size:14px; font-weight:900;">Generate audio from a note field</div>')
         fixed_policy = getattr(QSizePolicy, "Fixed", QSizePolicy.Policy.Fixed)
         title.setSizePolicy(fixed_policy, fixed_policy)
         layout.addWidget(title)
 
         # header
-        h = QHBoxLayout(); h.addWidget(QLabel("Generate using"))
+        h = QHBoxLayout(); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(6); h.addWidget(QLabel("Generate using"))
         self.generate_combo = QComboBox(); self.generate_combo.addItem("Edge-TTS")
-        h.addWidget(self.generate_combo)
+        h.addWidget(self.generate_combo, 1)
         h.addWidget(QLabel("Language:"))
         self.language_combo = QComboBox(); self.language_combo.addItem("English")
-        h.addWidget(self.language_combo)
+        h.addWidget(self.language_combo, 1)
         layout.addLayout(h)
 
         # API Key
-        ak = QHBoxLayout(); ak.addWidget(QLabel("API Key                   "))
+        ak = QHBoxLayout(); ak.setContentsMargins(0, 0, 0, 0); ak.setSpacing(6); ak.addWidget(QLabel("API Key"))
         self.api_key_edit = QLineEdit(); self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("🔒")
         try:
             self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -64,20 +77,26 @@ class TTSTab(QWidget):
         self.voice_blocks: List[dict] = []
         for idx in range(1, 4):
             box = QGroupBox(f"Voice {idx}")
+            box.setMinimumHeight(112)
             vb = QVBoxLayout()
+            vb.setContentsMargins(10, 8, 10, 8)
+            vb.setSpacing(6)
 
             row1 = QHBoxLayout(); cb = QCheckBox(f"Enable Voice {idx}")
+            row1.setContentsMargins(0, 0, 0, 0); row1.setSpacing(6)
             voice_combo = QComboBox(); voice_combo.setEditable(True); voice_combo.addItem("en-US-AriaNeural")
+            voice_combo.setMinimumWidth(150)
             preview_text = QLineEdit(); preview_text.setPlaceholderText("Type a phrase to test...")
             preview_btn = QPushButton("Preview")
             preview_btn.clicked.connect(lambda _, c=cb, v=voice_combo, t=preview_text: self._preview_voice(c, v, t))
             row1.addWidget(cb); row1.addWidget(voice_combo); row1.addWidget(preview_text); row1.addWidget(preview_btn)
 
             row2 = QHBoxLayout()
-            row2.addWidget(QLabel("Gender:")); gender_combo = QComboBox(); gender_combo.addItems(["Female", "Male"]) ; row2.addWidget(gender_combo)
-            row2.addWidget(QLabel("Speed:")); sp = QSlider(Qt.Orientation.Horizontal); sp.setRange(-50, 50); sp.setValue(0); row2.addWidget(sp)
-            row2.addWidget(QLabel("Volume:")); vol = QSlider(Qt.Orientation.Horizontal); vol.setRange(-50, 50); vol.setValue(0); row2.addWidget(vol)
-            row2.addWidget(QLabel("Pitch:")); pit = QSlider(Qt.Orientation.Horizontal); pit.setRange(-50, 50); pit.setValue(0); row2.addWidget(pit)
+            row2.setContentsMargins(0, 0, 0, 0); row2.setSpacing(6)
+            row2.addWidget(QLabel("Gender:")); gender_combo = QComboBox(); gender_combo.addItems(["Female", "Male"]) ; row2.addWidget(gender_combo, 1)
+            row2.addWidget(QLabel("Speed:")); sp = QSlider(Qt.Orientation.Horizontal); sp.setRange(-50, 50); sp.setValue(0); row2.addWidget(sp, 2)
+            row2.addWidget(QLabel("Volume:")); vol = QSlider(Qt.Orientation.Horizontal); vol.setRange(-50, 50); vol.setValue(0); row2.addWidget(vol, 2)
+            row2.addWidget(QLabel("Pitch:")); pit = QSlider(Qt.Orientation.Horizontal); pit.setRange(-50, 50); pit.setValue(0); row2.addWidget(pit, 2)
 
             vb.addLayout(row1); vb.addLayout(row2); box.setLayout(vb); layout.addWidget(box)
             self.voice_blocks.append({"enable": cb, "voice": voice_combo, "preview": preview_text, "speed": sp, "volume": vol, "pitch": pit, "gender": gender_combo})
@@ -85,10 +104,11 @@ class TTSTab(QWidget):
         # Fields and handling
         field_sep = QFrame(); field_sep.setFrameShape(getattr(QFrame, "HLine", QFrame.Shape.HLine)); field_sep.setFrameShadow(getattr(QFrame, "Sunken", QFrame.Shadow.Sunken))
         layout.addWidget(field_sep)
-        fr = QHBoxLayout(); fr.addWidget(QLabel("Source Field:")); self.src_combo = QComboBox(); fr.addWidget(self.src_combo)
-        fr.addWidget(QLabel("Destination Field:")); self.dst_combo = QComboBox(); fr.addWidget(self.dst_combo); layout.addLayout(fr)
+        fr = QHBoxLayout(); fr.setContentsMargins(0, 0, 0, 0); fr.setSpacing(6); fr.addWidget(QLabel("Source Field:")); self.src_combo = QComboBox(); fr.addWidget(self.src_combo, 1)
+        fr.addWidget(QLabel("Destination Field:")); self.dst_combo = QComboBox(); fr.addWidget(self.dst_combo, 1); layout.addLayout(fr)
 
-        self.setLayout(layout)
+        scroll.setWidget(content)
+        root_layout.addWidget(scroll)
         # react to language/gender changes
         self.language_combo.currentIndexChanged.connect(self._update_all_voices)
         for blk in self.voice_blocks:
@@ -272,9 +292,9 @@ class TTSTab(QWidget):
         if not self._confirm_write_risk(note_ids, src, dst):
             return
         provider = create_provider("audio", "edge_tts", {})
-        progress = QProgressDialog("Generating TTS...", "Cancel", 0, len(note_ids), self); progress.setWindowTitle("TTS"); progress.show()
+        progress = QProgressDialog("Generating audio...", "Cancel", 0, len(note_ids), self); progress.setWindowTitle("Audio"); progress.show()
         updated = 0
-        create_undo_checkpoint("AINotePro TTS generation")
+        create_undo_checkpoint("AINotePro audio generation")
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled(): break
             note = self._editor_note_for_id(nid) or mw.col.get_note(nid)
@@ -303,7 +323,7 @@ class TTSTab(QWidget):
             mw.reset()
         except Exception:
             pass
-        progress.close(); showInfo(f"TTS complete. Updated {updated} notes.")
+        progress.close(); showInfo(f"Audio complete. Updated {updated} notes.")
 
     def _confirm_write_risk(self, note_ids: list[int], src: str, dst: str) -> bool:
         risky = []
@@ -316,7 +336,7 @@ class TTSTab(QWidget):
         message = "\n".join(risky) + "\n\nContinue?"
         return QMessageBox.question(
             self,
-            "Confirm AINotePro TTS",
+            "Confirm AINotePro Audio",
             message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         ) == QMessageBox.StandardButton.Yes

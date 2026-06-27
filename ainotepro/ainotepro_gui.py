@@ -1,4 +1,4 @@
-"""Main tabbed dialog (Text / TTS)."""
+"""Main tabbed dialog (Text / Audio)."""
 
 from aqt.qt import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
@@ -17,7 +17,8 @@ class AiNoteProConfigDialog(QDialog):
         self.note_ids = list(note_ids or [])
         self.editor = editor
         self.setWindowTitle("AINotePro")
-        self.resize(800, 600)
+        self.resize(760, 620)
+        self.setMinimumSize(680, 520)
 
         main_layout = QVBoxLayout(self)
 
@@ -39,7 +40,7 @@ class AiNoteProConfigDialog(QDialog):
 
         self.tabs = {
             "Text": TextTab(parent=self, browser=browser, note_ids=self.note_ids, editor=editor),
-            "TTS": TTSTab(parent=self, browser=browser, note_ids=self.note_ids, editor=editor),
+            "Audio": TTSTab(parent=self, browser=browser, note_ids=self.note_ids, editor=editor),
         }
         for name, tab in self.tabs.items():
             self.tab_widget.addTab(tab, name)
