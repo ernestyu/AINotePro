@@ -2,11 +2,38 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from typing import Any, Dict
 
 ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-USER_DATA_DIR = os.path.join(ADDON_ROOT, "user_data")
-CONFIG_FILE = os.path.join(USER_DATA_DIR, "user_config.json")
+USER_FILES_DIR = os.path.join(ADDON_ROOT, "user_files")
+LEGACY_USER_DATA_DIR = os.path.join(ADDON_ROOT, "user_data")
+CONFIG_FILE = os.path.join(USER_FILES_DIR, "user_config.json")
+
+
+def _copy_missing_tree(src: str, dst: str) -> None:
+    for root, dirs, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        target_root = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(target_root, exist_ok=True)
+        for dirname in dirs:
+            os.makedirs(os.path.join(target_root, dirname), exist_ok=True)
+        for filename in files:
+            src_file = os.path.join(root, filename)
+            dst_file = os.path.join(target_root, filename)
+            if not os.path.exists(dst_file):
+                shutil.copy2(src_file, dst_file)
+
+
+def migrate_legacy_user_data() -> None:
+    """Move pre-release user_data files into Anki's upgrade-safe user_files."""
+    os.makedirs(USER_FILES_DIR, exist_ok=True)
+    if not os.path.isdir(LEGACY_USER_DATA_DIR):
+        return
+    try:
+        _copy_missing_tree(LEGACY_USER_DATA_DIR, USER_FILES_DIR)
+    except Exception as e:
+        print(f"[AINotePro] Failed to migrate user_data to user_files: {e}")
 
 
 def _get_default_config() -> Dict[str, Any]:
@@ -14,6 +41,8 @@ def _get_default_config() -> Dict[str, Any]:
     return {
         "text": {
             "provider": "openai",
+            "debug_logging": False,
+            "allow_remote_image_urls": False,
             "openai": {"base_url": "https://api.openai.com", "api_key": "", "model": "gpt-4o-mini", "temperature": 0.7},
             "deepseek": {"base_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat", "temperature": 0.7},
             "openrouter": {"base_url": "https://openrouter.ai/api", "api_key": "", "model": "openai/gpt-4o-mini", "temperature": 0.7},
@@ -72,7 +101,8 @@ class ConfigManager:
 
     def _load_config(self) -> Dict[str, Any]:
         """Loads config from file, or creates a default one if it doesn't exist."""
-        os.makedirs(USER_DATA_DIR, exist_ok=True)
+        migrate_legacy_user_data()
+        os.makedirs(USER_FILES_DIR, exist_ok=True)
         if not os.path.exists(CONFIG_FILE):
             print(f"[AINotePro] Config file not found. Creating default at {CONFIG_FILE}")
             default_config = _get_default_config()

@@ -278,9 +278,8 @@ class MainDialog(QDialog):
             return None
 
     def _get_img_hosting(self) -> tuple[Optional[str], Optional[str]]:
-        settings_file = os.path.abspath(os.path.join(
-            os.path.dirname(__file__), "..", "user_data", "gen_text", "img_hosting.json"
-        ))
+        from ..config.manager import USER_FILES_DIR
+        settings_file = os.path.join(USER_FILES_DIR, "gen_text", "img_hosting.json")
         if not os.path.exists(settings_file):
             return None, None
         try:

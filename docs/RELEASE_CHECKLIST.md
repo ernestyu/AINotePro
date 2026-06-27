@@ -16,6 +16,9 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Confirm the last successful model is still selected after closing and reopening the dialog.
 - Generate TTS audio and confirm `[sound:...]` is appended to the configured field.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
+- Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
+- Confirm failed text generation does not write `[Error]` into destination fields.
+- Confirm image OCR refuses `file://` paths outside Anki's media folder.
 
 ## 2. Documentation checks
 
@@ -24,7 +27,8 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Update `changelog.md`.
 - Confirm the support URL works.
 - Confirm privacy wording still matches the actual network behavior.
-- Choose and add a license file before public release if the repository is intended to be open source.
+- Confirm `LICENSE` and `THIRD_PARTY_NOTICES.md` are still accurate.
+- Confirm every vendored dependency in `libs/` includes its license text or distribution metadata.
 
 ## 3. Clean files before packaging
 
@@ -34,6 +38,8 @@ Remove generated and local-only files from the package:
 - `*.pyc`
 - `*.pyo`
 - `user_data/`
+- `user_files/user_config.json`
+- `user_files/gen_text/`
 - `ainotepro/logs/`
 - `.git/`
 - `.DS_Store`
@@ -49,7 +55,7 @@ From the add-on root:
 ```bash
 find . -name "__pycache__" -type d -prune -exec rm -rf {} +
 zip -r ../AINotePro.ankiaddon * \
-  -x "user_data/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+  -x "user_data/*" "user_files/user_config.json" "user_files/gen_text/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
 ```
 
 Verify the archive layout:
@@ -66,6 +72,7 @@ ainotepro/...
 libs/...
 manifest.json
 README.md
+user_files/README.txt
 ```
 
 Do not upload an archive whose contents are wrapped inside `AINotePro/`.

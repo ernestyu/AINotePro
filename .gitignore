@@ -1,5 +1,7 @@
 # Ignore user-generated data
 user_data/
+user_files/*
+!user_files/README.txt
 
 # Ignore local model files
 local_models/
@@ -17,5 +19,6 @@ env/
 .idea/
 
 # OS-generated metadata files
-.DS_Store
+*.DS_Store
 Thumbs.db
+meta.json

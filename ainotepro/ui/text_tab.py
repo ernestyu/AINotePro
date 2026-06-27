@@ -15,17 +15,16 @@ from aqt.qt import (
 )
 from aqt.utils import showInfo, showWarning
 
-from ..config.manager import ConfigManager
+from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
-from ..core.utils import update_field_content
+from ..core.utils import create_undo_checkpoint, update_field_content
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
 # user_config.json so they survive the normal add-on settings flow.
 ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-USER_DATA_DIR = os.path.join(ADDON_ROOT, "user_data")
-PROMPT_DIR = os.path.join(USER_DATA_DIR, "gen_text")
+PROMPT_DIR = os.path.join(USER_FILES_DIR, "gen_text")
 PROMPT_FILE = os.path.join(PROMPT_DIR, "prompt.json")
-USER_CONFIG_FILE = os.path.join(USER_DATA_DIR, "user_config.json")
+USER_CONFIG_FILE = CONFIG_FILE
 ROOT_CONFIG_FILE = os.path.join(ADDON_ROOT, "config.json")
 DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
@@ -80,6 +79,7 @@ def _extract_prompts(data: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _load_prompts() -> Dict[str, str]:
+    migrate_legacy_user_data()
     prompts: Dict[str, str] = dict(DEFAULT_PROMPTS)
 
     root_cfg = _read_json_file(ROOT_CONFIG_FILE)
@@ -216,6 +216,8 @@ class TextTab(QWidget):
         self._is_updating_prompt_combo = False
         self._generation_update_count = 0
         self._generation_success_count = 0
+        self._generation_failure_count = 0
+        self._generation_failures: list[str] = []
 
         self._build_ui()
         self._load_note_fields()
@@ -638,6 +640,8 @@ class TextTab(QWidget):
             showWarning("Prompt Preview is empty."); return
         if not src or not dst:
             showWarning("Source/Destination field is not set."); return
+        if not self._confirm_write_risk(note_ids, src, dst):
+            return
 
         st = "text"; pv = self._service_map(); provider = create_provider(st, pv, {})
         # If image-assisted is enabled, fall back to per-note flow for correctness
@@ -648,6 +652,7 @@ class TextTab(QWidget):
                 mw.progress.start(label="Generating responses...", max=len(note_ids))
             except Exception:
                 pass
+            create_undo_checkpoint("AINotePro text generation")
             for i, nid in enumerate(note_ids):
                 note = mw.col.get_note(nid)
                 if src not in note: continue
@@ -738,6 +743,7 @@ class TextTab(QWidget):
         self.worker.progressUpdated.connect(progress.setValue)
         self.worker.resultReady.connect(self._apply_generated_text_result)
         progress.canceled.connect(self.worker.cancel)
+        create_undo_checkpoint("AINotePro text generation")
 
         def on_finish(message):
             progress.setValue(len(items))
@@ -747,7 +753,12 @@ class TextTab(QWidget):
                 pass
             if self._generation_success_count:
                 self._save_current_provider_config()
-            showInfo(f"{message} Updated {self._generation_update_count} notes.")
+            summary = f"{message} Updated {self._generation_update_count} notes."
+            if self._generation_failure_count:
+                summary += f"\n\nSkipped/failed: {self._generation_failure_count}"
+                if self._generation_failures:
+                    summary += "\n" + "\n".join(self._generation_failures[:5])
+            showInfo(summary)
 
         self.worker.finished.connect(on_finish)
         self.thread.finished.connect(lambda: setattr(self, "_generation_update_count", 0))
@@ -755,19 +766,45 @@ class TextTab(QWidget):
         # Start the thread
         self._generation_update_count = 0
         self._generation_success_count = 0
+        self._generation_failure_count = 0
+        self._generation_failures = []
         self.thread.start()
 
     # Helpers
+    def _confirm_write_risk(self, note_ids: list[int], src: str, dst: str) -> bool:
+        risky = []
+        if src == dst:
+            risky.append("The source and destination fields are the same.")
+        if len(note_ids) > 1:
+            risky.append(f"This will update {len(note_ids)} selected notes.")
+        if not risky:
+            return True
+        message = "\n".join(risky) + "\n\nContinue?"
+        return QMessageBox.question(
+            self,
+            "Confirm AINotePro generation",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
+
+    def _is_generation_failure(self, result: Any) -> bool:
+        result_text = str(result or "").strip()
+        return not result_text or result_text.startswith("[Error]") or result_text == "[Cancelled]"
+
     def _apply_generated_text_result(self, payload) -> None:
         nid, dst, result = payload
         try:
+            if self._is_generation_failure(result):
+                self._generation_failure_count += 1
+                result_text = str(result or "").strip() or "empty response"
+                self._generation_failures.append(f"Note {nid}: {result_text}")
+                print(f"[AINotePro] Skipped note {nid}; generation returned no usable content.")
+                return
             editor_note = self._editor_note_for_id(nid)
             note = editor_note or mw.col.get_note(nid)
             update_field_content(note, dst, result)
             self._generation_update_count += 1
-            result_text = str(result or "").strip()
-            if result_text and not result_text.startswith("[Error]") and result_text != "[Cancelled]":
-                self._generation_success_count += 1
+            self._generation_success_count += 1
             print(f"[AINotePro] Updated note {nid} field '{dst}' on main thread.")
             self._refresh_editor_note(nid)
         except Exception as e:
@@ -830,7 +867,10 @@ class TextTab(QWidget):
 
         parsed = urlparse(raw_src)
         if parsed.scheme in ("http", "https"):
-            return raw_src, None
+            allow_remote = bool(self.cfg.get_all().get("text", {}).get("allow_remote_image_urls", False))
+            if allow_remote:
+                return raw_src, None
+            return None, "Remote image URLs are disabled for privacy. Use an Anki media image or enable allow_remote_image_urls in config."
 
         if parsed.scheme == "file":
             path = unquote(parsed.path)
@@ -839,14 +879,23 @@ class TextTab(QWidget):
             src = src.lstrip("/")
             path = os.path.join(mw.col.media.dir(), src)
 
-        if not os.path.exists(path):
+        media_dir = os.path.realpath(mw.col.media.dir())
+        real_path = os.path.realpath(path)
+        try:
+            is_media_file = os.path.commonpath([media_dir, real_path]) == media_dir
+        except ValueError:
+            is_media_file = False
+        if not is_media_file:
+            return None, "Refusing to read an image outside the Anki media folder"
+
+        if not os.path.exists(real_path):
             return None, f"Image file not found: {raw_src}"
 
         try:
-            with open(path, "rb") as image_file:
+            with open(real_path, "rb") as image_file:
                 base64_image = base64.b64encode(image_file.read()).decode('utf-8')
             
-            mime_type, _ = mimetypes.guess_type(path)
+            mime_type, _ = mimetypes.guess_type(real_path)
             if not mime_type:
                 mime_type = "image/png" # Default if type can't be guessed
             

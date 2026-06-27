@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import requests
 from typing import Dict
 from ..base import TextProvider, remove_think_tags, clean_html_output
@@ -9,6 +10,9 @@ from ..base import TextProvider, remove_think_tags, clean_html_output
 class OllamaTextProvider(TextProvider):
     def _base(self, config: Dict) -> str:
         return (config or {}).get("base_url", "http://localhost:11434").rstrip("/")
+
+    def _debug_enabled(self, config: Dict) -> bool:
+        return bool((config or {}).get("debug_logging")) or os.environ.get("AINOTEPRO_DEBUG") == "1"
 
     def generate(self, prompt: str, config: Dict) -> str:
         # Use Ollama's native /api/chat endpoint (non-stream) and parse message.content
@@ -19,17 +23,17 @@ class OllamaTextProvider(TextProvider):
             "stream": False,
             "options": {"temperature": (config or {}).get("temperature", 0.7)},
         }
-        print(f"[AINotePro] POST {url}")
+        print(f"[AINotePro] POST {url} model={body.get('model')}")
         try:
             import json as _json
-            first_msg = body.get("messages", [{}])[0].get("content", "")
-            preview = (first_msg[:200] + "…") if len(first_msg) > 200 else first_msg
-            print("[AINotePro] body:", _json.dumps({
+            metadata = {
                 "model": body.get("model"),
                 "messages": len(body.get("messages", [])),
                 "stream": body.get("stream"),
-                "content_preview": preview,
-            }, ensure_ascii=False))
+            }
+            if self._debug_enabled(config):
+                metadata["prompt_length"] = len(prompt or "")
+            print("[AINotePro] body:", _json.dumps(metadata, ensure_ascii=False))
         except Exception:
             pass
 
@@ -39,7 +43,7 @@ class OllamaTextProvider(TextProvider):
         data = r.json() or {}
         msg = (data.get("message") or {}).get("content", "")
         content = (msg or "").strip()
-        print(f"[AINotePro] Response content: {(content[:400] + '...') if len(content) > 400 else content}")
+        print(f"[AINotePro] Response received: chars={len(content)}")
         return clean_html_output(remove_think_tags(content))
 
     def list_models(self, config: Dict) -> list[str]:
@@ -78,12 +82,11 @@ class OllamaTextProvider(TextProvider):
             try:
                 r.raise_for_status()
             except Exception:
-                error_text = r.text[:1000]
-                print(f"[AINotePro] Ollama vision request failed with HTTP {r.status_code}: {error_text}")
-                raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
+                print(f"[AINotePro] Ollama vision request failed with HTTP {r.status_code}")
+                raise RuntimeError(f"HTTP {r.status_code}") from None
             data = r.json() or {}
             content = ((data.get("message") or {}).get("content") or "").strip()
-            print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+            print(f"[AINotePro] Vision response received: chars={len(content)}")
             return clean_html_output(remove_think_tags(content))
 
         if "/api" in base:
@@ -123,10 +126,9 @@ class OllamaTextProvider(TextProvider):
         try:
             r.raise_for_status()
         except Exception:
-            error_text = r.text[:1000]
-            print(f"[AINotePro] OpenAI-compatible Ollama vision request failed with HTTP {r.status_code}: {error_text}")
-            raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
+            print(f"[AINotePro] OpenAI-compatible Ollama vision request failed with HTTP {r.status_code}")
+            raise RuntimeError(f"HTTP {r.status_code}") from None
         data = r.json() or {}
         content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-        print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+        print(f"[AINotePro] Vision response received: chars={len(content)}")
         return clean_html_output(remove_think_tags(content))

@@ -21,6 +21,7 @@ AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audi
 - A compatible API key is required for paid or hosted LLM providers.
 - Ollama, LM Studio, and LocalAI require a local server to be running before generation.
 - Image OCR requires a vision-capable model and an endpoint that accepts OpenAI-style `image_url` message parts. Some servers expose the same model name in a text-only endpoint; in that case OCR will fail even if another UI can use a vision variant.
+- For privacy, image OCR reads local files only from Anki's media folder by default. Remote image URLs are disabled unless `allow_remote_image_urls` is manually enabled in `config.json`.
 
 ## Installation
 
@@ -60,7 +61,7 @@ AINotePro appends generated audio to the destination field as an Anki sound refe
 
 ## Prompt Templates
 
-Prompt templates are stored in the add-on's `user_data` folder. They can also be mirrored into the add-on configuration file so normal settings saves do not erase them.
+Prompt templates are stored in the add-on's `user_files` folder. Anki preserves this folder during add-on upgrades, so prompts and local settings are not erased when the add-on is updated.
 
 Use the prompt name field to select an existing prompt or type a new name. `Save` stores the current prompt text under that name. `Load` replaces the prompt editor with the selected template. `Delete` removes the selected template.
 
@@ -97,7 +98,7 @@ AINotePro sends selected note field content to the provider you configure. If im
 
 Do not use the add-on with private, medical, legal, or confidential notes unless you understand and accept the privacy policy of the selected provider.
 
-API keys and provider settings are stored locally in the add-on's `user_data/user_config.json`.
+API keys and provider settings are stored locally in the add-on's `user_files/user_config.json`.
 
 ## Troubleshooting
 
@@ -120,6 +121,10 @@ When reporting a bug, include:
 - Whether the issue happens from the Browse menu, editor toolbar button, or both.
 - The exact error message from Anki, if any.
 
+## License
+
+AINotePro is released under the MIT License. Vendored third-party dependencies keep their own licenses; see `THIRD_PARTY_NOTICES.md` and the metadata files in `libs/`.
+
 ## Development
 
 The add-on entry point is `__init__.py`. The current user-facing dialog lives in `ainotepro/ainotepro_gui.py`, with tab implementations in `ainotepro/ui/text_tab.py` and `ainotepro/ui/tts_tab.py`.
@@ -135,7 +140,7 @@ Build a package from the add-on root:
 ```bash
 find . -name "__pycache__" -type d -prune -exec rm -rf {} +
 zip -r ../AINotePro.ankiaddon * \
-  -x "user_data/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+  -x "user_data/*" "user_files/user_config.json" "user_files/gen_text/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
 ```
 
 The generated zip must contain `__init__.py` at the top level. Do not include the parent `AINotePro/` folder inside the archive.

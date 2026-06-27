@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import requests
 from typing import Dict, List
 from ..base import TextProvider, remove_think_tags, clean_html_output
@@ -25,15 +26,14 @@ class OpenAITextProvider(TextProvider):
             return base
         return base + "/v1"
 
+    def _debug_enabled(self, config: Dict) -> bool:
+        return bool((config or {}).get("debug_logging")) or os.environ.get("AINOTEPRO_DEBUG") == "1"
+
     def list_models(self, config: Dict) -> List[str]:
         try:
             url = f"{self._base(config)}/models"
             headers = self._headers(config)
-            safe_key = (config or {}).get("api_key")
-            if safe_key:
-                safe_key = safe_key[:6] + "…" + safe_key[-4:]
             print(f"[AINotePro] GET {url}")
-            print(f"[AINotePro] headers: Authorization: Bearer {safe_key or '(none)'}")
             r = requests.get(url, headers=headers, timeout=12)
             r.raise_for_status()
             data = r.json()
@@ -55,19 +55,13 @@ class OpenAITextProvider(TextProvider):
 
         url = f"{self._base(config)}/chat/completions"
         headers = self._headers(config)
-        safe_key = (config or {}).get("api_key")
-        if safe_key:
-            safe_key = safe_key[:6] + "…" + safe_key[-4:]
-        print(f"[AINotePro] POST {url}")
-        print(f"[AINotePro] headers: Authorization: Bearer {safe_key or '(none)'}")
+        print(f"[AINotePro] POST {url} model={body.get('model')}")
         try:
             import json as _json
-            # Log a preview of the message content for better debugging
-            content_preview = ""
-            if body.get("messages"):
-                content_preview = (body["messages"][0].get("content", "") or "")
-                content_preview = (content_preview[:200] + "...") if len(content_preview) > 200 else content_preview
-            print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "temperature": body.get("temperature"), "stream": body.get("stream"), "content_preview": content_preview}, ensure_ascii=False))
+            metadata = {"model": body.get("model"), "temperature": body.get("temperature"), "stream": body.get("stream")}
+            if self._debug_enabled(config):
+                metadata["prompt_length"] = len(prompt or "")
+            print("[AINotePro] body:", _json.dumps(metadata, ensure_ascii=False))
         except Exception:
             pass
 
@@ -83,7 +77,7 @@ class OpenAITextProvider(TextProvider):
         if not choices or not isinstance(choices, list): return ""
         message = choices[0].get("message", {})
         content = (message.get("content", "") or "").strip()
-        print(f"[AINotePro] Response content: {(content[:400] + '...') if len(content) > 400 else content}")
+        print(f"[AINotePro] Response received: chars={len(content)}")
         return clean_html_output(remove_think_tags(content))
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
@@ -104,7 +98,7 @@ class OpenAITextProvider(TextProvider):
 
         url = f"{self._base(config)}/chat/completions"
         headers = self._headers(config)
-        print(f"[AINotePro] POST {url} (vision)")
+        print(f"[AINotePro] POST {url} (vision) model={body.get('model')}")
         try:
             import json as _json
             print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "stream": body.get("stream"), "content_parts": len(body.get("messages", [{}])[0].get("content", []))}, ensure_ascii=False))
@@ -114,9 +108,8 @@ class OpenAITextProvider(TextProvider):
         try:
             r.raise_for_status()
         except Exception:
-            error_text = r.text[:1000]
-            print(f"[AINotePro] Vision request failed with HTTP {r.status_code}: {error_text}")
-            raise RuntimeError(f"HTTP {r.status_code}: {error_text}") from None
+            print(f"[AINotePro] Vision request failed with HTTP {r.status_code}")
+            raise RuntimeError(f"HTTP {r.status_code}") from None
         data = r.json()
         choices = data.get("choices", [])
         if not choices:
@@ -127,5 +120,5 @@ class OpenAITextProvider(TextProvider):
         if not choices or not isinstance(choices, list): return ""
         message = choices[0].get("message", {})
         content = (message.get("content", "") or "").strip()
-        print(f"[AINotePro] Response content (vision): {(content[:400] + '...') if len(content) > 400 else content}")
+        print(f"[AINotePro] Vision response received: chars={len(content)}")
         return clean_html_output(remove_think_tags(content))

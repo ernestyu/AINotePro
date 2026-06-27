@@ -1,6 +1,8 @@
 {
   "text": {
     "provider": "openai",
+    "debug_logging": false,
+    "allow_remote_image_urls": false,
     "openai": {
       "base_url": "https://api.openai.com",
       "api_key": "",

@@ -41,3 +41,12 @@ def update_field_content(note, field_name: str, content: str) -> None:
     note[field_name] = content
     note.col.update_note(note)
 
+
+def create_undo_checkpoint(label: str) -> None:
+    """Best-effort undo checkpoint for direct note edits."""
+    checkpoint = getattr(mw, "checkpoint", None)
+    if callable(checkpoint):
+        try:
+            checkpoint(label)
+        except Exception as e:
+            print(f"[AINotePro] Failed to create undo checkpoint: {e}")

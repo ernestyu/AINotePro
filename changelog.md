@@ -9,6 +9,11 @@
 - Added last successful model persistence.
 - Added optional image-source mode for vision-capable models.
 - Added Edge TTS audio generation with Anki `[sound:...]` field insertion.
+- Moved local settings and prompt templates to Anki's upgrade-safe `user_files` folder.
+- Disabled prompt/response body logging by default for release privacy.
+- Prevented failed text generations from writing `[Error]` text into note fields.
+- Restricted image OCR file reads to Anki's media folder by default.
+- Added write confirmations and undo checkpoints for multi-note or same-field generation.
 - Fixed editor toolbar launch behavior.
 - Fixed single-note field update behavior by applying generated results on Anki's main thread.
 - Fixed TTS field insertion when opened from the editor toolbar.

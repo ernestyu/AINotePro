@@ -6,14 +6,15 @@ from typing import List
 from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
-    QLineEdit, QSlider, QGroupBox, QSizePolicy, QToolButton, QFrame, Qt, QProgressDialog
+    QLineEdit, QSlider, QGroupBox, QSizePolicy, QToolButton, QFrame, Qt, QProgressDialog,
+    QMessageBox
 )
 from aqt.utils import showInfo, showWarning
 from ..config.manager import ConfigManager
 from ..gen_audio.models.edge_tts.tts_handler import get_languages, get_voices
 
 from ..services.provider_factory import create_provider
-from ..core.utils import add_audio_to_media_collection, get_field_content, update_field_content
+from ..core.utils import add_audio_to_media_collection, create_undo_checkpoint, get_field_content, update_field_content
 
 
 class TTSTab(QWidget):
@@ -253,8 +254,7 @@ class TTSTab(QWidget):
         voice = voice_combo.currentData() or voice_combo.currentText().strip() or "en-US-AriaNeural"
         provider = create_provider("audio", "edge_tts", {})
         try:
-            preview_snippet = (text[:60] + "…") if len(text) > 60 else text
-            print(f"[AINotePro][TTS Preview] voice={voice}, text_len={len(text)}, text=\"{preview_snippet}\"")
+            print(f"[AINotePro][TTS Preview] voice={voice}, text_len={len(text)}")
             data = provider.generate(text, {"voice": voice, "speed": 0, "volume": 0, "pitch": 0})
             # play via Anki after writing to temp media
             fname = add_audio_to_media_collection(data, "preview.mp3")
@@ -269,9 +269,12 @@ class TTSTab(QWidget):
         if not note_ids:
             showWarning("No notes selected."); return
         src = self.src_combo.currentText(); dst = self.dst_combo.currentText()
+        if not self._confirm_write_risk(note_ids, src, dst):
+            return
         provider = create_provider("audio", "edge_tts", {})
         progress = QProgressDialog("Generating TTS...", "Cancel", 0, len(note_ids), self); progress.setWindowTitle("TTS"); progress.show()
         updated = 0
+        create_undo_checkpoint("AINotePro TTS generation")
         for i, nid in enumerate(note_ids):
             if progress.wasCanceled(): break
             note = self._editor_note_for_id(nid) or mw.col.get_note(nid)
@@ -301,3 +304,19 @@ class TTSTab(QWidget):
         except Exception:
             pass
         progress.close(); showInfo(f"TTS complete. Updated {updated} notes.")
+
+    def _confirm_write_risk(self, note_ids: list[int], src: str, dst: str) -> bool:
+        risky = []
+        if src == dst:
+            risky.append("The source and destination fields are the same.")
+        if len(note_ids) > 1:
+            risky.append(f"This will update {len(note_ids)} selected notes.")
+        if not risky:
+            return True
+        message = "\n".join(risky) + "\n\nContinue?"
+        return QMessageBox.question(
+            self,
+            "Confirm AINotePro TTS",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
