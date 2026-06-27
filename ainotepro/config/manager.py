@@ -62,11 +62,6 @@ def _get_default_config() -> Dict[str, Any]:
             },
             "last_used_prompt": "Default",
         },
-        "image": {
-            "provider": "dalle",
-            "dalle": {"base_url": "https://api.openai.com", "api_key": "", "model": "dall-e-3"},
-            "sd_webui": {"base_url": "http://127.0.0.1:7860"},
-        },
         "audio": {
             "provider": "edge_tts",
             "edge_tts": {"voice": "en-US-AriaNeural", "speed": 0, "volume": 0, "pitch": 0},
