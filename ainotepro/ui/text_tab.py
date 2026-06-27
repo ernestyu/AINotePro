@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlparse
 from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
-    QPushButton, QFrame, QTextEdit, QSizePolicy, QSlider, Qt, QProgressDialog, QFileDialog, QMessageBox, QCheckBox,
+    QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QCheckBox,
     QIcon, QStyle
 )
 from aqt.utils import showInfo, showWarning
@@ -217,14 +217,26 @@ class TextTab(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(5)
 
         # Title
         title = QLabel('<div style="font-size:14px; font-weight:900;">Insert AI-generated content into the selected note</div>')
         layout.addWidget(title)
 
-        # Generate using
-        gen_row = QHBoxLayout()
-        gen_row.addWidget(QLabel("<b>Generate using</b>"))
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(6)
+        grid.setVerticalSpacing(4)
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 0)
+        grid.setColumnStretch(3, 1)
+        grid.setColumnStretch(4, 0)
+        grid.setColumnStretch(5, 0)
+
+        # Row 0: Provider + Base URL
+        grid.addWidget(QLabel("<b>Provider:</b>"), 0, 0)
         self.service_combo = QComboBox(); self.service_combo.addItems([label for label, _key in TEXT_PROVIDER_OPTIONS])
         saved_provider = self.cfg.get_all().get("text", {}).get("provider", "openai")
         saved_label = TEXT_PROVIDER_KEY_TO_LABEL.get(str(saved_provider).lower(), "OpenAI")
@@ -232,60 +244,44 @@ class TextTab(QWidget):
         if saved_idx >= 0:
             self.service_combo.setCurrentIndex(saved_idx)
         self.service_combo.currentTextChanged.connect(self._populate_provider_cfg)
-        gen_row.addWidget(self.service_combo)
-        layout.addLayout(gen_row)
-
-        # Use a grid so left edges are aligned and buttons dock to the right
-        grid = QGridLayout()
-        grid.setColumnStretch(0, 0)  # label column
-        grid.setColumnStretch(1, 1)  # main control column expands
-        grid.setColumnStretch(2, 0)
-        grid.setColumnStretch(3, 0)
-
-        # Base URL
-        grid.addWidget(QLabel("<b>Base URL</b>"), 0, 0)
+        grid.addWidget(self.service_combo, 0, 1)
+        grid.addWidget(QLabel("<b>Base URL:</b>"), 0, 2)
         self.base_url_edit = QLineEdit(); self.base_url_edit.setPlaceholderText("https://api.example.com")
-        grid.addWidget(self.base_url_edit, 0, 1, 1, 3)
+        grid.addWidget(self.base_url_edit, 0, 3, 1, 3)
 
-        # API Key + lock button at far right
-        grid.addWidget(QLabel("<b>API Key</b>"), 1, 0)
+        # Row 1: API Key + Temp
+        grid.addWidget(QLabel("<b>API Key:</b>"), 1, 0)
         self.api_key_edit = QLineEdit()
         try:
             self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         except Exception:
             self.api_key_edit.setEchoMode(QLineEdit.Password)
-        # pack API key field and lock button into an inner row to eliminate the gap
-        api_row = QHBoxLayout(); api_row.setContentsMargins(0, 0, 0, 0); api_row.setSpacing(4)
+        api_row = QHBoxLayout(); api_row.setContentsMargins(0, 0, 0, 0); api_row.setSpacing(2)
         api_row.addWidget(self.api_key_edit, 1)
         self.toggle_password_button = QToolButton(); self.toggle_password_button.setText("🔒")
-        self.toggle_password_button.setFixedWidth(28)
+        self.toggle_password_button.setFixedWidth(24)
         self.toggle_password_button.clicked.connect(self._toggle_pw)
         api_row.addWidget(self.toggle_password_button, 0)
         api_wrap = QWidget(); api_wrap.setLayout(api_row)
         grid.addWidget(api_wrap, 1, 1, 1, 3)
+        grid.addWidget(QLabel("<b>Temp:</b>"), 1, 4)
+        self.temperature_edit = QLineEdit()
+        self.temperature_edit.setText("0.70")
+        self.temperature_edit.setFixedWidth(48)
+        self.temperature_edit.setToolTip("Sampling temperature. Default: 0.70")
+        grid.addWidget(self.temperature_edit, 1, 5)
 
-        # Available Model + right-aligned small buttons
-        grid.addWidget(QLabel("<b>Available Model</b>"), 2, 0)
+        # Row 2: Model + actions
+        grid.addWidget(QLabel("<b>Model:</b>"), 2, 0)
         self.model_combo = QComboBox(); self.model_combo.setEditable(True)
         self.model_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
-        grid.addWidget(self.model_combo, 2, 1)
-        self.refresh_button = QPushButton("Refresh"); self.refresh_button.setFixedWidth(80)
-        self.test_button = QPushButton("Check"); self.test_button.setFixedWidth(80)
+        grid.addWidget(self.model_combo, 2, 1, 1, 3)
+        self.refresh_button = QPushButton("Refresh"); self.refresh_button.setFixedWidth(70)
+        self.test_button = QPushButton("Check"); self.test_button.setFixedWidth(60)
         self.refresh_button.clicked.connect(self._refresh_models)
         self.test_button.clicked.connect(self._test_model)
-        grid.addWidget(self.refresh_button, 2, 2)
-        grid.addWidget(self.test_button, 2, 3)
-
-        # Temperature row: keep label aligned at col 0
-        grid.addWidget(QLabel("<b>Temperature</b>"), 3, 0)
-        temp_box = QHBoxLayout()
-        self.temperature_slider = QSlider(Qt.Orientation.Horizontal); self.temperature_slider.setRange(0, 100); self.temperature_slider.setValue(70)
-        self.temperature_value = QLabel("0.70")
-        self.temperature_slider.valueChanged.connect(lambda v: self.temperature_value.setText(f"{v/100:.2f}"))
-        temp_box.addWidget(self.temperature_slider)
-        temp_box.addWidget(self.temperature_value)
-        temp_wrap = QWidget(); temp_wrap.setLayout(temp_box)
-        grid.addWidget(temp_wrap, 3, 1, 1, 3)
+        grid.addWidget(self.refresh_button, 2, 4)
+        grid.addWidget(self.test_button, 2, 5)
 
         layout.addLayout(grid)
 
@@ -341,11 +337,18 @@ class TextTab(QWidget):
 
         # Fields row
         fields_row = QHBoxLayout()
-        fields_row.addWidget(QLabel("<b>Source Field:</b>"), 0)
+        fields_row.setContentsMargins(0, 0, 0, 0)
+        fields_row.setSpacing(6)
+        fields_row.addWidget(QLabel("<b>Source Field:</b>"))
         self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
-        self.image_checkbox = QCheckBox("Enable Image Source"); fields_row.addWidget(self.image_checkbox, 0)
         fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
         self.destination_field_combo = QComboBox(); fields_row.addWidget(self.destination_field_combo, 1)
+        self.image_checkbox = QCheckBox("Image Recognition")
+        self.image_checkbox.setToolTip(
+            "Read images from the source field and send them to a vision-capable model. "
+            "Remote image URLs are not supported."
+        )
+        fields_row.addWidget(self.image_checkbox, 0)
         layout.addLayout(fields_row)
 
         self.setLayout(layout)
@@ -554,8 +557,15 @@ class TextTab(QWidget):
             "base_url": self.base_url_edit.text().strip(),
             "api_key": self.api_key_edit.text().strip(),
             "model": self.model_combo.currentText().strip(),
-            "temperature": self.temperature_slider.value() / 100.0,
+            "temperature": self._temperature_value(),
         }
+
+    def _temperature_value(self) -> float:
+        try:
+            value = float(self.temperature_edit.text().strip())
+        except Exception:
+            value = 0.7
+        return max(0.0, min(value, 2.0))
 
     def _save_current_provider_config(self) -> None:
         st = "text"; pv = self._service_map()
@@ -568,10 +578,12 @@ class TextTab(QWidget):
         self.base_url_edit.setText(cfg.get("base_url", ""))
         self.api_key_edit.setText(cfg.get("api_key", ""))
         self.model_combo.setEditText(cfg.get("model", ""))
-        # Also update temperature slider from config
         temp = cfg.get("temperature", 0.7)
-        self.temperature_slider.setValue(int(temp * 100))
-        self.temperature_value.setText(f"{temp:.2f}")
+        try:
+            temp = float(temp)
+        except Exception:
+            temp = 0.7
+        self.temperature_edit.setText(f"{temp:.2f}")
 
     def _refresh_models(self) -> None:
         st = "text"; pv = self._service_map()
@@ -599,7 +611,7 @@ class TextTab(QWidget):
     def _test_model(self) -> None:
         # simple ping using a tiny prompt
         base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
-        model = self.model_combo.currentText().strip(); temp = self.temperature_slider.value()/100.0
+        model = self.model_combo.currentText().strip(); temp = self._temperature_value()
         st = "text"; pv = self._service_map(); cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
         print(f"[AINotePro] Check clicked. service={pv}, model={model}, base_url={base_url}, temp={temp}")
         provider = create_provider(st, pv, cfg)
@@ -619,7 +631,7 @@ class TextTab(QWidget):
             showWarning("No notes selected."); return
 
         base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
-        model = self.model_combo.currentText().strip(); temp = self.temperature_slider.value()/100.0
+        model = self.model_combo.currentText().strip(); temp = self._temperature_value()
         prompt_tpl = self.prompt_edit.toPlainText().strip()
         src = self.source_field_combo.currentText(); dst = self.destination_field_combo.currentText()
         if not prompt_tpl:
