@@ -17,7 +17,7 @@ AINotePro adds AI-assisted text generation and text-to-speech tools to Anki's Br
 - Tested with Anki 26.05.
 - Remote providers require network access and, where applicable, your own API key.
 - Local providers such as Ollama, LM Studio, or LocalAI must be running separately.
-- Image OCR requires an endpoint that truly supports image input. For privacy, AINotePro reads local image files only from Anki's media folder by default. Remote image URLs require the `Allow Remote Image URLs` option in the Text tab.
+- Image OCR requires an endpoint that truly supports image input. For privacy and security, AINotePro supports Anki media images and `data:image/...;base64,...` images only; remote image URLs are not fetched or forwarded.
 
 ## Privacy note
 

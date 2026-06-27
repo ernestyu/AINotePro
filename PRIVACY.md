@@ -8,7 +8,7 @@ When you generate text, AINotePro sends the selected source field content and pr
 
 ## Data sent for image OCR
 
-When image source mode is enabled, AINotePro may read an image referenced in the selected source field from Anki's media folder, encode it as Base64, and send it to the selected vision-capable LLM endpoint. The release build refuses to read `file://` images outside Anki's media folder. Remote image URLs are disabled by default and require the `Allow Remote Image URLs` option in the Text tab.
+When image source mode is enabled, AINotePro may read an image referenced in the selected source field from Anki's media folder, encode it as Base64, and send it to the selected vision-capable LLM endpoint. It also accepts existing `data:image/...;base64,...` image data. The release build refuses to read `file://` images outside Anki's media folder, and remote image URLs are not fetched or forwarded.
 
 ## Data sent for TTS
 

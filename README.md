@@ -21,7 +21,7 @@ AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audi
 - A compatible API key is required for paid or hosted LLM providers.
 - Ollama, LM Studio, and LocalAI require a local server to be running before generation.
 - Image OCR requires a vision-capable model and an endpoint that accepts OpenAI-style `image_url` message parts. Some servers expose the same model name in a text-only endpoint; in that case OCR will fail even if another UI can use a vision variant.
-- For privacy, image OCR reads local files only from Anki's media folder by default. Remote image URLs are disabled unless `Allow Remote Image URLs` is enabled in the Text tab.
+- Image OCR supports images stored in Anki's media folder and `data:image/...;base64,...` images. Remote image URLs are not fetched or forwarded for privacy and security. If your note contains a remote image, download it and add it to Anki media first.
 
 ## Installation
 
@@ -104,6 +104,7 @@ API keys and provider settings are stored locally in the add-on's `user_files/us
 
 - If no text appears in the destination field, confirm that the source field is not empty, the prompt contains `{Source Field}` or `{Source}`, and the provider returns non-empty content.
 - If image OCR fails with a server error, confirm that the exact endpoint accepts image inputs, not only text chat completions.
+- If image OCR reports a remote image URL, download the image and add it to Anki media first.
 - If model refresh fails, type the model name manually and use `Check`.
 - If TTS does not append audio, confirm that a voice is enabled and the destination field exists on the selected note type.
 - For local providers, confirm that the local server is running and reachable from Anki.

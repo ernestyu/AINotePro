@@ -2,7 +2,6 @@ DEFAULTS = {
     "text": {
         "provider": "openai",
         "debug_logging": False,
-        "allow_remote_image_urls": False,
         "openai": {
             "base_url": "https://api.openai.com",
             "api_key": "",

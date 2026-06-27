@@ -19,6 +19,7 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.
 - Confirm image OCR refuses `file://` paths outside Anki's media folder.
+- Confirm image OCR refuses remote `http://` and `https://` image URLs.
 
 ## 2. Documentation checks
 

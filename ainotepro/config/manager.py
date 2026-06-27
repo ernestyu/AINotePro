@@ -36,13 +36,24 @@ def migrate_legacy_user_data() -> None:
         print(f"[AINotePro] Failed to migrate user_data to user_files: {e}")
 
 
+def _prune_removed_config_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove pre-1.0 config keys that are no longer public or supported."""
+    if not isinstance(data, dict):
+        return data
+    data.pop("concurrency", None)
+    data.pop("image", None)
+    text_cfg = data.get("text")
+    if isinstance(text_cfg, dict):
+        text_cfg.pop("allow_remote_image_urls", None)
+    return data
+
+
 def _get_default_config() -> Dict[str, Any]:
     """Returns a dictionary with the default configuration."""
     return {
         "text": {
             "provider": "openai",
             "debug_logging": False,
-            "allow_remote_image_urls": False,
             "openai": {"base_url": "https://api.openai.com", "api_key": "", "model": "gpt-4o-mini", "temperature": 0.7},
             "deepseek": {"base_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat", "temperature": 0.7},
             "openrouter": {"base_url": "https://openrouter.ai/api", "api_key": "", "model": "openai/gpt-4o-mini", "temperature": 0.7},
@@ -68,11 +79,6 @@ def _get_default_config() -> Dict[str, Any]:
         },
         "ui": {
             "last_service_tab": "text",
-        },
-        "concurrency": {
-            "openai_batch_max_size": 20,
-            "openai_batch_max_prompt_len": 8000,
-            "ollama_workers": 4,
         },
     }
 
@@ -108,6 +114,7 @@ class ConfigManager:
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 user_config = json.load(f)
+            user_config = _prune_removed_config_keys(user_config)
             # Merge user config into defaults to fill in any missing keys
             default_config = _get_default_config()
             return _deep_merge_dicts(default_config, user_config)
@@ -126,7 +133,7 @@ class ConfigManager:
 
     def set_provider_config(self, service_type: str, provider_name: str, provider_cfg: Dict[str, Any]):
         """Sets the config for a specific provider and saves it."""
-        self.config = self._load_config()
+        self.config = _prune_removed_config_keys(self._load_config())
         if service_type not in self.config: self.config[service_type] = {}
         if provider_name not in self.config[service_type]: self.config[service_type][provider_name] = {}
         self.config[service_type][provider_name].update(provider_cfg)
@@ -135,6 +142,7 @@ class ConfigManager:
 
     def save_all(self, data: Dict[str, Any]):
         """Replaces the full config and saves it."""
+        data = _prune_removed_config_keys(data)
         self.config = _deep_merge_dicts(_get_default_config(), data)
         self._save_config()
 

@@ -25,7 +25,6 @@ ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 PROMPT_DIR = os.path.join(USER_FILES_DIR, "gen_text")
 PROMPT_FILE = os.path.join(PROMPT_DIR, "prompt.json")
 USER_CONFIG_FILE = CONFIG_FILE
-ROOT_CONFIG_FILE = os.path.join(ADDON_ROOT, "config.json")
 DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
 }
@@ -81,9 +80,6 @@ def _extract_prompts(data: Dict[str, Any]) -> Dict[str, str]:
 def _load_prompts() -> Dict[str, str]:
     migrate_legacy_user_data()
     prompts: Dict[str, str] = dict(DEFAULT_PROMPTS)
-
-    root_cfg = _read_json_file(ROOT_CONFIG_FILE)
-    prompts.update(_extract_prompts(root_cfg))
 
     user_cfg = _read_json_file(USER_CONFIG_FILE)
     prompts.update(_extract_prompts(user_cfg))
@@ -146,14 +142,10 @@ class GenerationWorker(QObject):
             provider = self.params["provider"]
             prompt_tpl = self.params["prompt_tpl"]
             dst = self.params["dst"]
-            cfg_all = self.params["cfg_all"]
             base_cfg = self.params["base_cfg"]
 
-            concurrency_cfg = cfg_all.get("concurrency", {})
-            # The batching logic is removed in favor of a simpler, more robust concurrent model.
-            # We will use a thread pool to process items concurrently.
-            max_workers = int(concurrency_cfg.get("ollama_workers", 4)) # Re-use ollama_workers for general concurrency
-            print(f"[AINotePro] Using concurrent generation with max_workers={max_workers}")
+            max_workers = 1
+            print(f"[AINotePro] Using text generation workers={max_workers}")
 
             import concurrent.futures as _fut
             
@@ -277,8 +269,8 @@ class TextTab(QWidget):
         self.model_combo = QComboBox(); self.model_combo.setEditable(True)
         self.model_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
         grid.addWidget(self.model_combo, 2, 1)
-        self.refresh_button = QToolButton(); self.refresh_button.setText("Refresh"); self.refresh_button.setFixedWidth(80)
-        self.test_button = QToolButton(); self.test_button.setText("Check"); self.test_button.setFixedWidth(80)
+        self.refresh_button = QPushButton("Refresh"); self.refresh_button.setFixedWidth(80)
+        self.test_button = QPushButton("Check"); self.test_button.setFixedWidth(80)
         self.refresh_button.clicked.connect(self._refresh_models)
         self.test_button.clicked.connect(self._test_model)
         grid.addWidget(self.refresh_button, 2, 2)
@@ -320,7 +312,6 @@ class TextTab(QWidget):
         # Get standard icons
         style = self.style()
         save_icon = style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
-        load_icon = style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
         delete_icon = style.standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
         import_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
         export_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp)
@@ -338,11 +329,10 @@ class TextTab(QWidget):
         btn_row.addStretch(1)
         self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
         self.save_button.setToolTip("Save the current Prompt Preview under the Prompt Name.")
-        self.load_button = QPushButton(" Load"); self.load_button.setIcon(load_icon)
         self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
-        self.save_button.clicked.connect(self._on_save_prompt); self.load_button.clicked.connect(self._on_load_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
+        self.save_button.clicked.connect(self._on_save_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
         self.prompt_list_combo.currentIndexChanged.connect(self._on_prompt_selection_changed)
-        btn_row.addWidget(self.save_button); btn_row.addWidget(self.load_button); btn_row.addWidget(self.delete_button)
+        btn_row.addWidget(self.save_button); btn_row.addWidget(self.delete_button)
         layout.addLayout(btn_row)
 
         # Separator
@@ -354,9 +344,6 @@ class TextTab(QWidget):
         fields_row.addWidget(QLabel("<b>Source Field:</b>"), 0)
         self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
         self.image_checkbox = QCheckBox("Enable Image Source"); fields_row.addWidget(self.image_checkbox, 0)
-        self.remote_image_checkbox = QCheckBox("Allow Remote Image URLs")
-        self.remote_image_checkbox.setToolTip("Allow http/https images in the source field to be sent to the selected vision model.")
-        fields_row.addWidget(self.remote_image_checkbox, 0)
         fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
         self.destination_field_combo = QComboBox(); fields_row.addWidget(self.destination_field_combo, 1)
         layout.addLayout(fields_row)
@@ -494,10 +481,6 @@ class TextTab(QWidget):
         self.prompt_edit.setPlainText(content)
         showInfo(f"Prompt saved: {name}")
 
-    def _on_load_prompt(self):
-        name = self._prompt_name_text()
-        self._load_prompt_by_name(name)
-
     def _on_delete_prompt(self):
         name = self._prompt_name_text()
         if not name:
@@ -577,22 +560,14 @@ class TextTab(QWidget):
     def _save_current_provider_config(self) -> None:
         st = "text"; pv = self._service_map()
         self.cfg.set_provider_config(st, pv, self._current_provider_config())
-        data = self.cfg.get_all()
-        text_cfg = data.setdefault("text", {})
-        if hasattr(self, "remote_image_checkbox"):
-            text_cfg["allow_remote_image_urls"] = self.remote_image_checkbox.isChecked()
-        self.cfg.save_all(data)
         print(f"[AINotePro] Saved settings for Text/{pv}")
 
     def _populate_provider_cfg(self) -> None:
         st = "text"; pv = self._service_map()
-        text_cfg = self.cfg.get_all().get("text", {})
         cfg = self.cfg.get_provider_config(st, pv)
         self.base_url_edit.setText(cfg.get("base_url", ""))
         self.api_key_edit.setText(cfg.get("api_key", ""))
         self.model_combo.setEditText(cfg.get("model", ""))
-        if hasattr(self, "remote_image_checkbox"):
-            self.remote_image_checkbox.setChecked(bool(text_cfg.get("allow_remote_image_urls", False)))
         # Also update temperature slider from config
         temp = cfg.get("temperature", 0.7)
         self.temperature_slider.setValue(int(temp * 100))
@@ -739,7 +714,6 @@ class TextTab(QWidget):
             "provider": provider,
             "prompt_tpl": prompt_tpl,
             "dst": dst,
-            "cfg_all": self.cfg.get_all(),
             "provider_name": pv,
             "base_cfg": {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp},
         }
@@ -878,10 +852,10 @@ class TextTab(QWidget):
 
         parsed = urlparse(raw_src)
         if parsed.scheme in ("http", "https"):
-            allow_remote = bool(getattr(self, "remote_image_checkbox", None) and self.remote_image_checkbox.isChecked())
-            if allow_remote:
-                return raw_src, None
-            return None, "Remote image URLs are disabled for privacy. Use an Anki media image or enable Allow Remote Image URLs."
+            return None, (
+                "Remote image URLs are not supported for privacy and security. "
+                "Please download the image and add it to Anki media first."
+            )
 
         if parsed.scheme == "file":
             path = unquote(parsed.path)

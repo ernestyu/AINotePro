@@ -48,8 +48,8 @@ class AiNoteProConfigDialog(QDialog):
         bottom_layout = QHBoxLayout()
         bottom_label = QLabel(
             '<p style="font-size:12px;">'
-            'Found a bug or have a feature request? '
-            '<a href="https://github.com/ernestyu/AINotePro/issues">Create an issue on Github</a> '
+            'Enjoying AINotePro? '
+            '<a href="https://github.com/ernestyu/AINotePro">Star it on GitHub</a> '
             '</p>'
         )
         bottom_label.linkActivated.connect(openLink)
