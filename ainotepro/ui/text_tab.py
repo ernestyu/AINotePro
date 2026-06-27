@@ -354,6 +354,9 @@ class TextTab(QWidget):
         fields_row.addWidget(QLabel("<b>Source Field:</b>"), 0)
         self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
         self.image_checkbox = QCheckBox("Enable Image Source"); fields_row.addWidget(self.image_checkbox, 0)
+        self.remote_image_checkbox = QCheckBox("Allow Remote Image URLs")
+        self.remote_image_checkbox.setToolTip("Allow http/https images in the source field to be sent to the selected vision model.")
+        fields_row.addWidget(self.remote_image_checkbox, 0)
         fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
         self.destination_field_combo = QComboBox(); fields_row.addWidget(self.destination_field_combo, 1)
         layout.addLayout(fields_row)
@@ -574,14 +577,22 @@ class TextTab(QWidget):
     def _save_current_provider_config(self) -> None:
         st = "text"; pv = self._service_map()
         self.cfg.set_provider_config(st, pv, self._current_provider_config())
+        data = self.cfg.get_all()
+        text_cfg = data.setdefault("text", {})
+        if hasattr(self, "remote_image_checkbox"):
+            text_cfg["allow_remote_image_urls"] = self.remote_image_checkbox.isChecked()
+        self.cfg.save_all(data)
         print(f"[AINotePro] Saved settings for Text/{pv}")
 
     def _populate_provider_cfg(self) -> None:
         st = "text"; pv = self._service_map()
+        text_cfg = self.cfg.get_all().get("text", {})
         cfg = self.cfg.get_provider_config(st, pv)
         self.base_url_edit.setText(cfg.get("base_url", ""))
         self.api_key_edit.setText(cfg.get("api_key", ""))
         self.model_combo.setEditText(cfg.get("model", ""))
+        if hasattr(self, "remote_image_checkbox"):
+            self.remote_image_checkbox.setChecked(bool(text_cfg.get("allow_remote_image_urls", False)))
         # Also update temperature slider from config
         temp = cfg.get("temperature", 0.7)
         self.temperature_slider.setValue(int(temp * 100))
@@ -867,10 +878,10 @@ class TextTab(QWidget):
 
         parsed = urlparse(raw_src)
         if parsed.scheme in ("http", "https"):
-            allow_remote = bool(self.cfg.get_all().get("text", {}).get("allow_remote_image_urls", False))
+            allow_remote = bool(getattr(self, "remote_image_checkbox", None) and self.remote_image_checkbox.isChecked())
             if allow_remote:
                 return raw_src, None
-            return None, "Remote image URLs are disabled for privacy. Use an Anki media image or enable allow_remote_image_urls in config."
+            return None, "Remote image URLs are disabled for privacy. Use an Anki media image or enable Allow Remote Image URLs."
 
         if parsed.scheme == "file":
             path = unquote(parsed.path)

@@ -27,7 +27,7 @@ class AiNoteProConfigDialog(QDialog):
             'Enhance your Anki notes with AI-generated text and speech!'
             '</div>'
             '<div style="text-align:right; font-size:11px; margin: 10px 0; font-style:italic;">'
-            'AINotePro v1.0    '
+            'AINotePro v1.0.0    '
             '</div>'
         )
         top_label.linkActivated.connect(openLink)

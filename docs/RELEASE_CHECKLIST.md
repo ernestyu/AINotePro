@@ -54,8 +54,10 @@ From the add-on root:
 
 ```bash
 find . -name "__pycache__" -type d -prune -exec rm -rf {} +
+rm -f ../AINotePro.ankiaddon
 zip -r ../AINotePro.ankiaddon * \
-  -x "user_data/*" "user_files/user_config.json" "user_files/gen_text/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+  -x "user_data/*" "user_files/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+zip -ur ../AINotePro.ankiaddon user_files/README.txt
 ```
 
 Verify the archive layout:

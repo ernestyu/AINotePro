@@ -3,6 +3,7 @@ from aqt.qt import (
 )
 from aqt import mw
 from aqt.utils import showWarning, showInfo
+from .core.utils import create_undo_checkpoint
 
 
 class RemoveDialog(QDialog):
@@ -107,6 +108,7 @@ class RemoveDialog(QDialog):
             return
 
         count = 0
+        create_undo_checkpoint("AINotePro remove field content")
         for note_id in selected_notes:
             note = mw.col.get_note(note_id)
             if field_name in note:

@@ -21,7 +21,7 @@ AINotePro is an Anki add-on for adding AI-generated text and text-to-speech audi
 - A compatible API key is required for paid or hosted LLM providers.
 - Ollama, LM Studio, and LocalAI require a local server to be running before generation.
 - Image OCR requires a vision-capable model and an endpoint that accepts OpenAI-style `image_url` message parts. Some servers expose the same model name in a text-only endpoint; in that case OCR will fail even if another UI can use a vision variant.
-- For privacy, image OCR reads local files only from Anki's media folder by default. Remote image URLs are disabled unless `allow_remote_image_urls` is manually enabled in `config.json`.
+- For privacy, image OCR reads local files only from Anki's media folder by default. Remote image URLs are disabled unless `Allow Remote Image URLs` is enabled in the Text tab.
 
 ## Installation
 
@@ -139,8 +139,10 @@ Build a package from the add-on root:
 
 ```bash
 find . -name "__pycache__" -type d -prune -exec rm -rf {} +
+rm -f ../AINotePro.ankiaddon
 zip -r ../AINotePro.ankiaddon * \
-  -x "user_data/*" "user_files/user_config.json" "user_files/gen_text/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+  -x "user_data/*" "user_files/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
+zip -ur ../AINotePro.ankiaddon user_files/README.txt
 ```
 
 The generated zip must contain `__init__.py` at the top level. Do not include the parent `AINotePro/` folder inside the archive.
