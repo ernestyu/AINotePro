@@ -11,7 +11,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 - Refresh available models when the provider exposes a models endpoint.
 - Remember the last provider settings and the last model that generated successfully.
 - Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
-- Generate MP3 audio and append Anki `[sound:...]` references to the selected destination field. The current audio provider is Edge TTS.
+- Audio V2 development candidate: Edge TTS plus optional local Kokoro MLX (English only); three independent voice blocks, uniform per-note random selection, named Audio Profiles, asynchronous synthesis, conservative Skip/Replace and Anki media references. **Not yet verified in Anki.**
 - Process one selected note or multiple selected notes from the Browser.
 
 ## Requirements
@@ -50,14 +50,16 @@ The AnkiWeb code will be available after the add-on is published.
 6. Choose the source and destination fields.
 7. Click `Generate`.
 
-For Audio:
+For Audio V2 (development candidate; no Anki integration testing has been performed):
 
-1. Open the `Audio` tab.
-2. Select a language and enable at least one voice.
-3. Choose source and destination fields.
-4. Click `Generate`.
+1. Open `Audio`, select `Edge-TTS` or `Kokoro MLX (Local)` under `Generate using`.
+2. For Kokoro, run your separate local Gradio service at `http://127.0.0.1:7860`; use `Retry` if the status is unavailable. The plugin does not start Kokoro or install models.
+3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge retains its original language, volume and pitch options. A different complete enabled block is chosen uniformly for each note.
+4. Choose Source/Destination fields. The default policy is Skip if any sound tag already exists. `Replace managed audio only` requires a matching local provenance record and exact media hash.
+5. Use `Save`, `Save As`, `Load` or `Delete` to manage persistent Audio Profiles; simply clicking Generate does not save a Profile.
+6. Click `Generate`. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview writes a temporary MP3, not an Anki media file.
 
-AINotePro appends generated audio to the destination field as an Anki sound reference.
+The Kokoro adapter currently uses Python standard-library HTTP to speak Gradio's queued-call API, not `gradio_client`. **This alternate transport has not been validated against the user's actual Gradio or Anki Python runtime.** The user explicitly requested no tests and no CI in this development pass; it must be verified on the Mac mini before release. No remote service is started or required for mobile Anki playback once media sync completes.
 
 ## Prompt Templates
 
@@ -94,7 +96,7 @@ If `Refresh` returns no models, type the model name manually. Many OpenAI-compat
 
 ## Privacy
 
-AINotePro sends selected note field content to the provider you configure. If image source mode is enabled, images in the source field may be read from your Anki media folder, encoded as Base64 data, and sent to the configured model endpoint. Audio generation sends selected text to Edge TTS.
+AINotePro sends selected note field content to the provider you configure. If image source mode is enabled, images in the source field may be read from your Anki media folder, encoded as Base64 data, and sent to the configured model endpoint. Audio generation sends selected text to the chosen Edge TTS service or to the configured local loopback Kokoro Gradio service.
 
 Do not use the add-on with private, medical, legal, or confidential notes unless you understand and accept the privacy policy of the selected provider.
 
