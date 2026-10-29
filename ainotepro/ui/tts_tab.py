@@ -81,6 +81,7 @@ class TTSTab(QWidget):
         self._saved = copy.deepcopy(self._draft)
         self._loading = False
         self._probe_id = 0
+        self._draft_revision = 0
         self._probe_state = "unprobed"
         self._available = []
         self._edge_cache = {}
@@ -120,6 +121,12 @@ class TTSTab(QWidget):
         self.language_combo = QComboBox(); h.addWidget(self.language_combo, 1)
         layout.addLayout(h)
         state_row = QHBoxLayout()
+        self.url_label = QLabel("Local URL:")
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("http://127.0.0.1:7860")
+        self.url_edit.setMaximumWidth(190)
+        self.url_edit.editingFinished.connect(self._url_changed)
+        state_row.addWidget(self.url_label); state_row.addWidget(self.url_edit)
         self.status_label = QLabel(""); state_row.addWidget(self.status_label, 1)
         self.retry_button = QPushButton("Retry"); self.retry_button.clicked.connect(self._probe)
         state_row.addWidget(self.retry_button); layout.addLayout(state_row)
@@ -236,6 +243,8 @@ class TTSTab(QWidget):
         if self._loading: return
         provider = self._draft["provider"]
         conf = self._draft["provider_configs"][provider]
+        if provider == "kokoro_gradio":
+            conf["base_url"] = self.url_edit.text().strip()
         if provider == "edge_tts":
             conf["language_code"] = self.language_combo.currentData() or "en"
         for block, voice in zip(self.voice_blocks, conf["voices"]):
@@ -261,6 +270,9 @@ class TTSTab(QWidget):
             self.generate_combo.setCurrentIndex(self.generate_combo.findData(provider))
             self._set_languages(provider)
             conf = self._draft["provider_configs"][provider]
+            self.url_edit.setText(self._draft["provider_configs"]["kokoro_gradio"]["base_url"])
+            self.url_label.setVisible(provider == "kokoro_gradio")
+            self.url_edit.setVisible(provider == "kokoro_gradio")
             if provider == "edge_tts":
                 i = self.language_combo.findData(conf.get("language_code", "en"))
                 if i >= 0: self.language_combo.setCurrentIndex(i)
@@ -295,7 +307,18 @@ class TTSTab(QWidget):
         self._refresh_availability()
 
     def _mark_dirty(self, *_):
-        if not self._loading: self._capture()
+        if not self._loading:
+            self._capture()
+            self._draft_revision += 1
+
+    def _url_changed(self):
+        if self._loading or self._draft["provider"] != "kokoro_gradio":
+            return
+        old = self._draft["provider_configs"]["kokoro_gradio"]["base_url"]
+        self._capture()
+        if old != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]:
+            self._draft_revision += 1
+            self._probe()
 
     def _slider_changed(self, block):
         if not self._loading: self._capture()
@@ -306,6 +329,7 @@ class TTSTab(QWidget):
         if self._loading: return
         self._capture()
         self._draft["provider"] = self.generate_combo.currentData()
+        self._draft_revision += 1
         self._apply_draft()
 
     def _language_changed(self, *_):
@@ -319,6 +343,7 @@ class TTSTab(QWidget):
         self._capture()
         self._populate_voice(block, "")
         self._capture()
+        self._draft_revision += 1
 
     def _populate_voice(self, block, wanted):
         provider = self._draft["provider"]
@@ -361,13 +386,16 @@ class TTSTab(QWidget):
         if self._draft["provider"] != "kokoro_gradio": return
         self._probe_id += 1
         request = self._probe_id
+        revision = self._draft_revision
         url = self._draft["provider_configs"]["kokoro_gradio"]["base_url"]
         self._probe_state = "checking"; self.status_label.setText("Kokoro: Checking...")
         self._refresh_availability()
         def fetch():
             return create_provider("audio", "kokoro_gradio", {}).probe({"base_url": url})
         def done(voices):
-            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio" or url != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]: return
+            if (request != self._probe_id or revision != self._draft_revision or
+                    self._draft["provider"] != "kokoro_gradio" or
+                    url != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]): return
             self._capture()
             self._available = voices; self._probe_state = "ready"
             self.status_label.setText(f"Kokoro: Ready · {len(voices)} English voices")
@@ -377,7 +405,7 @@ class TTSTab(QWidget):
             self._loading = False
             self._refresh_availability()
         def failed(err):
-            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
+            if request != self._probe_id or revision != self._draft_revision or self._draft["provider"] != "kokoro_gradio": return
             self._available = []; self._probe_state = "unavailable"
             self.status_label.setText(f"Kokoro: Unavailable · {err[:150]}")
             self._refresh_availability()
@@ -388,7 +416,8 @@ class TTSTab(QWidget):
         for block in self.voice_blocks: block["button"].setEnabled(ready and not self._running)
         parent = self.parent()
         if parent is not None and hasattr(parent, "generate_button") and getattr(parent, "tab_widget", None) is not None:
-            parent.generate_button.setEnabled(not self._running and ready)
+            if parent.tab_widget.currentWidget() is self:
+                parent.generate_button.setEnabled(not self._running and ready)
 
     def _save(self, profile_id, profile):
         new_audio = copy.deepcopy(self._audio)
@@ -466,7 +495,6 @@ class TTSTab(QWidget):
 
     def request_cancel(self):
         self._cancelled = True
-        if hasattr(self, "_progress"): self._progress.cancel()
 
     def _preview(self, index):
         self._capture()
