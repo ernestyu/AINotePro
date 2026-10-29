@@ -223,7 +223,8 @@ def _consume_events(response, total_deadline):
                 processing_until = min(total_deadline, time.monotonic() + PROCESS_SECONDS)
             elif event == "complete":
                 try:
-                    return json.loads(payload)
+                    return json.loads(payload), (processing_until or
+                                                min(total_deadline, time.monotonic() + PROCESS_SECONDS))
                 except (UnicodeError, ValueError) as exc:
                     raise KokoroValidationError("Invalid Gradio completion JSON") from exc
             elif event in ("error", "failed", "eof"):
@@ -279,8 +280,8 @@ class KokoroGradioProvider:
         url = base + "/gradio_api/call/synthesize/" + urllib.parse.quote(event_id)
         with _open(url, timeout=min(PROCESS_SECONDS, _remaining(deadline)),
                    error_class=KokoroQueueError) as response:
-            result = _consume_events(response, deadline)
-        return self._read_outputs(base, result, deadline)
+            result, process_deadline = _consume_events(response, deadline)
+        return self._read_outputs(base, result, min(deadline, process_deadline))
 
     @staticmethod
     def _read_outputs(base, result, deadline):
