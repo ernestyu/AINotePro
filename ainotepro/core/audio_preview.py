@@ -75,13 +75,25 @@ class _PreviewSession:
             return
         self.closed = True
         _ACTIVE.discard(self)
+        from aqt.qt import QUrl
         try:
             self.player.stop()
-            self.player.deleteLater()
+            # Release the decoder's handle before unlinking, especially on Windows.
+            self.player.setSource(QUrl())
         finally:
+            path = self.path
+            def cleanup():
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    print(f"[AINotePro Audio] preview cleanup: {exc}")
             try:
-                os.unlink(self.path)
+                os.unlink(path)
             except FileNotFoundError:
                 pass
-            except OSError as exc:
-                print(f"[AINotePro Audio] preview cleanup: {exc}")
+            except OSError:
+                # Qt may release the file only when the player QObject is destroyed.
+                self.player.destroyed.connect(lambda *_: cleanup())
+            self.player.deleteLater()
