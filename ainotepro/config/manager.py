@@ -223,8 +223,9 @@ class ConfigManager:
         def update(raw):
             for key, value in data.items():
                 if key == "audio":
-                    validate_audio(value)
-                    raw[key] = copy.deepcopy(value)
+                    # Audio V2 is owned exclusively by replace_audio(); a stale
+                    # TextTab.save_all() snapshot must never resurrect deleted profiles.
+                    continue
                 elif isinstance(value, dict) and isinstance(raw.get(key), dict):
                     raw[key].update(copy.deepcopy(value))
                 else:
