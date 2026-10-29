@@ -778,8 +778,11 @@ class TTSTab(QWidget):
                     self._count("failed_commit")
                     if update_error:
                         print(f"[AINotePro Audio] note update failed note={nid}: {update_error}")
-                    else:
-                        self._stop_batch(f"Note {nid} did not retain its audio reference")
+                    # Even a confirmed non-persisted note can leave a changed undo
+                    # state or an unreferenced media file. Never continue the batch.
+                    self._stop_batch(
+                        f"Note {nid} did not retain its audio reference; "
+                        "inspect collection and unreferenced media before retrying")
                     return
 
                 # The note IS committed. An undo merge failure must never turn it
