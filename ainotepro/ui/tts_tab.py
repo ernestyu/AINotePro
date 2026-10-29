@@ -351,8 +351,12 @@ class TTSTab(QWidget):
                 voice["speed"] = block["speed"].value()
                 voice["volume"] = block["volume"].value()
                 voice["pitch"] = block["pitch"].value()
-        self._draft["source_field"] = self.src_combo.currentText() if self.src_combo.currentIndex() >= 0 else ""
-        self._draft["destination_field"] = self.dst_combo.currentText() if self.dst_combo.currentIndex() >= 0 else ""
+        # No selected note, or a different note type, may leave field combos
+        # empty. That is not a request to erase saved Profile field names.
+        if self.src_combo.currentIndex() >= 0:
+            self._draft["source_field"] = self.src_combo.currentText()
+        if self.dst_combo.currentIndex() >= 0:
+            self._draft["destination_field"] = self.dst_combo.currentText()
 
     def _apply_draft(self):
         self._loading = True
