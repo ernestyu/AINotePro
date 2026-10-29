@@ -328,12 +328,19 @@ class TTSTab(QWidget):
         provider = self._draft["provider"]
         conf = self._draft["provider_configs"][provider]
         if provider == "kokoro_gradio":
-            conf["base_url"] = self.url_edit.text().strip()
+            # A trailing root slash is equivalent to the service origin.
+            # Do not accept arbitrary paths, queries or remote hosts.
+            typed_url = self.url_edit.text().strip()
+            conf["base_url"] = typed_url[:-1] if typed_url.endswith("/") and not typed_url.endswith("//") else typed_url
         if provider == "edge_tts":
             conf["language_code"] = self.language_combo.currentData() or "en"
         for block, voice in zip(self.voice_blocks, conf["voices"]):
             voice["enabled"] = block["enable"].isChecked()
-            voice["voice"] = block["voice"].currentData() or ""
+            selected_voice = block["voice"].currentData()
+            # Provider discovery is asynchronous. An empty/unpopulated combo
+            # must not erase a saved Voice while Kokoro or Edge is offline.
+            if isinstance(selected_voice, str):
+                voice["voice"] = selected_voice
             voice["gender"] = block["gender"].currentText()
             voice["preview_text"] = block["preview"].text()
             if provider == "kokoro_gradio":
