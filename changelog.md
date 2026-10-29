@@ -1,5 +1,13 @@
 # Changelog
 
+## Audio V2 - Profile Save/Load field fix (2026-10-29)
+
+- Scope Audio Profile optimistic concurrency to the Audio JSON domain, not the whole shared config file: Text prompt/UI changes no longer invalidate Audio Save/Load.
+- Read the Audio snapshot and revision token together, preserving conflict protection when another Audio window really changed Profiles.
+- Preserve saved Voice IDs and Source/Destination field names when voice discovery is offline or note fields are unavailable, avoiding false unsaved-change prompts and silent config loss.
+- Kokoro Retry now probes the current URL input; trim a trailing root slash without allowing non-loopback endpoints.
+- **No tests or CI were run at the user's request. Save/Load and Gradio connectivity still require Anki field verification.**
+
 ## Audio V2 - Compact Profile UI candidate (2026-10-29)
 
 - Removed the Audio tab's nested scroll area and tightened margins, row spacing, three Voice blocks and main dialog header/footer.
