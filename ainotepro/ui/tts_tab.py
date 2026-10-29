@@ -278,28 +278,50 @@ class TTSTab(QWidget):
             self.language_combo.setEnabled(True)
         self.language_combo.blockSignals(False)
 
-    def _refresh_profiles(self):
-        self.profile_combo.clear()
-        if not self._profile_id:
-            self.profile_combo.addItem("— Select Profile; click Load —", None)
+    def _refresh_profiles(self, display_name=None):
+        # Preserve a typed, not-yet-saved name when refreshing the list.
+        name = (self.profile_combo.currentText() if display_name is None
+                else display_name)
+        self.profile_combo.blockSignals(True)
+        try:
+            self.profile_combo.clear()
+            self.profile_combo.addItem("", None)
+            for pid, profile in sorted(self._audio["profiles"].items(),
+                                       key=lambda item: item[1]["name"].casefold()):
+                self.profile_combo.addItem(profile["name"], pid)
+            self.profile_combo.setCurrentIndex(0)
+            self.profile_combo.setEditText(name)
+        finally:
+            self.profile_combo.blockSignals(False)
+
+    def _profile_for_name(self, name):
         for pid, profile in self._audio["profiles"].items():
-            self.profile_combo.addItem(profile["name"], pid)
-        i = self.profile_combo.findData(self._profile_id)
-        if i >= 0:
-            self.profile_combo.setCurrentIndex(i)
+            if profile["name"].casefold() == name.casefold():
+                return pid
+        return None
+
+    def _selected_profile_id(self):
+        # QComboBox.currentData() can still point to an old selection after
+        # typing; resolve by the actual visible text instead.
+        name = self.profile_combo.currentText().strip()
+        return self._profile_for_name(name) if name else None
 
     def _is_dirty(self):
         self._capture()
         return self._draft != self._saved
 
     def _confirm_discard(self):
-        if not self._is_dirty(): return True
-        choice = QMessageBox.question(self, "Unsaved Audio Profile",
-            "Save changes to the current Profile before continuing?",
-            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
-        if choice == QMessageBox.StandardButton.Cancel: return False
-        if choice == QMessageBox.StandardButton.Save: return self.save_profile()
-        return True
+        if not self._is_dirty():
+            return True
+        # Do not offer Save here: the combo might already name a *different*
+        # Profile selected for Load/Delete, which would be overwritten.
+        return QMessageBox.question(
+            self, "Unsaved Audio Settings",
+            "The current Audio settings have unsaved changes. Discard them?\n"
+            "Click Cancel to return and use Save first.",
+            QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        ) == QMessageBox.StandardButton.Discard
 
     def _capture(self):
         if self._loading: return
@@ -504,73 +526,99 @@ class TTSTab(QWidget):
         new_audio["last_profile_id"] = profile_id
         validate_audio(new_audio)
         self._revision = self.cfg.replace_audio(new_audio, expected_revision=self._revision)
-        self._audio = new_audio; self._profile_id = profile_id
-        self._draft = copy.deepcopy(profile); self._saved = copy.deepcopy(profile)
-        self._refresh_profiles()
+        self._audio = new_audio
+        self._profile_id = profile_id
+        self._draft = copy.deepcopy(profile)
+        self._saved = copy.deepcopy(profile)
+        self._refresh_profiles(profile["name"])
         return True
 
     def save_profile(self, *_):
-        if not self._profile_id:
-            showWarning("No Profile is loaded. Use Load or Save As first.")
+        # Save is both Create and Update; Save As / New are unnecessary.
+        name = self.profile_combo.currentText().strip()
+        if not name:
+            showWarning("Enter a Profile name before saving.")
+            return False
+        if len(name) > 100:
+            showWarning("Profile name must be 100 characters or fewer.")
             return False
         self._capture()
-        try: return self._save(self._profile_id, self._draft)
-        except Exception as exc:
-            showWarning(f"Could not save Audio Profile: {exc}")
-            return False
-
-    def save_as_profile(self, *_):
-        self._capture()
-        name, ok = QInputDialog.getText(self, "Save Audio Profile As", "Profile name:")
-        if not ok: return False
-        name = name.strip()
-        if not name: return False
-        profile = copy.deepcopy(self._draft); profile["name"] = name
-        try: return self._save(new_profile_id(), profile)
+        existing_id = self._profile_for_name(name)
+        if existing_id and existing_id != self._profile_id:
+            answer = QMessageBox.question(
+                self, "Overwrite Audio Profile",
+                f'Profile "{name}" already exists. Replace its saved settings?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+        pid = existing_id or new_profile_id()
+        profile = copy.deepcopy(self._draft)
+        profile["name"] = name
+        try:
+            return self._save(pid, profile)
         except Exception as exc:
             showWarning(f"Could not save Audio Profile: {exc}")
             return False
 
     def load_profile(self, *_):
-        pid = self.profile_combo.currentData()
-        if not pid or not self._confirm_discard(): return False
-        self._profile_id = pid
-        self._draft = copy.deepcopy(self._audio["profiles"][pid])
-        self._saved = copy.deepcopy(self._draft)
-        self._apply_draft()
+        pid = self._selected_profile_id()
+        if not pid:
+            showWarning("Choose a saved Profile from the list, then click Load.")
+            return False
+        if not self._confirm_discard():
+            return False
+        profile = copy.deepcopy(self._audio["profiles"][pid])
+        # Commit selection first, before touching the live Audio controls.
         try:
             new_audio = copy.deepcopy(self._audio)
             new_audio["last_profile_id"] = pid
             self._revision = self.cfg.replace_audio(new_audio, expected_revision=self._revision)
             self._audio = new_audio
         except Exception as exc:
-            showWarning(f"Profile loaded, but last selection could not be saved: {exc}")
+            showWarning(f"Could not load Profile: {exc}")
+            return False
+        self._profile_id = pid
+        self._draft = profile
+        self._saved = copy.deepcopy(profile)
+        self._refresh_profiles(profile["name"])
+        self._apply_draft()
         return True
 
     def delete_profile(self, *_):
-        pid = self.profile_combo.currentData()
-        if not pid or len(self._audio["profiles"]) <= 1:
-            showWarning("The last Audio Profile cannot be deleted."); return False
-        if not self._confirm_discard(): return False
-        if QMessageBox.question(self, "Delete Audio Profile", "Delete the selected Profile?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+        pid = self._selected_profile_id()
+        if not pid:
+            showWarning("Choose a saved Profile from the list before deleting.")
+            return False
+        if len(self._audio["profiles"]) <= 1:
+            showWarning("The last Audio Profile cannot be deleted.")
+            return False
+        if pid == self._profile_id and not self._confirm_discard():
+            return False
+        name = self._audio["profiles"][pid]["name"]
+        if QMessageBox.question(
+                self, "Delete Audio Profile",
+                f'Delete saved Profile "{name}"? This does not delete Anki audio.',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return False
         new_audio = copy.deepcopy(self._audio)
         del new_audio["profiles"][pid]
-        if new_audio["last_profile_id"] == pid: new_audio["last_profile_id"] = None
+        if new_audio["last_profile_id"] == pid:
+            new_audio["last_profile_id"] = None
         try:
             self._revision = self.cfg.replace_audio(new_audio, expected_revision=self._revision)
             self._audio = new_audio
             if self._profile_id == pid:
+                # Keep the current controls available for unsaved Generate/Save.
+                # Deleting a Profile must never delete generated Anki media.
                 self._profile_id = None
-                self._draft = default_profile("Unsaved Audio settings")
                 self._saved = copy.deepcopy(self._draft)
-                self._apply_draft()
-                self.status_label.setText("Profile deleted. Select another Profile and click Load.")
-            self._refresh_profiles()
+            self._refresh_profiles("")
             return True
         except Exception as exc:
-            showWarning(f"Could not delete Profile: {exc}"); return False
+            showWarning(f"Could not delete Profile: {exc}")
+            return False
 
     def can_close(self):
         if self._close_ready:
@@ -643,9 +691,6 @@ class TTSTab(QWidget):
 
     def on_generate_tts(self):
         if self._running: return
-        if not self._profile_id:
-            showWarning("Select an Audio Profile and click Load (or Save As) before generating.")
-            return
         self._capture()
         ids = self._selected_note_ids()
         src, dst = self._draft["source_field"], self._draft["destination_field"]
