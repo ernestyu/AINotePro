@@ -3,6 +3,14 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
+import threading
+import hashlib
+import copy
+
+from .audio_profiles import migrate_audio, validate_audio
+
+_CONFIG_LOCK = threading.RLock()
 from typing import Any, Dict
 
 ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -97,56 +105,131 @@ def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
     return destination
 
 class ConfigManager:
+    """Single writer for settings; Audio profiles are always replaced, never deep-merged."""
+
     def __init__(self):
         self.config = self._load_config()
 
-    def _load_config(self) -> Dict[str, Any]:
-        """Loads config from file, or creates a default one if it doesn't exist."""
-        migrate_legacy_user_data()
+    @staticmethod
+    def _atomic_write(data):
         os.makedirs(USER_FILES_DIR, exist_ok=True)
-        if not os.path.exists(CONFIG_FILE):
-            print(f"[AINotePro] Config file not found. Creating default at {CONFIG_FILE}")
-            default_config = _get_default_config()
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(default_config, f, ensure_ascii=False, indent=2)
-            return default_config
-        
+        fd, tmp = tempfile.mkstemp(prefix=".ainotepro-", suffix=".json", dir=USER_FILES_DIR)
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                user_config = json.load(f)
-            user_config = _prune_removed_config_keys(user_config)
-            # Merge user config into defaults to fill in any missing keys
-            default_config = _get_default_config()
-            return _deep_merge_dicts(default_config, user_config)
-        except (json.JSONDecodeError, IOError) as e:
-            print(f"[AINotePro] Error loading config file: {e}. Loading default config.")
-            return _get_default_config()
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(tmp, CONFIG_FILE)
+            try:
+                dfd = os.open(USER_FILES_DIR, os.O_RDONLY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
+            except OSError:
+                pass
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
+    @staticmethod
+    def _revision():
+        if not os.path.exists(CONFIG_FILE):
+            return None
+        with open(CONFIG_FILE, "rb") as stream:
+            return hashlib.sha256(stream.read()).hexdigest()
 
-    def get_all(self) -> Dict[str, Any]:
-        """Returns the entire configuration dictionary."""
-        return self.config
+    @staticmethod
+    def _read_raw():
+        if not os.path.exists(CONFIG_FILE):
+            return None
+        with open(CONFIG_FILE, "r", encoding="utf-8") as stream:
+            raw = json.load(stream)
+        if not isinstance(raw, dict):
+            raise ValueError("AINotePro config root must be a JSON object")
+        return raw
 
-    def get_provider_config(self, service_type: str, provider_name: str) -> Dict[str, Any]:
-        """Gets the config for a specific provider (e.g., text.openai)."""
-        return self.config.get(service_type, {}).get(provider_name, {})
+    def _load_config(self):
+        with _CONFIG_LOCK:
+            migrate_legacy_user_data()
+            os.makedirs(USER_FILES_DIR, exist_ok=True)
+            raw = self._read_raw()
+            if raw is None:
+                raw = _get_default_config()
+                raw["audio"] = migrate_audio(raw["audio"])
+                self._atomic_write(raw)
+            else:
+                _prune_removed_config_keys(raw)
+                audio = raw.get("audio", {})
+                if not isinstance(audio, dict):
+                    raise ValueError("Invalid Audio configuration; original file retained")
+                if "profiles" not in audio and not audio.get("migration", {}).get("legacy_edge_v1_done"):
+                    backup = CONFIG_FILE + ".pre-audio-v2.bak"
+                    if not os.path.exists(backup):
+                        shutil.copy2(CONFIG_FILE, backup)
+                    raw["audio"] = migrate_audio(audio)
+                    self._atomic_write(raw)
+                else:
+                    validate_audio(audio)
+            merged = _deep_merge_dicts(_get_default_config(), copy.deepcopy(raw))
+            merged["audio"] = copy.deepcopy(raw["audio"])
+            return merged
 
-    def set_provider_config(self, service_type: str, provider_name: str, provider_cfg: Dict[str, Any]):
-        """Sets the config for a specific provider and saves it."""
-        self.config = _prune_removed_config_keys(self._load_config())
-        if service_type not in self.config: self.config[service_type] = {}
-        if provider_name not in self.config[service_type]: self.config[service_type][provider_name] = {}
-        self.config[service_type][provider_name].update(provider_cfg)
-        self.config[service_type]["provider"] = provider_name
-        self._save_config()
+    def get_all(self):
+        return copy.deepcopy(self.config)
 
-    def save_all(self, data: Dict[str, Any]):
-        """Replaces the full config and saves it."""
-        data = _prune_removed_config_keys(data)
-        self.config = _deep_merge_dicts(_get_default_config(), data)
-        self._save_config()
+    def get_provider_config(self, service_type, provider_name):
+        return copy.deepcopy(self.config.get(service_type, {}).get(provider_name, {}))
+
+    def _replace_raw(self, mutator, expected_revision=None):
+        with _CONFIG_LOCK:
+            current = self._read_raw()
+            if current is None:
+                raise ValueError("Configuration file disappeared")
+            if expected_revision is not None and self._revision() != expected_revision:
+                raise RuntimeError("Configuration changed in another window; reload before saving")
+            updated = copy.deepcopy(current)
+            mutator(updated)
+            if "audio" in updated and "profiles" in updated["audio"]:
+                validate_audio(updated["audio"])
+            self._atomic_write(updated)
+            self.config = _deep_merge_dicts(_get_default_config(), copy.deepcopy(updated))
+            self.config["audio"] = copy.deepcopy(updated["audio"])
+            return self._revision()
+
+    def audio_revision(self):
+        return self._revision()
+
+    def get_audio(self):
+        return copy.deepcopy(self.config["audio"])
+
+    def replace_audio(self, audio, expected_revision=None):
+        validate_audio(audio)
+        return self._replace_raw(
+            lambda raw: raw.__setitem__("audio", copy.deepcopy(audio)),
+            expected_revision=expected_revision,
+        )
+
+    def set_provider_config(self, service_type, provider_name, provider_cfg):
+        def update(raw):
+            service = raw.setdefault(service_type, {})
+            service.setdefault(provider_name, {}).update(copy.deepcopy(provider_cfg))
+            service["provider"] = provider_name
+        self._replace_raw(update)
+
+    def save_all(self, data):
+        """Compatibility API: preserve unknown keys and replace Audio profiles as one unit."""
+        _prune_removed_config_keys(data)
+        def update(raw):
+            for key, value in data.items():
+                if key == "audio":
+                    validate_audio(value)
+                    raw[key] = copy.deepcopy(value)
+                elif isinstance(value, dict) and isinstance(raw.get(key), dict):
+                    raw[key].update(copy.deepcopy(value))
+                else:
+                    raw[key] = copy.deepcopy(value)
+        self._replace_raw(update)
 
     def _save_config(self):
-        """Saves the current configuration to the file."""
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=2)
+        self.save_all(self.config)
