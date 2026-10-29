@@ -6,8 +6,8 @@
 
 **审计对象（固定版本）**：
 - SPEC：`docs/specs/audio-v2-kokoro-profiles-implementation-spec.md`
-- SPEC 冻结提交：`8756fabbe9336b9b0ea34873143f76c04a6ec5b6`
-- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/8756fabbe9336b9b0ea34873143f76c04a6ec5b6/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
+- SPEC 冻结提交：`de4bce6604f47f40fa850b712b9e53868d53bce9`
+- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/de4bce6604f47f40fa850b712b9e53868d53bce9/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
 - AINotePro 原代码基线：`2f3efa526b5e16f0d8b0eb5443d42f38c91e7e3c`（v1.0.0）
 - Kokoro TTS 服务端基线：`ernestyu/kokoro-tts@d3f8333765d4e3432e51a5ead831b80096064a4e`（私有仓库；如无访问权限请明确标注未核验，不得假设）
 - 官方音色资料：`docs/reference/kokoro-official-voice-language-catalog.md`（提交 `d84873e186b786fbf857ca6c3cee8541e0775a98`），原作者资料：https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
@@ -39,6 +39,16 @@ SPEC 第 13 节已针对上一轮审计意见补入**八项规范性实施契约
 8. 自动化及真实 Anki 1/10/100 张、macOS Apple Silicon、移动端播放、发布阻断规则。
 
 **本轮新增审计任务**：验证第 13.2 节 JSON Schema 在 Draft 2020-12 校验器中可实际使用，尤其旧配置迁移、删除后配置与 provider 独立三 Voice 的兼容；检查第 13 节与第 3–12 节是否冲突，给出精确修订文本。Kokoro 本轮**仅英语**，Edge TTS 原多语言不得削减。不得把“设计契约已补齐”误写为“已在 Anki 环境实测”。
+
+## 一-B、第二轮 P1 差异核销（本次只需差异复核）
+
+针对第三方报告 `PASS WITH REQUIRED CHANGES — 0 P0 / 3 P1`，本次 SPEC 修订仅关闭以下三个文档缺口；**不要求重新进行全面架构审计**：
+
+- **P1-01（§13.2）**：每个 Kokoro Voice 明确定义可选 `locale: en-US | en-GB`，按 `accent` 推导缺省；Provider `language=en`；补齐含两个 Provider 各三 Voice 的完整合法 JSON 实例。已用 `jsonschema 4.26.0` / Draft 2020-12 进行 8 项 Schema 正反例验证（结果及边界见 SPEC）。请核对 `locale` 与声线前缀的一致性校验属于应用层、离线 Profile 仍可加载。
+- **P1-02（§13.5）**：取消与单笔提交之间设立 `ready_to_commit → committing` 的最后门禁；先取消则禁止写媒体，先进入提交则该笔尽力完成并报告，随后停止派发。批次成功笔记归入单个 collection undo step；具体 Anki API 仍为开发阶段实机先决验证。
+- **P1-03（§13.5–13.6）**：笔记成功但 provenance 索引写失败分类 `generated_unmanaged`，计入已生成但来源不完整；下次默认 Skip，禁止未经重新核验来源的 Replace；两文件非原子提交的失败恢复和索引原子替换失败行为已明确。
+
+请只报告三项 **CLOSED / PARTIAL / OPEN** 及是否存在新增 P0/P1 矛盾；文档核销与实际 Anki/Gradio 运行时验证严格区分。Kokoro 仍仅英语、原 Audio UI 保持兼容、Edge 多语言不变。
 
 ## 二、审计目标
 
