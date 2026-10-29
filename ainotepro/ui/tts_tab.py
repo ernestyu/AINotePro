@@ -76,8 +76,9 @@ class TTSTab(QWidget):
         self.cfg = ConfigManager()
         self._audio = self.cfg.get_audio()
         self._revision = self.cfg.audio_revision()
-        self._profile_id = self._audio.get("last_profile_id") or next(iter(self._audio["profiles"]))
-        self._draft = copy.deepcopy(self._audio["profiles"][self._profile_id])
+        self._profile_id = self._audio.get("last_profile_id")
+        self._draft = (copy.deepcopy(self._audio["profiles"][self._profile_id])
+                       if self._profile_id else default_profile("Unsaved Audio settings"))
         self._saved = copy.deepcopy(self._draft)
         self._loading = False
         self._probe_id = 0
@@ -436,6 +437,9 @@ class TTSTab(QWidget):
         return True
 
     def save_profile(self, *_):
+        if not self._profile_id:
+            showWarning("No Profile is loaded. Use Load or Save As first.")
+            return False
         self._capture()
         try: return self._save(self._profile_id, self._draft)
         except Exception as exc:
@@ -485,10 +489,11 @@ class TTSTab(QWidget):
             self._revision = self.cfg.replace_audio(new_audio, expected_revision=self._revision)
             self._audio = new_audio
             if self._profile_id == pid:
-                self._profile_id = next(iter(new_audio["profiles"]))
-                self._draft = copy.deepcopy(new_audio["profiles"][self._profile_id])
+                self._profile_id = None
+                self._draft = default_profile("Unsaved Audio settings")
                 self._saved = copy.deepcopy(self._draft)
                 self._apply_draft()
+                self.status_label.setText("Profile deleted. Select another Profile and click Load.")
             self._refresh_profiles()
             return True
         except Exception as exc:
@@ -557,6 +562,9 @@ class TTSTab(QWidget):
 
     def on_generate_tts(self):
         if self._running: return
+        if not self._profile_id:
+            showWarning("Select an Audio Profile and click Load (or Save As) before generating.")
+            return
         self._capture()
         ids = self._selected_note_ids()
         src, dst = self._draft["source_field"], self._draft["destination_field"]
