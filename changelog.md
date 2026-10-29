@@ -1,5 +1,13 @@
 # Changelog
 
+## Text - Per-model reasoning and persistent model selection (2026-10-29)
+
+- Added a compact Reasoning selector beside Model: Off, Low, Medium, High, Model Default. It stores the selection per model inside the chosen Text provider's config; existing models default to Model Default to preserve previous request behavior.
+- For OpenAI-compatible Chat Completions (including locally hosted llama.cpp), send `reasoning_effort` only for an explicit non-default choice: Off -> none, Low -> low, Medium -> medium, High -> xhigh. This applies to text and vision requests; backend/template support must be checked with Check. Native Ollama control is disabled until separately implemented.
+- Fixed the DeepSeek (and other Text providers) model reverting after reopen: a successful Refresh had saved the old model before the user chose a different entry. User model selection, manual entry, provider switching, Prompt Save, Check, Generate, and dialog Close/Esc/title-bar close now persist provider/model preferences.
+- Existing Prompt Save still saves the prompt itself; it also commits visible provider/model settings. No changes to Audio Profile persistence or existing Text prompts.
+- This commit was inspected statically; runtime Anki and live inference-endpoint tests have not been executed.
+
 ## Audio V2 - Preserve active Profile during tab switching and reopen (2026-10-29)
 
 - Fixed a startup ordering defect: populating Source/Destination fields emitted change signals before the saved Audio Profile was applied. Those signals captured blank URL/Voice controls and uninitialized speed sliders into the in-memory draft, producing false unsaved-change prompts, failed Kokoro validation and apparent 0.70x speed resets.
