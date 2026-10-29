@@ -57,9 +57,9 @@ For Audio V2 (development candidate; no Anki integration testing has been perfor
 3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge retains its original language, volume and pitch options. A different complete enabled block is chosen uniformly for each note.
 4. Choose Source/Destination fields. The default policy is Skip if any sound tag already exists. `Replace managed audio only` requires a matching local provenance record and exact media hash.
 5. Use `Save`, `Save As`, `Load` or `Delete` to manage persistent Audio Profiles; simply clicking Generate does not save a Profile.
-6. Click `Generate`. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview writes a temporary MP3, not an Anki media file.
+6. Click `Generate`. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file; Qt Multimedia availability in the user's Anki build remains unverified.
 
-The Kokoro adapter currently uses Python standard-library HTTP to speak Gradio's queued-call API, not `gradio_client`. **This alternate transport has not been validated against the user's actual Gradio or Anki Python runtime.** The user explicitly requested no tests and no CI in this development pass; it must be verified on the Mac mini before release. No remote service is started or required for mobile Anki playback once media sync completes.
+The Kokoro adapter currently uses Python standard-library HTTP with queue (120 s), processing + download (300 s), and overall (420 s) deadlines, not `gradio_client`. **This alternate transport has not been validated against the user's actual Gradio or Anki Python runtime.** The user explicitly requested no tests and no CI in this development pass; it must be verified on the Mac mini before release. The static-audit remediation candidate includes conservative undo-failure stop and commit-state reconciliation; Anki's actual undo API semantics remain unverified. No remote service is started or required for mobile Anki playback once media sync completes.
 
 ## Prompt Templates
 
