@@ -415,20 +415,22 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 
 每张笔记从**已启用且 Provider/语言/口音/性别/voice ID/参数均合法的 Voice 区块**中做一次均匀抽样，抽中的是完整不可变区块快照（含 voice、speed、volume/pitch〔仅 Edge〕、accent、gender），**禁止分别抽 voice 与 speed**。每张笔记独立抽取；同音色在两个区块中出现仍按两个区块计权。零有效区块直接阻断批次并报告。Preview 指定第 1/2/3 区块，不随机；使用该区块当前速度等全部有效参数；不进入 Anki media。将随机源注入可单测的纯函数，固定随机序列核对参数配对，另以足量样本及预设容差检查分布，不把概率测试作为唯一正确性证据。
 
-### 13.5 Anki 后台任务与提交协议（对应审计条款 5）
+### 13.5 Anki 后台任务与提交协议（对应审计条款 5；P1-02/P1-03）
 
 1. Qt 主线程获取**有限**的 note ID、源文本/字段名、目标字段内容指纹、音色与 Provider 快照；网络探测、合成、下载、MP3 校验只在后台进行。后台任务不得访问 Qt 控件或 `mw.col`，不得持有/操作 Anki note 对象。
 2. 采用目标 Anki 版本**实际支持**的任务管理与 collection 操作/撤销 API（须在 Anki 26.05+ 实机核验，不能凭旧版示例臆测）；UI 进度与提交经主线程安全回调。批次初版并发度 1，限制预取和内存；不得在主线程 `join` 或同步等待。
 3. **提交前在合法 collection 上下文重新读取笔记**，验证 note 存在、笔记类型、源/目标字段存在、源内容或其指纹未变、目标字段内容与启动时快照一致、未被其他任务写入声音；不一致归类 `conflict_skipped`，不能覆盖用户编辑。
-4. 正式提交顺序：验证 → 写入 Anki 媒体库取得文件名 → 构造精确 `[sound:filename]` → 按目标 Anki 的可撤销写入机制更新 note → 校验 note 提交成功 → 写入/更新来源记录。媒体写入成功而 note 更新失败，结果为 `failed_commit`，**不得产生悬空字段引用**；可留下未引用媒体但不自动删除（可能共享），应记录供人工诊断。来源记录写入失败时必须报告 `failed_provenance`，禁用后续自动 Replace，不能宣称完整成功。
-5. Cancel 立即停止派发新笔记；正在合成的请求可完成但取消后**不得提交**。窗口关闭/销毁时废弃旧 UI 回调；后台结果仍须遵循取消与提交门禁。防止重复点击/并发批次，明确同一 note 的互斥或版本检查。
-6. 每张笔记结果使用固定枚举：`success`、`skipped_empty`、`skipped_existing_audio`、`skipped_invalid_fields`、`conflict_skipped`、`cancelled`、`failed_probe`、`failed_synthesis`、`failed_download`、`failed_validation`、`failed_commit`、`failed_provenance`。统计与用户可见结果一致；单笔失败不回滚先前成功。必须验证撤销/重做及浏览器/编辑器入口的笔记刷新行为。
+4. 正式提交顺序：验证 → 最后取消检查及进入不可中断提交区 → 写入 Anki 媒体库取得文件名 → 构造精确 `[sound:filename]` → 按目标 Anki 的可撤销写入机制更新 note → 校验 note 提交成功 → 原子写入/更新来源记录。媒体写入成功而 note 更新失败为 `failed_commit`，**不得产生悬空字段引用**；可能留下未引用媒体，但不自动删除（可能共享）。笔记更新成功而来源记录失败为 `generated_unmanaged`，保留可播放音频并禁止自动 Replace；不得报告为未生成。
+5. **取消与提交的线性化边界（P1-02）**：Cancel 立即停止派发新笔记。尚在排队、合成、下载、校验或等待提交的结果都不得在取消后进入提交。每笔提交在写媒体前、完成冲突验证后，检查取消标志，并在同一个受保护的串行化门禁内从 `ready_to_commit` 转为 `committing`，该转换即不可中断提交区起点。若取消先于转换生效，该笔为 `cancelled`，不得写媒体；若转换先发生，即使用户随后 Cancel，也必须尽力完成该笔媒体、笔记、来源记录的全部步骤并报告真实结果，不人为中断形成半提交；该笔结束后不再派发下一笔。Cancel **不回滚已提交笔记**。窗口关闭/销毁时废弃旧 UI 回调；后台结果仍须遵循门禁。防止重复点击/并发批次，明确同一 note 的互斥或版本检查。
+6. **撤销分组（P1-02）**：同一批次中所有成功更新的 Anki 笔记（含 `generated_unmanaged`）必须合并为**一个 collection undo step**，即使批次部分失败或取消，也不能合并其他用户编辑或其他任务。开发实现记录必须给出目标 Anki 版本、实际 undo API、分组建立/合并/关闭时机、部分失败及关闭窗口时行为的实测证据；若无法安全满足此语义，阻断发布并申请 SPEC 变更，不得退化为不可撤销写入。撤销/重做只影响 collection 字段，不自动删除可能共享的媒体；残留来源索引在下一次 Replace 前必须实时核验，不匹配则保守拒绝。
+7. 每笔结果固定枚举：`success`、`generated_unmanaged`、`skipped_empty`、`skipped_existing_audio`、`skipped_invalid_fields`、`conflict_skipped`、`cancelled`、`failed_probe`、`failed_synthesis`、`failed_download`、`failed_validation`、`failed_commit`。其中 `success` = 音频已写入且来源完整；`generated_unmanaged` = 音频已写入但来源不完整。两者均计入“已生成”，分别报告“来源完整/来源不完整”；其余结果不计入生成成功。单笔失败不回滚先前成功。必须验证撤销/重做及浏览器/编辑器入口的笔记刷新。
 
 ### 13.6 幂等、来源记录与 Replace（对应审计条款 6）
 
 - 默认 **Skip**：目标字段只要存在任何有效 `[sound:...]` 引用即跳过该笔记；无论该声音是否由本插件生成。无声音时保留既有文字/HTML，再追加唯一音频引用；重复 Generate 不追加。
 - **来源记录**存于 `user_files` 下由统一管理器维护的独立版本化索引（例如 `audio_provenance_v1.json`），每条至少包含 `schema_version=1`、`note_id`、`destination_field`、`media_filename`、`media_sha256`、`sound_tag`、`provider`、`created_at`。以 `note_id + destination_field + sound_tag` 作为记录匹配键；写入应为原子替换，保留失败诊断，不能靠文件名前缀猜测所有权。记录不包含全文源文本、API Key 或临时路径。
 - **Replace 门槛**：明确开启 Replace 后，必须同时验证来源索引命中、目标字段含有**完全匹配**的原声音标签、媒体文件仍存在且 SHA-256 一致、没有歧义的重复标签、当前字段内容未在后台生成期间变化。任一条件不满足则保守跳过并提示人工处理；绝不能用 `ainotepro-` 文件名前缀或正则批量清理未知音频。替换只移除该条已验证旧标签并添加新标签，保留字段其余内容/HTML 和其他声音引用。
+- **双文件非原子提交的故障恢复（P1-03）**：Anki collection 与 `user_files/audio_provenance_v1.json` 不是同一数据库事务，**不能承诺跨两者的原子提交**。媒体成功、笔记失败：`failed_commit`，不写来源索引，不在字段留下新声音引用；未引用媒体不自动删除。笔记成功、来源索引失败：`generated_unmanaged`，字段与音频保留，批次计入“已生成/来源不完整”，向用户明确说明下次默认 Skip、不能自动 Replace。再次 Generate 一律先按目标字段已有 `[sound:...]` 执行 Skip，不因来源索引失败而重复追加。禁止依据文件名前缀或日志自动补造来源；若将来提供显式修复，必须重新验证 note ID、字段精确引用、真实媒体 SHA-256 与可证明的插件来源，无法证明则不允许认领。来源索引的原子替换失败必须保留旧文件、只留下诊断，不得宣称部分索引已成功提交。
 - 来源记录写入失败或配置丢失时：已生成声音仍可通过 Anki 同步播放，但该音频被视为**不可自动 Replace**。撤销/重做、手动编辑、笔记删除、媒体重命名后，旧索引可能失效；下一次 Replace 必须实时核验并保守拒绝，不得以旧索引作为最终证据。跨设备同步仅保证 Anki 字段和媒体；`user_files` 的来源索引不视为跨设备共享数据，其他设备无记录时默认 Skip。禁止自动删除 Anki 媒体文件。
 - 源/目标同字段：必须显式风险确认，合成文本先清除 HTML 与已有声音标记；提交前再次验证字段指纹。旧版未知来源音频不作自动归属。音频生成失败、取消或冲突时不应改变字段。
 
@@ -438,8 +440,8 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 
 ### 13.8 测试矩阵与发布门槛（对应审计条款 8）
 
-- **自动化**：JSON Schema 校验/缺省/损坏/未来版本、旧 Edge 配置迁移优先级/幂等/删除不复活/原子写失败；随机种子和参数配对/分布；Provider 切换和过期探测竞态；Gradio 三输出/排队/超时/版本不兼容/下载损坏；主线程提交前冲突检查；Skip/Replace 来源验证/撤销/重复生成；Preview 临时文件清理；取消、窗口销毁、批次失败隔离；两条音频入口同一安全策略；Edge/Text 回归。
-- **真实 Anki**：在目标 Anki 26.05+ 的内嵌 Python 验证依赖；Mac mini Apple Silicon 真实 `/synthesize`；1/10/100 张笔记；Edge/Kokoro、Kokoro 离线→Retry→恢复、Profile 保存→退出→重启、旧 user_files 升级、Preview 不增加媒体、重复生成 Skip、Replace 只处理确证归属音频、Cancel/关闭/重复点击、撤销/重做、浏览器/编辑器入口、Anki 媒体同步到手机播放；检查现有 UI 截图对照和纯英语范围。
+- **自动化**：Draft 2020-12 原文 Schema 和完整实例、非法 locale 与可选 locale 缺省、语言/口音/音色一致性；取消在提交边界前后两种时序、单批撤销分组；来源索引写失败后 `generated_unmanaged`、再次 Generate Skip 与 Replace 拒绝；JSON Schema 校验/缺省/损坏/未来版本、旧 Edge 配置迁移优先级/幂等/删除不复活/原子写失败；随机种子和参数配对/分布；Provider 切换和过期探测竞态；Gradio 三输出/排队/超时/版本不兼容/下载损坏；主线程提交前冲突检查；Skip/Replace 来源验证/撤销/重复生成；Preview 临时文件清理；取消、窗口销毁、批次失败隔离；两条音频入口同一安全策略；Edge/Text 回归。
+- **真实 Anki**：在目标 Anki 26.05+ 的内嵌 Python 验证依赖；Mac mini Apple Silicon 真实 `/synthesize`；1/10/100 张笔记；Edge/Kokoro、Kokoro 离线→Retry→恢复、Profile 保存→退出→重启、旧 user_files 升级、Preview 不增加媒体、重复生成 Skip、Replace 只处理确证归属音频、Cancel 在提交前/提交中、关闭/重复点击、批次单步撤销/重做、来源索引失败后的播放及再次 Skip、浏览器/编辑器入口、Anki 媒体同步到手机播放；检查现有 UI 截图对照和纯英语范围。
 - 每个验收项记录环境、版本、命令/操作、实际结果和证据；未执行标记 `NOT TESTED`，失败标记 `FAIL`，**不得用 mock PASS 代替真实端到端证据**。任一必需真实验收项 `FAIL`/`NOT TESTED` 时不得宣称发布通过；仅可说明当前阻断项及受限测试结论。任何非目标平台未验证，须在发布声明中排除该平台或阻断跨平台发布。
 
 ## 14. 实施纪律
