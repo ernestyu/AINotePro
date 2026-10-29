@@ -76,10 +76,19 @@ class TTSTab(QWidget):
         self.cfg = ConfigManager()
         self._audio, self._revision = self.cfg.get_audio_snapshot()
         self._profile_id = self._audio.get("last_profile_id")
-        self._draft = (copy.deepcopy(self._audio["profiles"][self._profile_id])
-                       if self._profile_id else default_profile("Unsaved Audio settings"))
+        if self._profile_id is None:
+            # A deleted/cleared selection must not silently open an unrelated
+            # unsaved default when saved Profiles still exist.
+            self._profile_id = next(iter(sorted(
+                self._audio["profiles"],
+                key=lambda pid: (self._audio["profiles"][pid]["name"].casefold(), pid)
+            )))
+        self._draft = copy.deepcopy(self._audio["profiles"][self._profile_id])
         self._saved = copy.deepcopy(self._draft)
-        self._loading = False
+        # _load_fields() emits currentIndexChanged while adding the first field.
+        # Keep all initialization signals from capturing blank/uninitialized
+        # voice combos, URL and speed sliders into the saved Profile draft.
+        self._loading = True
         self._probe_id = 0
         self._draft_revision = 0
         self._probe_state = "unprobed"
@@ -327,10 +336,9 @@ class TTSTab(QWidget):
         provider = self._draft["provider"]
         conf = self._draft["provider_configs"][provider]
         if provider == "kokoro_gradio":
-            # A trailing root slash is equivalent to the service origin.
-            # Do not accept arbitrary paths, queries or remote hosts.
-            typed_url = self.url_edit.text().strip()
-            conf["base_url"] = typed_url[:-1] if typed_url.endswith("/") and not typed_url.endswith("//") else typed_url
+            # Preserve the saved URL verbatim except for surrounding whitespace.
+            # Both a bare origin and a trailing root slash are valid endpoints.
+            conf["base_url"] = self.url_edit.text().strip()
         if provider == "edge_tts":
             conf["language_code"] = self.language_combo.currentData() or "en"
         for block, voice in zip(self.voice_blocks, conf["voices"]):
