@@ -393,9 +393,10 @@ class TTSTab(QWidget):
         def fetch():
             return create_provider("audio", "kokoro_gradio", {}).probe({"base_url": url})
         def done(voices):
-            if (request != self._probe_id or revision != self._draft_revision or
-                    self._draft["provider"] != "kokoro_gradio" or
-                    url != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]): return
+            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
+            if revision != self._draft_revision or url != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]:
+                self._probe()
+                return
             self._capture()
             self._available = voices; self._probe_state = "ready"
             self.status_label.setText(f"Kokoro: Ready · {len(voices)} English voices")
@@ -405,7 +406,10 @@ class TTSTab(QWidget):
             self._loading = False
             self._refresh_availability()
         def failed(err):
-            if request != self._probe_id or revision != self._draft_revision or self._draft["provider"] != "kokoro_gradio": return
+            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
+            if revision != self._draft_revision:
+                self._probe()
+                return
             self._available = []; self._probe_state = "unavailable"
             self.status_label.setText(f"Kokoro: Unavailable · {err[:150]}")
             self._refresh_availability()
