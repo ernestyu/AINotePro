@@ -17,17 +17,21 @@ class AiNoteProConfigDialog(QDialog):
         self.note_ids = list(note_ids or [])
         self.editor = editor
         self.setWindowTitle("AINotePro")
-        self.resize(760, 620)
-        self.setMinimumSize(680, 520)
+        # Audio V2 has three voice blocks and an inline Profile editor.
+        # Give them one full page without introducing an Audio scroll area.
+        self.resize(1000, 700)
+        self.setMinimumSize(870, 610)
 
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 6, 10, 6)
+        main_layout.setSpacing(5)
 
         # Top info
         top_label = QLabel(
-            '<div style="text-align:center; font-size:14px; margin: 10px 0; font-style:italic;">'
+            '<div style="text-align:center; font-size:13px; margin: 2px 0; font-style:italic;">'
             'Enhance your Anki notes with AI-generated text and speech!'
             '</div>'
-            '<div style="text-align:right; font-size:11px; margin: 10px 0; font-style:italic;">'
+            '<div style="text-align:right; font-size:11px; margin: 2px 0; font-style:italic;">'
             'AINotePro v1.0.0    '
             '</div>'
         )
@@ -48,7 +52,7 @@ class AiNoteProConfigDialog(QDialog):
         # Bottom info + buttons
         bottom_layout = QHBoxLayout()
         bottom_label = QLabel(
-            '<p style="font-size:12px;">'
+            '<p style="font-size:12px; margin:0;">'
             'Enjoying AINotePro? '
             '<a href="https://github.com/ernestyu/AINotePro">Star it on GitHub</a> '
             '</p>'
