@@ -109,6 +109,7 @@ class ConfigManager:
 
     def __init__(self):
         self.config = self._load_config()
+        self._baseline = copy.deepcopy(self.config)
 
     @staticmethod
     def _atomic_write(data):
@@ -195,6 +196,7 @@ class ConfigManager:
             self._atomic_write(updated)
             self.config = _deep_merge_dicts(_get_default_config(), copy.deepcopy(updated))
             self.config["audio"] = copy.deepcopy(updated["audio"])
+            self._baseline = copy.deepcopy(self.config)
             return self._revision()
 
     def audio_revision(self):
@@ -217,19 +219,62 @@ class ConfigManager:
             service["provider"] = provider_name
         self._replace_raw(update)
 
-    def save_all(self, data):
-        """Compatibility API: preserve unknown keys and replace Audio profiles as one unit."""
-        _prune_removed_config_keys(data)
+    def update_text_fields(self, fields):
+        """Write only the named Text keys; preserve Audio and all other Text settings."""
+        allowed = {"prompts", "last_used_prompt"}
+        if not isinstance(fields, dict) or set(fields) - allowed:
+            raise ValueError("Unsupported Text field update")
         def update(raw):
-            for key, value in data.items():
-                if key == "audio":
-                    # Audio V2 is owned exclusively by replace_audio(); a stale
-                    # TextTab.save_all() snapshot must never resurrect deleted profiles.
+            text = raw.setdefault("text", {})
+            for key, value in fields.items():
+                text[key] = copy.deepcopy(value)
+        self._replace_raw(update)
+
+    def save_all(self, data):
+        """Legacy API: apply changed leaf values only, never a stale whole Text snapshot.
+
+        Compare against this manager's last-read baseline. If a different window
+        changed the same leaf, refuse the conflicting update instead of losing it.
+        Audio remains exclusively owned by replace_audio().
+        """
+        if not isinstance(data, dict):
+            raise ValueError("Expected configuration mapping")
+        proposed = copy.deepcopy(data)
+        _prune_removed_config_keys(proposed)
+        baseline = copy.deepcopy(self._baseline)
+        missing = object()
+        changes = []
+
+        def collect(old, new, path=()):
+            for key, value in new.items():
+                if not path and key == "audio":
                     continue
-                elif isinstance(value, dict) and isinstance(raw.get(key), dict):
-                    raw[key].update(copy.deepcopy(value))
-                else:
-                    raw[key] = copy.deepcopy(value)
+                previous = old.get(key, missing) if isinstance(old, dict) else missing
+                if isinstance(value, dict) and isinstance(previous, dict):
+                    collect(previous, value, path + (key,))
+                elif previous is missing or previous != value:
+                    changes.append((path + (key,), copy.deepcopy(value),
+                                    copy.deepcopy(previous) if previous is not missing else missing))
+
+        collect(baseline, proposed)
+        if not changes:
+            return
+
+        def update(raw):
+            current_with_defaults = _deep_merge_dicts(_get_default_config(), copy.deepcopy(raw))
+            for path, value, old_value in changes:
+                old_parent = current_with_defaults
+                for key in path[:-1]:
+                    old_parent = old_parent.get(key, {}) if isinstance(old_parent, dict) else {}
+                now = old_parent.get(path[-1], missing) if isinstance(old_parent, dict) else missing
+                if now != old_value and now != value:
+                    raise RuntimeError("Concurrent settings change: " + ".".join(path))
+                parent = raw
+                for key in path[:-1]:
+                    parent = parent.setdefault(key, {})
+                    if not isinstance(parent, dict):
+                        raise ValueError("Invalid configuration structure")
+                parent[path[-1]] = value
         self._replace_raw(update)
 
     def _save_config(self):
