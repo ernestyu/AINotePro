@@ -102,7 +102,7 @@ class TTSTab(QWidget):
         self._build_ui()
         self._load_fields()
         self._load_languages()
-        self._refresh_profiles()
+        self._refresh_profiles(self._draft["name"] if self._profile_id else "")
         self._apply_draft()
 
     def _build_ui(self):
