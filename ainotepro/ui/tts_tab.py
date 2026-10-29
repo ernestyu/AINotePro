@@ -767,10 +767,12 @@ class TTSTab(QWidget):
                 try:
                     persisted = mw.col.get_note(nid)[dst] == content
                 except Exception as exc:
-                    self._count("failed_commit")
+                    # This is an indeterminate commit, NOT a confirmed failed write.
+                    # Never retry automatically: the new sound tag may be present.
+                    self._count("commit_unverified")
                     self._stop_batch(
                         f"Cannot determine whether note {nid} was committed: {exc}; "
-                        "inspect collection before retrying")
+                        "inspect the note and its media before retrying")
                     return
                 if not persisted:
                     self._count("failed_commit")
