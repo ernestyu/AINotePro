@@ -221,6 +221,16 @@ class ConfigManager:
     def get_audio(self):
         return copy.deepcopy(self.config["audio"])
 
+    def get_audio_snapshot(self):
+        """Read Audio and its CAS token from one consistent disk snapshot."""
+        with _CONFIG_LOCK:
+            current = self._read_raw()
+            if current is None:
+                raise ValueError("Configuration file disappeared")
+            audio = copy.deepcopy(current["audio"])
+            validate_audio(audio)
+            return audio, self._audio_digest(audio)
+
     def replace_audio(self, audio, expected_revision=None):
         validate_audio(audio)
         # Keep the atomic whole-file write, but compare only the Audio domain.
