@@ -530,6 +530,8 @@ class TextTab(QWidget):
                 raise RuntimeError("Saved prompt could not be verified on disk")
             self.all_prompts = saved
             _set_last_used_prompt(name)
+            # Prompt Save should also retain the visible provider/model settings.
+            self._save_current_provider_config()
         except Exception as exc:
             print(f"[AINotePro] Prompt save failed name={name!r}: {exc}")
             showWarning(f"Could not save prompt '{name}': {exc}")
@@ -682,6 +684,8 @@ class TextTab(QWidget):
             self._save_current_provider_config()
 
     def _refresh_models(self) -> None:
+        # Commit a manually entered model before replacing the combo's items.
+        self._model_selection_changed()
         st = "text"; pv = self._service_map()
         # Use current UI values rather than stored config
         base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
@@ -705,10 +709,11 @@ class TextTab(QWidget):
             showWarning(f"Failed to fetch models: {e}")
 
     def _test_model(self) -> None:
-        # simple ping using a tiny prompt
-        base_url = self.base_url_edit.text().strip(); api_key = self.api_key_edit.text().strip()
-        model = self.model_combo.currentText().strip(); temp = self._temperature_value()
-        st = "text"; pv = self._service_map(); cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
+        # Test the exact request settings, including the reasoning override.
+        self._model_selection_changed()
+        cfg = self._current_provider_config()
+        base_url, model, temp = cfg["base_url"], cfg["model"], cfg["temperature"]
+        st = "text"; pv = self._service_map()
         print(f"[AINotePro] Check clicked. service={pv}, model={model}, base_url={base_url}, temp={temp}")
         provider = create_provider(st, pv, cfg)
         try:
@@ -737,6 +742,9 @@ class TextTab(QWidget):
         if not self._confirm_write_risk(note_ids, src, dst):
             return
 
+        # Save the chosen model even if Generate is the first action after selection.
+        self._model_selection_changed()
+        request_cfg = self._current_provider_config()
         st = "text"; pv = self._service_map(); provider = create_provider(st, pv, {})
         # If image-assisted is enabled, fall back to per-note flow for correctness
         if self.image_checkbox and self.image_checkbox.isChecked():
@@ -751,7 +759,7 @@ class TextTab(QWidget):
                 note = mw.col.get_note(nid)
                 if src not in note: continue
                 src_text = (note[src] or "").strip()
-                cfg = {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp}
+                cfg = dict(request_cfg)
                 content: Optional[str] = None
                 image_ref, image_error = self._extract_image_reference(src_text)
                 if image_ref:
@@ -823,7 +831,7 @@ class TextTab(QWidget):
             "prompt_tpl": prompt_tpl,
             "dst": dst,
             "provider_name": pv,
-            "base_cfg": {"base_url": base_url, "api_key": api_key, "model": model, "temperature": temp},
+            "base_cfg": dict(request_cfg),
         }
         self.worker = GenerationWorker(params)
         self.worker.moveToThread(self.thread)
@@ -996,6 +1004,12 @@ class TextTab(QWidget):
         except Exception as e:
             return None, f"Failed to encode image as Base64: {e}"
 
-    def save_settings(self) -> None:
-        """Saves the current UI settings for the selected provider to the config file."""
-        self._save_current_provider_config()
+    def save_settings(self) -> bool:
+        """Persist Text settings on dialog close, including model and reasoning."""
+        try:
+            self._model_selection_changed()
+            self._save_current_provider_config()
+            return True
+        except Exception as exc:
+            showWarning(f"Could not save Text provider settings: {exc}")
+            return False
