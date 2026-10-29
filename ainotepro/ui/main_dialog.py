@@ -157,7 +157,7 @@ class MainDialog(QDialog):
         elif value == "image":
             self.provider_combo.addItems(["pollinations", "dalle"])  # sd_webui optional
         else:
-            self.provider_combo.addItems(["edge_tts"])  # default audio
+            self.provider_combo.addItems(["edge_tts"])  # legacy audio entry is disabled
 
         # Load saved provider config into UI
         self._populate_provider_cfg()
@@ -246,7 +246,7 @@ class MainDialog(QDialog):
             if req.service_type == "image":
                 return self.manager.generate_image_for_field(req)
             if req.service_type == "audio":
-                return self.manager.generate_audio_for_field(req)
+                raise RuntimeError("Legacy Audio entry disabled; use the Audio tab.")
             raise ValueError("unknown service type")
 
         task = AsyncTask(target=work)
