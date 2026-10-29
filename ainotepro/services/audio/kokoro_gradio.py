@@ -102,7 +102,10 @@ def _voices(params):
 class KokoroGradioProvider:
     def probe(self, config):
         base = _base_url(config.get("base_url", "http://127.0.0.1:7860"))
-        info = _json(base + "/gradio_api/info", timeout=10)
+        try:
+            info = _json(base + "/gradio_api/info", timeout=10)
+        except KokoroError:
+            info = _json(base + "/info", timeout=10)
         params = _endpoint(info)
         voices = _voices(params)
         if not voices:
@@ -110,7 +113,7 @@ class KokoroGradioProvider:
             cfg = _json(base + "/config", timeout=10)
             for comp in cfg.get("components", []):
                 props = comp.get("props") or {}
-                if props.get("label") == "Voice":
+                if str(comp.get("type", "")).lower() == "dropdown" or props.get("choices"):
                     for item in props.get("choices", []):
                         name = item[-1] if isinstance(item, (list, tuple)) and item else item
                         if isinstance(name, str) and name.startswith(PREFIXES):
