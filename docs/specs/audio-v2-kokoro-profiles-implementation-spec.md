@@ -135,6 +135,58 @@ Kokoro v1.0 官方覆盖**8 种语言、9 个语言/口音组、54 个音色**�
 - 语言、口音、性别、voice ID 均随 Profile 保存/加载，迁移旧 Profile 不丢旧音色。
 - 其他 7 种语言的支持须以独立第二阶段实际部署验证为前提，不计入本阶段 PASS。
 
-## 12. 实施纪律
+## 12. 现有 Audio UI 兼容性与纯英语范围冻结（2026-10-29 决策）
+
+本节为**必须实现的 UI 与兼容性约束**，优先于前述章节中可能引起界面重设计或多语言范围扩大的表述。用户已明确决定：**本次 Kokoro 仅做英语，美式和英式均保留；现有 Audio UI 是兼容基线。** “仅英语”只限制新 Kokoro Provider，**不得削减 Edge TTS 现有多语言功能**。
+
+### 12.1 保持现有界面结构和操作习惯
+
+以 `ainotepro/ui/tts_tab.py` 当前 `main` 实现和用户提供的 Audio 标签截图为界面基线。必须保留：
+- 顶部 `Generate using` 和 `Language` 两个选择位置；
+- 三个纵向排列的 `Voice 1/2/3` 分组，各自独立的 `Enable Voice`、音色下拉框、试听文本框、`Preview` 按钮、`Gender`、`Speed`；Edge 下继续保留 `Volume`、`Pitch`；
+- 下方 `Source Field`、`Destination Field`，以及原对话框底部的 `Generate` / `Close` 等主操作；
+- 现有滚动区域与 Qt/macOS 原生控件风格；不得为了新增 Kokoro 将三个 Voice 合并为单个音色选择器、改成独立弹窗、移动 Generate 主入口或大规模重排页面。
+
+新增 **Profile 下拉框 + Load / Save / Save As / Delete** 应在 Audio 标签内容顶部使用一行紧凑工具栏，不遮挡或替代原控件；连接状态/Retry 使用简短行内提示，不能增加占满屏幕的服务配置面板。因窗口尺寸或系统缩放造成空间不足时沿用现有滚动区域，避免水平溢出。
+
+### 12.2 Provider 切换与参数映射
+
+| UI 元素 | Edge TTS（兼容基线） | Kokoro MLX（本次） |
+|---|---|---|
+| Generate using | 保留原 Edge-TTS 选项及语义 | 增加 Kokoro MLX (Local) |
+| Language | 保留原多语言列表与选择能力 | 仅 English，显示为固定值或不可编辑选项 |
+| Voice 1/2/3 | 原三个区块、启用状态、预览 | **原三个区块与随机选取机制完全保留** |
+| Accent | 沿用原 Edge 语言与音色筛选，不强行增加新控件 | **每个 Voice 区块**独立筛选 American / British；不得全局统一口音 |
+| Gender | 原 Female / Male | 原 Female / Male；与口音组合过滤可用音色 |
+| Voice | Edge 原 ShortName 作为存储值 | 友好标签如 `Heart · American Female · A`，原 `af_heart` 作为存储/API 值 |
+| Speed | 原滑块范围与单位不变 | 同位置滑块映射 0.70–1.30 倍，显示实际倍数，切回 Edge 时恢复 Edge 值 |
+| Volume / Pitch | 保留原滑块、参数及其值 | **保留位置但禁用**，附简短“不受 Kokoro API 支持”提示；不传给 Kokoro |
+| API Key | 现有 Edge UI 行为本次不主动重构 | 隐藏（Kokoro 不需要） |
+| Preview | 每个区块原位置、预览该区块 | 同一位置，使用当前区块全部有效参数，不随机、不写 Anki 媒体库 |
+| Source/Destination/Generate | 维持现有位置和含义 | 维持相同操作入口，服务未就绪时禁用 Generate |
+
+Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 American Female (`af_`)、American Male (`am_`)、British Female (`bf_`)、British Male (`bm_`)；显示名和官方等级来自 `docs/reference/kokoro-official-voice-language-catalog.md`，仅作元数据。建议在每个 Voice 区块现有 `Gender` 所在行紧凑增加 `Accent` 选择框，原 `Voice` 下拉框保留位置，避免将所有音色平铺为不可理解的 ID 长列表。三块可独立选不同口音、性别及音色，随机选择时带走该区块的完整配置。未连接或服务不返回该 ID 时保留 Profile 原值并标记不可用，不自动选第一项。
+
+### 12.3 无损切换、离线及 Profile 恢复
+
+- 切换 Edge ↔ Kokoro 不得将一方的 voice ID、语言、音量、音调、语速数值覆盖到另一方；同名 UI 控件背后须有 Provider 独立的编辑状态或经验证的状态快照。Kokoro 0.95 与 Edge `-5` 等滑块值不能混用。
+- 用户选择 Kokoro 后可在下拉框看到当前选择，但后台探测未成功时明确显示 `Checking/Unavailable`，禁用 Preview/Generate 并提供 Retry；**不允许悄悄回退 Edge 并生成音频**。这既满足“不可用就不让用”，也允许加载离线 Kokoro Profile 供编辑和保存。
+- Profile 加载与 Provider 切换必须区分：仅明确 Load 才覆盖当前 Profile 的编辑配置；仅切换 Provider 不应覆盖已保存 Profile。未保存状态遵守第 5 节提示规则。
+- Edge TTS 现有多语言、语音列表、试听和字段生成流程必须通过回归；即使当前 UI 中出现无意义的 API Key 行，也不得借本次开发删除 Edge 功能或擅自改其持久化语义。
+
+### 12.4 明确排除多语言扩展
+
+本次**不提供**日语、中文、法语、西班牙语、意大利语、印地语或葡萄牙语的 Kokoro 选择项；不修改 Kokoro 模型、Gradio 服务、G2P 安装或音色过滤逻辑；不为非英语 Kokoro 编写可交付 UI。前述第 11 节非英语资料仅作背景参考和未来扩展说明，不是本次实施需求。Profile 可以保留通用 `language/locale` 字段，但不能因此引入第二阶段代码。
+
+### 12.5 必须新增的 UI 回归验收
+
+1. 升级前后的 Edge TTS 顶部控件、三 Voice、语言/性别/音色、Preview、Speed/Volume/Pitch、源/目标字段和 Generate 操作在同一位置且功能等价；原有配置可恢复。
+2. Kokoro 只有 English，三个 Voice 独立可混合 American/British、Female/Male；28 个音色 ID 与友好名称/官方等级映射正确，列表不会展示无法合成的其他语言。
+3. 在同一窗口反复 Edge → Kokoro → Edge，未保存的两个 Provider 编辑状态与各自滑块值不串用、不被重置；Kokoro 不支持的控件被禁用而非误传参数。
+4. Kokoro 离线、连接中、在线、断线、Retry、加载离线 Profile 各状态下，Preview/Generate 的启用条件正确，无静默回退；其他 Provider 正常使用。
+5. 保存/加载/删除 Profile、关闭/重开插件后，Provider、口音、性别、原始 voice ID、三个 Voice 的启用和参数、字段均正确恢复；不能因重新填充下拉框导致默认选第一项。
+6. Mac mini 实际窗口及不同缩放/窗口尺寸下没有控件重叠、水平溢出或关键按钮不可达；至少对照现有 Audio 截图人工验收。
+
+## 13. 实施纪律
 
 本 SPEC 经独立审计通过后再实施。先补自动化测试，再以最小必要改动实现；先保证 Edge TTS 不退化，再接入 Kokoro；所有新增依赖须说明打包方式。开发完成提交 PR/Commit、测试命令与结果、Mac mini 实测步骤和残留风险；不得以单次 API 成功替代完整验收。
