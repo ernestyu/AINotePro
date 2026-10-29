@@ -196,6 +196,10 @@ class TextTab(QWidget):
         self.note_ids = list(note_ids or [])
         self.editor = editor
         self.cfg = ConfigManager()
+        self._active_provider: Optional[str] = None
+        self._active_model = ""
+        self._reasoning_by_model: Dict[str, str] = {}
+        self._loading_provider = False
         self.all_prompts: Dict[str, str] = {}
         self._is_updating_prompt_combo = False
         self._generation_update_count = 0
@@ -267,7 +271,30 @@ class TextTab(QWidget):
         grid.addWidget(QLabel("<b>Model:</b>"), 2, 0)
         self.model_combo = QComboBox(); self.model_combo.setEditable(True)
         self.model_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
-        grid.addWidget(self.model_combo, 2, 1, 1, 3)
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.setSpacing(6)
+        model_row.addWidget(self.model_combo, 1)
+        model_row.addWidget(QLabel("<b>Reasoning:</b>"))
+        self.reasoning_combo = QComboBox()
+        for label, mode in (
+            ("Off", "off"), ("Low", "low"), ("Medium", "medium"),
+            ("High", "high"), ("Model Default", "default")
+        ):
+            self.reasoning_combo.addItem(label, mode)
+        self.reasoning_combo.setToolTip(
+            "Per-model reasoning preference. For llama.cpp: Off=none, "
+            "Low=low, Medium=medium, High=xhigh; Model Default sends no override. "
+            "Other servers may not support these parameters."
+        )
+        self.reasoning_combo.setCurrentIndex(self.reasoning_combo.findData("default"))
+        model_row.addWidget(self.reasoning_combo)
+        grid.addLayout(model_row, 2, 1, 1, 3)
+        # User selection and completed manual entry both persist the chosen model.
+        # Avoid currentTextChanged: it fires on every typed character and during Refresh.
+        self.model_combo.activated.connect(self._model_selection_changed)
+        self.model_combo.lineEdit().editingFinished.connect(self._model_selection_changed)
+        self.reasoning_combo.currentIndexChanged.connect(self._reasoning_selection_changed)
         self.refresh_button = QPushButton("Refresh"); self.refresh_button.setFixedWidth(70)
         self.test_button = QPushButton("Check"); self.test_button.setFixedWidth(60)
         self.refresh_button.clicked.connect(self._refresh_models)
@@ -580,11 +607,15 @@ class TextTab(QWidget):
         return TEXT_PROVIDER_LABEL_TO_KEY.get(svc, TEXT_PROVIDER_LABEL_ALIASES.get(svc, "openai"))
 
     def _current_provider_config(self) -> Dict[str, Any]:
+        model = self.model_combo.currentText().strip()
+        if model:
+            self._reasoning_by_model[model] = self.reasoning_combo.currentData() or "default"
         return {
             "base_url": self.base_url_edit.text().strip(),
             "api_key": self.api_key_edit.text().strip(),
-            "model": self.model_combo.currentText().strip(),
+            "model": model,
             "temperature": self._temperature_value(),
+            "reasoning_by_model": dict(self._reasoning_by_model),
         }
 
     def _temperature_value(self) -> float:
@@ -594,23 +625,61 @@ class TextTab(QWidget):
             value = 0.7
         return max(0.0, min(value, 2.0))
 
-    def _save_current_provider_config(self) -> None:
-        st = "text"; pv = self._service_map()
-        self.cfg.set_provider_config(st, pv, self._current_provider_config())
+    def _save_current_provider_config(self, provider_key: Optional[str] = None) -> None:
+        pv = provider_key or self._active_provider or self._service_map()
+        self.cfg.set_provider_config("text", pv, self._current_provider_config())
         print(f"[AINotePro] Saved settings for Text/{pv}")
 
-    def _populate_provider_cfg(self) -> None:
-        st = "text"; pv = self._service_map()
-        cfg = self.cfg.get_provider_config(st, pv)
-        self.base_url_edit.setText(cfg.get("base_url", ""))
-        self.api_key_edit.setText(cfg.get("api_key", ""))
-        self.model_combo.setEditText(cfg.get("model", ""))
-        temp = cfg.get("temperature", 0.7)
+    def _model_selection_changed(self, *_):
+        if self._loading_provider:
+            return
+        new_model = self.model_combo.currentText().strip()
+        if self._active_model and self._active_model != new_model:
+            self._reasoning_by_model[self._active_model] = self.reasoning_combo.currentData() or "default"
+        self._active_model = new_model
+        self._loading_provider = True
         try:
-            temp = float(temp)
-        except Exception:
-            temp = 0.7
-        self.temperature_edit.setText(f"{temp:.2f}")
+            mode = self._reasoning_by_model.get(new_model, "default")
+            index = self.reasoning_combo.findData(mode)
+            self.reasoning_combo.setCurrentIndex(index if index >= 0 else self.reasoning_combo.findData("default"))
+        finally:
+            self._loading_provider = False
+        self._save_current_provider_config()
+
+    def _reasoning_selection_changed(self, *_):
+        if not self._loading_provider:
+            self._save_current_provider_config()
+
+    def _populate_provider_cfg(self, *_):
+        pv = self._service_map()
+        previous = self._active_provider
+        if previous is not None and previous != pv:
+            self._save_current_provider_config(provider_key=previous)
+        self._loading_provider = True
+        try:
+            cfg = self.cfg.get_provider_config("text", pv)
+            self.base_url_edit.setText(cfg.get("base_url", ""))
+            self.api_key_edit.setText(cfg.get("api_key", ""))
+            self.model_combo.setEditText(cfg.get("model", ""))
+            temp = cfg.get("temperature", 0.7)
+            try:
+                temp = float(temp)
+            except Exception:
+                temp = 0.7
+            self.temperature_edit.setText(f"{temp:.2f}")
+            stored = cfg.get("reasoning_by_model", {})
+            self._reasoning_by_model = dict(stored) if isinstance(stored, dict) else {}
+            self._active_model = self.model_combo.currentText().strip()
+            mode = self._reasoning_by_model.get(self._active_model, "default")
+            index = self.reasoning_combo.findData(mode)
+            self.reasoning_combo.setCurrentIndex(index if index >= 0 else self.reasoning_combo.findData("default"))
+            # Native Ollama reasoning parameters are a separate protocol.
+            self.reasoning_combo.setEnabled(pv != "ollama")
+            self._active_provider = pv
+        finally:
+            self._loading_provider = False
+        if previous is not None and previous != pv:
+            self._save_current_provider_config()
 
     def _refresh_models(self) -> None:
         st = "text"; pv = self._service_map()
