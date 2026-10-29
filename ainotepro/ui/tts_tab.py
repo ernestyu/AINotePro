@@ -88,6 +88,7 @@ class TTSTab(QWidget):
         self._edge_request = 0
         self._running = False
         self._cancelled = False
+        self._closing = False
         self._items = []
         self._cursor = 0
         self._results = {}
@@ -494,8 +495,11 @@ class TTSTab(QWidget):
             showWarning(f"Could not delete Profile: {exc}"); return False
 
     def can_close(self):
+        if not self._confirm_discard():
+            return False
+        self._closing = True
         self.request_cancel()
-        return self._confirm_discard()
+        return True
 
     def request_cancel(self):
         self._cancelled = True
@@ -587,6 +591,8 @@ class TTSTab(QWidget):
         self._results[category] = self._results.get(category, 0) + 1
 
     def _next(self):
+        if self._closing:
+            return
         if self._cancelled or self._cursor >= len(self._items):
             self._finish(); return
         nid = self._items[self._cursor]; self._cursor += 1
@@ -633,6 +639,8 @@ class TTSTab(QWidget):
         _task(work, done, failed)
 
     def _commit(self, snapshot, data):
+        if self._closing:
+            return
         nid, raw, original, old_tag, _text, voice = snapshot
         spec = self._snapshot
         if self._cancelled:
@@ -678,12 +686,12 @@ class TTSTab(QWidget):
             print(f"[AINotePro Audio] commit {nid}: {exc}")
 
     def _advance(self):
-        if not self._running: return
+        if not self._running or self._closing: return
         self._progress.setValue(self._cursor)
         QTimer.singleShot(0, self._next)
 
     def _finish(self):
-        if not self._running: return
+        if not self._running or self._closing: return
         if self._cancelled:
             self._results["cancelled"] = self._results.get("cancelled", 0) + len(self._items) - self._cursor
         self._running = False
