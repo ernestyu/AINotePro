@@ -1,5 +1,14 @@
 # Changelog
 
+## Audio V2 - Preserve active Profile during tab switching and reopen (2026-10-29)
+
+- Fixed a startup ordering defect: populating Source/Destination fields emitted change signals before the saved Audio Profile was applied. Those signals captured blank URL/Voice controls and uninitialized speed sliders into the in-memory draft, producing false unsaved-change prompts, failed Kokoro validation and apparent 0.70x speed resets.
+- Suppress UI-to-draft capture for the entire initial widget/field setup, then hydrate the last saved/loaded Profile before accepting user edits.
+- If a saved Audio configuration has no selected last_profile_id, display an existing saved Profile instead of an unrelated unsaved default.
+- Preserve the exact saved local Gradio URL (apart from surrounding whitespace), including a valid trailing slash, without marking a Profile dirty merely because it was loaded.
+- Kokoro's three new-Profile speed defaults remain 1.00x; previously saved speed values (including 0.70x) are deliberately not overwritten.
+- No runtime Anki test or CI executed in this change; verify tab switching, close/reopen, Save/Load and all three Voice speed values on Mac.
+
 ## Audio V2 - Profile Save/Load field fix (2026-10-29)
 
 - Scope Audio Profile optimistic concurrency to the Audio JSON domain, not the whole shared config file: Text prompt/UI changes no longer invalidate Audio Save/Load.
