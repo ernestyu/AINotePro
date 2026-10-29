@@ -1,5 +1,15 @@
 # Changelog
 
+## Audio V2 - Development candidate (2026-10-29, not release-tested)
+
+- Added English-only local Kokoro Gradio Provider and user-visible American/British, Female/Male voice labels with official quality metadata.
+- Added versioned Audio Profiles with migration, independent Provider settings and atomic file replacement.
+- Kept the three original Voice blocks, with complete per-note random Voice selection and per-block Preview.
+- Moved audio synthesis off the Qt UI thread; added cancellation gate, Anki media provenance and conservative Skip/Replace.
+- Disabled legacy direct audio-writing entry to prevent bypassing the V2 safety policy.
+- **Per user instruction, no tests or CI were run. Anki/Gradio runtime compatibility and release acceptance remain unverified.**
+
+
 ## 1.0.0 - Initial AnkiWeb Release Candidate
 
 - Added text generation for selected Anki notes.
