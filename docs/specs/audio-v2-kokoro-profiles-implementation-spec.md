@@ -394,6 +394,8 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 
 **独立验证要求**：使用 `jsonschema.Draft202012Validator.check_schema(schema)` 校验仓库原文的 Schema，再以 `Draft202012Validator(schema, format_checker=FormatChecker()).validate(example)` 校验实例。反例应覆盖非法 locale、非英语、超范围速度、非三个 Voice、非法 Profile ID；省略可选 locale 的合法旧 Profile 应通过结构校验并由应用层补默认值。另测 locale/口音/性别/前缀一致性、离线失效音色仍可加载、`last_profile_id` 指向现有 Profile。必须记录校验器版本与结果；JSON 解析成功不等于 Draft 2020-12 验证通过。
 
+**2026-10-29 Schema 校验记录（P1-01）**：读取本仓库 SPEC 的两段 JSON（Schema 与完整示例），使用 Python `jsonschema 4.26.0` 的 `Draft202012Validator.check_schema`、`Draft202012Validator(..., format_checker=FormatChecker()).validate` 执行独立校验。结果：**8/8 PASS**——Schema 元校验、完整示例、非法 `locale=fr-FR` 拒绝、Kokoro `language=fr` 拒绝、`speed=1.5` 拒绝、Voice 数量为 2 拒绝、非法 Profile ID 拒绝、省略可选 `locale` 的旧 V2 Profile 接受。JSON 内容与仓库文档提取结果的规范化紧凑长度分别为 2811/1172 字符。**范围限制**：这是文档 Schema 级验证，不代表 Anki 运行时迁移、应用层跨字段一致性或真实 UI/媒体集成测试已通过；这些仍须按 §13.8 验收。
+
 **迁移优先级与删除**：
 1. 已有合法 `audio.profiles` 为权威，保留其稳定 ID 和内容；绝不因仍存在 `audio.edge_tts` 再创建默认 Profile。
 2. 尚无 Profiles 且 `migration.legacy_edge_v1_done` 不为 true 时，读取现有 `audio.edge_tts`，生成**恰好一个** `legacy-edge-default` Profile；只迁移实际存在的值，缺失部分按上述默认填充，并在同一次原子提交中写迁移标记。
