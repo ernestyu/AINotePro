@@ -249,6 +249,7 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
         "enabled": {"type": "boolean"},
         "voice": {"type": "string", "pattern": "^(|(?:af|am|bf|bm)_[a-z0-9_]+)$"},
         "accent": {"enum": ["American", "British"]},
+        "locale": {"type": "string", "enum": ["en-US", "en-GB"], "description": "Optional voice-level locale; default derived from accent."},
         "gender": {"enum": ["Female", "Male"]},
         "speed": {"type": "number", "minimum": 0.7, "maximum": 1.3},
         "preview_text": {"type": "string"}
@@ -298,7 +299,100 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 }
 ```
 
+**`locale` 契约（P1-01）**：`locale` 定义在**每个 Kokoro Voice 区块**而非 Provider 顶层，允许同一 Profile 混合美式和英式。字段可选，以兼容已保存的 V2 Profile；缺失时从该区块 `accent` 推导默认值（`American → en-US`，`British → en-GB`），新建或重新保存时显式写出。当前只允许 `en-US` / `en-GB`，Provider `language` 固定 `en`。应用层必须核验 `locale`、`accent`、`gender` 和 voice ID 前缀一致（`af/am → en-US`、`bf/bm → en-GB`）。**结构校验与运行时音色可用性校验必须分离**；离线或音色不再可用不能导致合法 Profile 无法加载。
+
 **结构之外的业务校验**：Profile key 采用小写 UUID v4（迁移 Profile 固定 `legacy-edge-default`）；Profile 名称去首尾空格后非空，同名（大小写不敏感）拒绝或明确提示重命名；`last_profile_id` 为 `null` 或存在于 `profiles`；三个 Voice 的 ID、口音、性别必须相互一致，允许空 voice 仅用于禁用的未配置区块；实际启用区块必须有可用 voice。URL 必须再做运行时 loopback 校验（含 DNS/重定向），不能只信 schema 正则。字段名允许空字符串作为尚未选定状态，但生成前必须验证存在。默认：Provider `edge_tts`、Edge 语言 `en`、三块均禁用、Edge 速度/音量/音调为 0、Kokoro 速度 1.0、Kokoro URL `http://127.0.0.1:7860`、策略 `uniform_per_note`；默认 Preview 文本为空。具体默认音色可从现有 Edge 配置恢复，不得臆造用户旧设置。
+
+**完整 Audio V2 JSON 实例（P1-01）**：以下是 `user_config.json` 中的 `audio` 域，真实文件还包含独立的 `text/ui` 域。三个 Voice 区块均保存，即使未启用也保留其参数。
+
+```json
+{
+  "schema_version": 2,
+  "last_profile_id": "123e4567-e89b-42d3-a456-426614174000",
+  "migration": {
+    "legacy_edge_v1_done": true
+  },
+  "profiles": {
+    "123e4567-e89b-42d3-a456-426614174000": {
+      "schema_version": 2,
+      "name": "English practice",
+      "provider": "kokoro_gradio",
+      "source_field": "Sentence",
+      "destination_field": "Audio",
+      "random_strategy": "uniform_per_note",
+      "provider_configs": {
+        "edge_tts": {
+          "language_code": "en",
+          "voices": [
+            {
+              "enabled": true,
+              "voice": "en-US-AriaNeural",
+              "gender": "Female",
+              "speed": 0,
+              "volume": 0,
+              "pitch": 0,
+              "preview_text": ""
+            },
+            {
+              "enabled": false,
+              "voice": "en-GB-SoniaNeural",
+              "gender": "Female",
+              "speed": 0,
+              "volume": 0,
+              "pitch": 0,
+              "preview_text": ""
+            },
+            {
+              "enabled": false,
+              "voice": "en-US-GuyNeural",
+              "gender": "Male",
+              "speed": 0,
+              "volume": 0,
+              "pitch": 0,
+              "preview_text": ""
+            }
+          ]
+        },
+        "kokoro_gradio": {
+          "base_url": "http://127.0.0.1:7860",
+          "language": "en",
+          "voices": [
+            {
+              "enabled": true,
+              "voice": "af_heart",
+              "accent": "American",
+              "locale": "en-US",
+              "gender": "Female",
+              "speed": 0.95,
+              "preview_text": ""
+            },
+            {
+              "enabled": true,
+              "voice": "bf_emma",
+              "accent": "British",
+              "locale": "en-GB",
+              "gender": "Female",
+              "speed": 1,
+              "preview_text": ""
+            },
+            {
+              "enabled": true,
+              "voice": "am_adam",
+              "accent": "American",
+              "locale": "en-US",
+              "gender": "Male",
+              "speed": 1.05,
+              "preview_text": ""
+            }
+          ]
+        }
+      }
+    }
+  }
+}
+```
+
+**独立验证要求**：使用 `jsonschema.Draft202012Validator.check_schema(schema)` 校验仓库原文的 Schema，再以 `Draft202012Validator(schema, format_checker=FormatChecker()).validate(example)` 校验实例。反例应覆盖非法 locale、非英语、超范围速度、非三个 Voice、非法 Profile ID；省略可选 locale 的合法旧 Profile 应通过结构校验并由应用层补默认值。另测 locale/口音/性别/前缀一致性、离线失效音色仍可加载、`last_profile_id` 指向现有 Profile。必须记录校验器版本与结果；JSON 解析成功不等于 Draft 2020-12 验证通过。
 
 **迁移优先级与删除**：
 1. 已有合法 `audio.profiles` 为权威，保留其稳定 ID 和内容；绝不因仍存在 `audio.edge_tts` 再创建默认 Profile。
