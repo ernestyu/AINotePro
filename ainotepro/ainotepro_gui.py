@@ -83,16 +83,16 @@ class AiNoteProConfigDialog(QDialog):
             fn()
 
     def _on_close(self):
-        if self.tabs["Audio"].can_close() and self.tabs["Text"].save_settings():
+        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
             self.accept()
 
     def reject(self):
-        if self.tabs["Audio"].can_close() and self.tabs["Text"].save_settings():
+        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
             super().reject()
 
     def closeEvent(self, event):
         # macOS title-bar close must persist the same Text settings as Close/Esc.
-        if self.tabs["Audio"].can_close() and self.tabs["Text"].save_settings():
+        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
             event.accept()
         else:
             event.ignore()
