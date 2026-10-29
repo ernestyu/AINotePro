@@ -95,13 +95,9 @@ def _save_prompts(data: Dict[str, str]) -> None:
     data = {str(k): str(v) for k, v in data.items()}
     _write_json_file(PROMPT_FILE, data)
 
-    user_cfg = _read_json_file(USER_CONFIG_FILE)
-    text_cfg = user_cfg.setdefault("text", {})
-    if not isinstance(text_cfg, dict):
-        text_cfg = {}
-        user_cfg["text"] = text_cfg
-    text_cfg["prompts"] = data
-    _write_json_file(USER_CONFIG_FILE, user_cfg)
+    # The shared user_config.json must only be written through ConfigManager.
+    # A Text prompt save must not overwrite Audio Profiles from a stale snapshot.
+    ConfigManager().update_text_fields({"prompts": data})
 
 
 def _get_last_used_prompt() -> str:
@@ -113,13 +109,7 @@ def _get_last_used_prompt() -> str:
 
 
 def _set_last_used_prompt(name: str) -> None:
-    user_cfg = _read_json_file(USER_CONFIG_FILE)
-    text_cfg = user_cfg.setdefault("text", {})
-    if not isinstance(text_cfg, dict):
-        text_cfg = {}
-        user_cfg["text"] = text_cfg
-    text_cfg["last_used_prompt"] = name
-    _write_json_file(USER_CONFIG_FILE, user_cfg)
+    ConfigManager().update_text_fields({"last_used_prompt": name})
 
 class GenerationWorker(QObject):
     """
