@@ -50,14 +50,14 @@ The AnkiWeb code will be available after the add-on is published.
 6. Choose the source and destination fields.
 7. Click `Generate`.
 
-For Audio V2 (development candidate; no Anki integration testing has been performed):
+For Audio V2 (development candidate; no Anki integration testing has been performed; the compact Audio page has no internal scrollbar):
 
 1. Open `Audio`, select `Edge-TTS` or `Kokoro MLX (Local)` under `Generate using`.
 2. For Kokoro, run your separate local Gradio service at `http://127.0.0.1:7860`; use `Retry` if the status is unavailable. The plugin does not start Kokoro or install models.
 3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge retains its original language, volume and pitch options. A different complete enabled block is chosen uniformly for each note.
 4. Choose Source/Destination fields. The default policy is Skip if any sound tag already exists. `Replace managed audio only` requires a matching local provenance record and exact media hash.
-5. Use `Save`, `Save As`, `Load` or `Delete` to manage persistent Audio Profiles; simply clicking Generate does not save a Profile.
-6. Click `Generate`. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file; Qt Multimedia availability in the user's Anki build remains unverified.
+5. At the bottom of the Audio page, type a new name into the editable Profile list and click `Save` to create it; choosing an existing name and clicking `Save` updates it. `Load` explicitly applies saved settings, and `Delete` removes a saved Profile (not Anki media). There is no separate New or Save As button.
+6. Click `Generate` with either saved or unsaved Audio settings. Generating never saves a Profile. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file; Qt Multimedia availability in the user's Anki build remains unverified.
 
 The Kokoro adapter currently uses Python standard-library HTTP with queue (120 s), processing + download (300 s), and overall (420 s) deadlines, not `gradio_client`. **This alternate transport has not been validated against the user's actual Gradio or Anki Python runtime.** The user explicitly requested no tests and no CI in this development pass; it must be verified on the Mac mini before release. The static-audit remediation candidate includes conservative undo-failure stop and commit-state reconciliation; Anki's actual undo API semantics remain unverified. No remote service is started or required for mobile Anki playback once media sync completes.
 
