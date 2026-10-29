@@ -150,6 +150,14 @@ class ConfigManager:
             raise ValueError("AINotePro config root must be a JSON object")
         return raw
 
+    @staticmethod
+    def _audio_digest(audio):
+        """Hash only the Audio domain; Text/UI saves are unrelated changes."""
+        return hashlib.sha256(
+            json.dumps(audio, sort_keys=True, ensure_ascii=False,
+                       separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
     def _load_config(self):
         with _CONFIG_LOCK:
             migrate_legacy_user_data()
@@ -182,13 +190,16 @@ class ConfigManager:
     def get_provider_config(self, service_type, provider_name):
         return copy.deepcopy(self.config.get(service_type, {}).get(provider_name, {}))
 
-    def _replace_raw(self, mutator, expected_revision=None):
+    def _replace_raw(self, mutator, expected_revision=None, expected_audio_revision=None):
         with _CONFIG_LOCK:
             current = self._read_raw()
             if current is None:
                 raise ValueError("Configuration file disappeared")
             if expected_revision is not None and self._revision() != expected_revision:
                 raise RuntimeError("Configuration changed in another window; reload before saving")
+            if (expected_audio_revision is not None
+                    and self._audio_digest(current.get("audio")) != expected_audio_revision):
+                raise RuntimeError("Audio Profiles changed in another window; reopen Audio before saving")
             updated = copy.deepcopy(current)
             mutator(updated)
             if "audio" in updated and "profiles" in updated["audio"]:
@@ -200,17 +211,25 @@ class ConfigManager:
             return self._revision()
 
     def audio_revision(self):
-        return self._revision()
+        # A Text prompt save must not invalidate an open Audio Profile editor.
+        with _CONFIG_LOCK:
+            current = self._read_raw()
+            if current is None:
+                raise ValueError("Configuration file disappeared")
+            return self._audio_digest(current.get("audio"))
 
     def get_audio(self):
         return copy.deepcopy(self.config["audio"])
 
     def replace_audio(self, audio, expected_revision=None):
         validate_audio(audio)
-        return self._replace_raw(
+        # Keep the atomic whole-file write, but compare only the Audio domain.
+        # Other windows may save Text/UI settings without conflicting with Audio.
+        self._replace_raw(
             lambda raw: raw.__setitem__("audio", copy.deepcopy(audio)),
-            expected_revision=expected_revision,
+            expected_audio_revision=expected_revision,
         )
+        return self.audio_revision()
 
     def set_provider_config(self, service_type, provider_name, provider_cfg):
         def update(raw):
