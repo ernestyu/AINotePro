@@ -229,7 +229,9 @@ class ConfigManager:
             lambda raw: raw.__setitem__("audio", copy.deepcopy(audio)),
             expected_audio_revision=expected_revision,
         )
-        return self.audio_revision()
+        # This is the digest of exactly the Audio data we committed. A second
+        # disk read could observe a newer writer and incorrectly advance CAS.
+        return self._audio_digest(audio)
 
     def set_provider_config(self, service_type, provider_name, provider_cfg):
         def update(raw):
