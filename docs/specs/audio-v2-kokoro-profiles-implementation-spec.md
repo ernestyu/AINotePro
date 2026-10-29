@@ -193,18 +193,18 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 
 ### 13.1 Kokoro 传输契约（对应审计条款 1）
 
-- **首选**在目标 Anki 内嵌 Python 中实际验证、可随插件发布的 \`gradio_client\`；开发必须在实现记录中冻结**准确版本、完整传递依赖/锁文件、安装或随包分发方式、许可证及各目标平台兼容性**。不能使用 Kokoro 服务自身 \`.venv\` 作为 Anki 的运行依赖，不能在 Anki 启动时自动 pip 安装。
-- 若改用轻量 HTTP，须单独在**当前真实 Gradio 服务**验证 schema/队列提交/轮询或 SSE/文件下载/异常路径，保留端到端可复现证据；仅能证明普通 \`POST\` 可连通不算通过。未经验证不得替换 \`gradio_client\`。
-- 当前唯一已实测 API：\`/synthesize\`，入参 \`text: str\`、\`voice: str\`、\`speed: float\`；**三个按位置返回值**为 \`Audio MP3 文件\`、\`下载文件\`、\`状态文本\`。客户端必须校验三元组数量、类型、音频与下载文件可访问性；读取第一个音频结果为本次合成产物，第二个用于一致性/可用性校验，第三个只用于诊断，**不得将状态字符串当作成功的唯一证据**。不假设 API 直接返回 MP3 bytes，也不假设服务端路径在插件进程中天然可访问；须通过客户端实际下载路径读取。
-- 探测须验证服务身份、端点与入参/出参 schema、可用音色及本机 URL；**不触发真实合成**。发现音色必须与 \`af_/am_/bf_/bm_\` 的英语范围求交集；返回无有效英语音色即不可用。
+- **首选**在目标 Anki 内嵌 Python 中实际验证、可随插件发布的 `gradio_client`；开发必须在实现记录中冻结**准确版本、完整传递依赖/锁文件、安装或随包分发方式、许可证及各目标平台兼容性**。不能使用 Kokoro 服务自身 `.venv` 作为 Anki 的运行依赖，不能在 Anki 启动时自动 pip 安装。
+- 若改用轻量 HTTP，须单独在**当前真实 Gradio 服务**验证 schema/队列提交/轮询或 SSE/文件下载/异常路径，保留端到端可复现证据；仅能证明普通 `POST` 可连通不算通过。未经验证不得替换 `gradio_client`。
+- 当前唯一已实测 API：`/synthesize`，入参 `text: str`、`voice: str`、`speed: float`；**三个按位置返回值**为 `Audio MP3 文件`、`下载文件`、`状态文本`。客户端必须校验三元组数量、类型、音频与下载文件可访问性；读取第一个音频结果为本次合成产物，第二个用于一致性/可用性校验，第三个只用于诊断，**不得将状态字符串当作成功的唯一证据**。不假设 API 直接返回 MP3 bytes，也不假设服务端路径在插件进程中天然可访问；须通过客户端实际下载路径读取。
+- 探测须验证服务身份、端点与入参/出参 schema、可用音色及本机 URL；**不触发真实合成**。发现音色必须与 `af_/am_/bf_/bm_` 的英语范围求交集；返回无有效英语音色即不可用。
 - 每次探测/生成必须有**有限**连接、排队、合成、下载和整体截止时间；推荐初始上限：探测 10s、排队 120s、合成+下载 300s、整个单条任务 420s，实际 API 如不能分别施加截止时间则须采用可取消/可放弃结果的受控 worker 和整体 watchdog，绝不能在 UI 线程等待。重试必须有限（默认不自动重试可能重复执行的合成请求）；队列拒绝、429、服务断线、超时、版本不兼容、schema 漂移、下载失败分别归类并展示可操作的错误。
-- 客户端取得的 MP3 必须存在、非空、有合理文件大小上限，并通过**真实 MP3 解码/探测或等价的结构验证**；仅文件扩展名或 \`ID3\` 头不足以证明可播放。转换为 \`bytes\` 后仅清理**插件自己创建**的下载副本/临时文件，不能删除 Gradio 管理的缓存或服务端 \`output/\`。失败不产生 Anki 字段写入。发布时要记录已验证的服务端和客户端版本组合；发现不兼容必须阻断 Kokoro 生成而非降级到 Edge。
+- 客户端取得的 MP3 必须存在、非空、有合理文件大小上限，并通过**真实 MP3 解码/探测或等价的结构验证**；仅文件扩展名或 `ID3` 头不足以证明可播放。转换为 `bytes` 后仅清理**插件自己创建**的下载副本/临时文件，不能删除 Gradio 管理的缓存或服务端 `output/`。失败不产生 Anki 字段写入。发布时要记录已验证的服务端和客户端版本组合；发现不兼容必须阻断 Kokoro 生成而非降级到 Edge。
 
 ### 13.2 Audio Profile JSON Schema 与持久化（对应审计条款 2）
 
-**规范数据结构**：\`user_files/user_config.json\` 下的 \`audio\` 为版本化域，\`audio.profiles\` 是**整体替换域**（禁止递归合并）。每个 Profile 的稳定 ID 为 \`profiles\` 的 key，显示名称可编辑，ID 不因改名改变。每个 Profile 保存所选 \`provider\`，以及两个 Provider **各自独立**的三 Voice 配置，以便切换后恢复各自未保存编辑；同时保存字段选择。配置示例和 JSON Schema 采用 JSON Schema Draft 2020-12（如下）。音色可用性由在线探测判断，不得因为服务离线而使结构校验失败或丢失原始 voice ID。
+**规范数据结构**：`user_files/user_config.json` 下的 `audio` 为版本化域，`audio.profiles` 是**整体替换域**（禁止递归合并）。每个 Profile 的稳定 ID 为 `profiles` 的 key，显示名称可编辑，ID 不因改名改变。每个 Profile 保存所选 `provider`，以及两个 Provider **各自独立**的三 Voice 配置，以便切换后恢复各自未保存编辑；同时保存字段选择。配置示例和 JSON Schema 采用 JSON Schema Draft 2020-12（如下）。音色可用性由在线探测判断，不得因为服务离线而使结构校验失败或丢失原始 voice ID。
 
-\`\`\`json
+```json
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AINotePro Audio V2 config domain",
@@ -247,7 +247,7 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
       "required": ["enabled", "voice", "accent", "gender", "speed", "preview_text"],
       "properties": {
         "enabled": {"type": "boolean"},
-        "voice": {"type": "string", "pattern": "^(|af_|am_|bf_|bm_)[a-z0-9_]*$"},
+        "voice": {"type": "string", "pattern": "^(|(?:af|am|bf|bm)_[a-z0-9_]+)$"},
         "accent": {"enum": ["American", "British"]},
         "gender": {"enum": ["Female", "Male"]},
         "speed": {"type": "number", "minimum": 0.7, "maximum": 1.3},
@@ -296,24 +296,24 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
     }
   }
 }
-\`\`\`
+```
 
-**结构之外的业务校验**：Profile key 采用小写 UUID v4（迁移 Profile 固定 \`legacy-edge-default\`）；Profile 名称去首尾空格后非空，同名（大小写不敏感）拒绝或明确提示重命名；\`last_profile_id\` 为 \`null\` 或存在于 \`profiles\`；三个 Voice 的 ID、口音、性别必须相互一致，允许空 voice 仅用于禁用的未配置区块；实际启用区块必须有可用 voice。URL 必须再做运行时 loopback 校验（含 DNS/重定向），不能只信 schema 正则。字段名允许空字符串作为尚未选定状态，但生成前必须验证存在。默认：Provider \`edge_tts\`、Edge 语言 \`en\`、三块均禁用、Edge 速度/音量/音调为 0、Kokoro 速度 1.0、Kokoro URL \`http://127.0.0.1:7860\`、策略 \`uniform_per_note\`；默认 Preview 文本为空。具体默认音色可从现有 Edge 配置恢复，不得臆造用户旧设置。
+**结构之外的业务校验**：Profile key 采用小写 UUID v4（迁移 Profile 固定 `legacy-edge-default`）；Profile 名称去首尾空格后非空，同名（大小写不敏感）拒绝或明确提示重命名；`last_profile_id` 为 `null` 或存在于 `profiles`；三个 Voice 的 ID、口音、性别必须相互一致，允许空 voice 仅用于禁用的未配置区块；实际启用区块必须有可用 voice。URL 必须再做运行时 loopback 校验（含 DNS/重定向），不能只信 schema 正则。字段名允许空字符串作为尚未选定状态，但生成前必须验证存在。默认：Provider `edge_tts`、Edge 语言 `en`、三块均禁用、Edge 速度/音量/音调为 0、Kokoro 速度 1.0、Kokoro URL `http://127.0.0.1:7860`、策略 `uniform_per_note`；默认 Preview 文本为空。具体默认音色可从现有 Edge 配置恢复，不得臆造用户旧设置。
 
 **迁移优先级与删除**：
-1. 已有合法 \`audio.profiles\` 为权威，保留其稳定 ID 和内容；绝不因仍存在 \`audio.edge_tts\` 再创建默认 Profile。
-2. 尚无 Profiles 且 \`migration.legacy_edge_v1_done\` 不为 true 时，读取现有 \`audio.edge_tts\`，生成**恰好一个** \`legacy-edge-default\` Profile；只迁移实际存在的值，缺失部分按上述默认填充，并在同一次原子提交中写迁移标记。
+1. 已有合法 `audio.profiles` 为权威，保留其稳定 ID 和内容；绝不因仍存在 `audio.edge_tts` 再创建默认 Profile。
+2. 尚无 Profiles 且 `migration.legacy_edge_v1_done` 不为 true 时，读取现有 `audio.edge_tts`，生成**恰好一个** `legacy-edge-default` Profile；只迁移实际存在的值，缺失部分按上述默认填充，并在同一次原子提交中写迁移标记。
 3. 既无可迁移旧配置也无 Profiles 时，初始化一个默认 Edge Profile；迁移标记为 true。已有迁移标记而 Profiles 缺失/无效时视为配置损坏，**不得重建已删除 Profile**，进入明确的恢复流程。
-4. 删除一个 Profile 必须从整个 \`profiles\` 映射中删除；禁止默认递归合并将其复活。不得删除最后一个 Profile；删除当前 Profile 后将 \`last_profile_id\` 置 \`null\` 并要求显式选择/加载其他 Profile，不暗中覆盖当前编辑。失效 \`last_profile_id\` 同样置 \`null\`，提示用户选择，不自动加载第一项。
+4. 删除一个 Profile 必须从整个 `profiles` 映射中删除；禁止默认递归合并将其复活。不得删除最后一个 Profile；删除当前 Profile 后将 `last_profile_id` 置 `null` 并要求显式选择/加载其他 Profile，不暗中覆盖当前编辑。失效 `last_profile_id` 同样置 `null`，提示用户选择，不自动加载第一项。
 
-**存储事务**：所有 Profile/迁移/last ID 变更必须经唯一 \`ConfigManager\` 读改写接口；\`audio.profiles\` 整体替换，其他 \`text/ui\` 与未知旧键保留。单进程写入序列化并在提交前检查配置修订版本，避免两个窗口或模块互相覆盖。写入同目录临时文件，完整序列化并校验、flush/fsync 后用 \`os.replace\` 原子替换，支持时同步父目录；任何失败保留旧文件并清理临时文件。JSON 解析失败、schema 校验失败、未来不认识的 schema_version：**只读报错、保留原始文件、禁止覆盖**；可让用户选择备份文件并手工恢复，不能静默初始化。对老配置迁移前保留一次原始备份；不在日志输出 API Key 或其他 Text 配置秘密。
+**存储事务**：所有 Profile/迁移/last ID 变更必须经唯一 `ConfigManager` 读改写接口；`audio.profiles` 整体替换，其他 `text/ui` 与未知旧键保留。单进程写入序列化并在提交前检查配置修订版本，避免两个窗口或模块互相覆盖。写入同目录临时文件，完整序列化并校验、flush/fsync 后用 `os.replace` 原子替换，支持时同步父目录；任何失败保留旧文件并清理临时文件。JSON 解析失败、schema 校验失败、未来不认识的 schema_version：**只读报错、保留原始文件、禁止覆盖**；可让用户选择备份文件并手工恢复，不能静默初始化。对老配置迁移前保留一次原始备份；不在日志输出 API Key 或其他 Text 配置秘密。
 
 ### 13.3 Provider / Profile / UI 三状态机（对应审计条款 3）
 
 状态必须分开存储，禁止混用：
-- **持久化 Profile**：\`profile_id\`、\`saved_revision\`、\`last_profile_id\`；
-- **当前 UI 草稿**：\`draft_profile\`、\`dirty\`、\`draft_revision\`（仅 Save/Save As 写盘；切换 Provider 只改草稿，未保存需按第 5 节提示）；
-- **Provider 健康**：\`unprobed | checking | ready | unavailable\`，以及 \`probe_request_id\`、\`base_url\`、\`provider\`、\`draft_revision\` 快照。
+- **持久化 Profile**：`profile_id`、`saved_revision`、`last_profile_id`；
+- **当前 UI 草稿**：`draft_profile`、`dirty`、`draft_revision`（仅 Save/Save As 写盘；切换 Provider 只改草稿，未保存需按第 5 节提示）；
+- **Provider 健康**：`unprobed | checking | ready | unavailable`，以及 `probe_request_id`、`base_url`、`provider`、`draft_revision` 快照。
 
 任何后台探测响应必须校验**请求 ID、窗口仍存活、Provider/URL/草稿版本仍匹配**才可改变当前 UI 健康状态；过期响应只能丢弃，不能覆盖新加载 Profile、新选择 Provider 或新 URL。Kokoro 离线仍可 Load/编辑/Save/Save As/Delete，Preview/Generate 不可用；不允许静默切换 Edge 继续生成。Edge 的健康状态不依赖 Kokoro。开始生成时冻结 Provider、URL、每个有效 Voice 的完整参数、源/目标字段、note IDs 与策略；批次运行中用户修改 UI 不得改变已启动任务。取消后不得把迟到结果提交给笔记。
 
@@ -323,30 +323,30 @@ Kokoro 音色来源以运行时探测到的 28 个英语音色为准，分为 Am
 
 ### 13.5 Anki 后台任务与提交协议（对应审计条款 5）
 
-1. Qt 主线程获取**有限**的 note ID、源文本/字段名、目标字段内容指纹、音色与 Provider 快照；网络探测、合成、下载、MP3 校验只在后台进行。后台任务不得访问 Qt 控件或 \`mw.col\`，不得持有/操作 Anki note 对象。
-2. 采用目标 Anki 版本**实际支持**的任务管理与 collection 操作/撤销 API（须在 Anki 26.05+ 实机核验，不能凭旧版示例臆测）；UI 进度与提交经主线程安全回调。批次初版并发度 1，限制预取和内存；不得在主线程 \`join\` 或同步等待。
-3. **提交前在合法 collection 上下文重新读取笔记**，验证 note 存在、笔记类型、源/目标字段存在、源内容或其指纹未变、目标字段内容与启动时快照一致、未被其他任务写入声音；不一致归类 \`conflict_skipped\`，不能覆盖用户编辑。
-4. 正式提交顺序：验证 → 写入 Anki 媒体库取得文件名 → 构造精确 \`[sound:filename]\` → 按目标 Anki 的可撤销写入机制更新 note → 校验 note 提交成功 → 写入/更新来源记录。媒体写入成功而 note 更新失败，结果为 \`failed_commit\`，**不得产生悬空字段引用**；可留下未引用媒体但不自动删除（可能共享），应记录供人工诊断。来源记录写入失败时必须报告 \`failed_provenance\`，禁用后续自动 Replace，不能宣称完整成功。
+1. Qt 主线程获取**有限**的 note ID、源文本/字段名、目标字段内容指纹、音色与 Provider 快照；网络探测、合成、下载、MP3 校验只在后台进行。后台任务不得访问 Qt 控件或 `mw.col`，不得持有/操作 Anki note 对象。
+2. 采用目标 Anki 版本**实际支持**的任务管理与 collection 操作/撤销 API（须在 Anki 26.05+ 实机核验，不能凭旧版示例臆测）；UI 进度与提交经主线程安全回调。批次初版并发度 1，限制预取和内存；不得在主线程 `join` 或同步等待。
+3. **提交前在合法 collection 上下文重新读取笔记**，验证 note 存在、笔记类型、源/目标字段存在、源内容或其指纹未变、目标字段内容与启动时快照一致、未被其他任务写入声音；不一致归类 `conflict_skipped`，不能覆盖用户编辑。
+4. 正式提交顺序：验证 → 写入 Anki 媒体库取得文件名 → 构造精确 `[sound:filename]` → 按目标 Anki 的可撤销写入机制更新 note → 校验 note 提交成功 → 写入/更新来源记录。媒体写入成功而 note 更新失败，结果为 `failed_commit`，**不得产生悬空字段引用**；可留下未引用媒体但不自动删除（可能共享），应记录供人工诊断。来源记录写入失败时必须报告 `failed_provenance`，禁用后续自动 Replace，不能宣称完整成功。
 5. Cancel 立即停止派发新笔记；正在合成的请求可完成但取消后**不得提交**。窗口关闭/销毁时废弃旧 UI 回调；后台结果仍须遵循取消与提交门禁。防止重复点击/并发批次，明确同一 note 的互斥或版本检查。
-6. 每张笔记结果使用固定枚举：\`success\`、\`skipped_empty\`、\`skipped_existing_audio\`、\`skipped_invalid_fields\`、\`conflict_skipped\`、\`cancelled\`、\`failed_probe\`、\`failed_synthesis\`、\`failed_download\`、\`failed_validation\`、\`failed_commit\`、\`failed_provenance\`。统计与用户可见结果一致；单笔失败不回滚先前成功。必须验证撤销/重做及浏览器/编辑器入口的笔记刷新行为。
+6. 每张笔记结果使用固定枚举：`success`、`skipped_empty`、`skipped_existing_audio`、`skipped_invalid_fields`、`conflict_skipped`、`cancelled`、`failed_probe`、`failed_synthesis`、`failed_download`、`failed_validation`、`failed_commit`、`failed_provenance`。统计与用户可见结果一致；单笔失败不回滚先前成功。必须验证撤销/重做及浏览器/编辑器入口的笔记刷新行为。
 
 ### 13.6 幂等、来源记录与 Replace（对应审计条款 6）
 
-- 默认 **Skip**：目标字段只要存在任何有效 \`[sound:...]\` 引用即跳过该笔记；无论该声音是否由本插件生成。无声音时保留既有文字/HTML，再追加唯一音频引用；重复 Generate 不追加。
-- **来源记录**存于 \`user_files\` 下由统一管理器维护的独立版本化索引（例如 \`audio_provenance_v1.json\`），每条至少包含 \`schema_version=1\`、\`note_id\`、\`destination_field\`、\`media_filename\`、\`media_sha256\`、\`sound_tag\`、\`provider\`、\`created_at\`。以 \`note_id + destination_field + sound_tag\` 作为记录匹配键；写入应为原子替换，保留失败诊断，不能靠文件名前缀猜测所有权。记录不包含全文源文本、API Key 或临时路径。
-- **Replace 门槛**：明确开启 Replace 后，必须同时验证来源索引命中、目标字段含有**完全匹配**的原声音标签、媒体文件仍存在且 SHA-256 一致、没有歧义的重复标签、当前字段内容未在后台生成期间变化。任一条件不满足则保守跳过并提示人工处理；绝不能用 \`ainotepro-\` 文件名前缀或正则批量清理未知音频。替换只移除该条已验证旧标签并添加新标签，保留字段其余内容/HTML 和其他声音引用。
-- 来源记录写入失败或配置丢失时：已生成声音仍可通过 Anki 同步播放，但该音频被视为**不可自动 Replace**。撤销/重做、手动编辑、笔记删除、媒体重命名后，旧索引可能失效；下一次 Replace 必须实时核验并保守拒绝，不得以旧索引作为最终证据。跨设备同步仅保证 Anki 字段和媒体；\`user_files\` 的来源索引不视为跨设备共享数据，其他设备无记录时默认 Skip。禁止自动删除 Anki 媒体文件。
+- 默认 **Skip**：目标字段只要存在任何有效 `[sound:...]` 引用即跳过该笔记；无论该声音是否由本插件生成。无声音时保留既有文字/HTML，再追加唯一音频引用；重复 Generate 不追加。
+- **来源记录**存于 `user_files` 下由统一管理器维护的独立版本化索引（例如 `audio_provenance_v1.json`），每条至少包含 `schema_version=1`、`note_id`、`destination_field`、`media_filename`、`media_sha256`、`sound_tag`、`provider`、`created_at`。以 `note_id + destination_field + sound_tag` 作为记录匹配键；写入应为原子替换，保留失败诊断，不能靠文件名前缀猜测所有权。记录不包含全文源文本、API Key 或临时路径。
+- **Replace 门槛**：明确开启 Replace 后，必须同时验证来源索引命中、目标字段含有**完全匹配**的原声音标签、媒体文件仍存在且 SHA-256 一致、没有歧义的重复标签、当前字段内容未在后台生成期间变化。任一条件不满足则保守跳过并提示人工处理；绝不能用 `ainotepro-` 文件名前缀或正则批量清理未知音频。替换只移除该条已验证旧标签并添加新标签，保留字段其余内容/HTML 和其他声音引用。
+- 来源记录写入失败或配置丢失时：已生成声音仍可通过 Anki 同步播放，但该音频被视为**不可自动 Replace**。撤销/重做、手动编辑、笔记删除、媒体重命名后，旧索引可能失效；下一次 Replace 必须实时核验并保守拒绝，不得以旧索引作为最终证据。跨设备同步仅保证 Anki 字段和媒体；`user_files` 的来源索引不视为跨设备共享数据，其他设备无记录时默认 Skip。禁止自动删除 Anki 媒体文件。
 - 源/目标同字段：必须显式风险确认，合成文本先清除 HTML 与已有声音标记；提交前再次验证字段指纹。旧版未知来源音频不作自动归属。音频生成失败、取消或冲突时不应改变字段。
 
 ### 13.7 入口封闭、Edge/Text 兼容（对应审计条款 7）
 
-必须清点并测试 \`TTSTab.on_generate_tts()\`、\`AIManager.generate_audio_for_field()\`、\`MainDialog\`、编辑器/浏览器钩子及其他所有可触发音频写入的入口。所有**可达**音频入口必须调用同一个安全的生成/提交编排层，执行同样的音色选择、Skip/Replace、provenance、线程、撤销规则；若某旧入口不再支持，必须显式禁用或转发，**不能留下可绕过保护的旧实现**。不得改 Text 业务接口，Edge 原有 Provider API、语言范围和 Audio UI 位置保持兼容。Audio 默认语言改为 **English**（不再默认 Afrikaans）；无意义的 API Key 控件在 Edge/Kokoro 下隐藏或禁用，但不得影响 Text Provider 的凭据配置。目标 Anki Python 环境、macOS Apple Silicon 与所有声明支持的发布平台必须实测依赖安装/导入；未验证平台不得标记支持。
+必须清点并测试 `TTSTab.on_generate_tts()`、`AIManager.generate_audio_for_field()`、`MainDialog`、编辑器/浏览器钩子及其他所有可触发音频写入的入口。所有**可达**音频入口必须调用同一个安全的生成/提交编排层，执行同样的音色选择、Skip/Replace、provenance、线程、撤销规则；若某旧入口不再支持，必须显式禁用或转发，**不能留下可绕过保护的旧实现**。不得改 Text 业务接口，Edge 原有 Provider API、语言范围和 Audio UI 位置保持兼容。Audio 默认语言改为 **English**（不再默认 Afrikaans）；无意义的 API Key 控件在 Edge/Kokoro 下隐藏或禁用，但不得影响 Text Provider 的凭据配置。目标 Anki Python 环境、macOS Apple Silicon 与所有声明支持的发布平台必须实测依赖安装/导入；未验证平台不得标记支持。
 
 ### 13.8 测试矩阵与发布门槛（对应审计条款 8）
 
 - **自动化**：JSON Schema 校验/缺省/损坏/未来版本、旧 Edge 配置迁移优先级/幂等/删除不复活/原子写失败；随机种子和参数配对/分布；Provider 切换和过期探测竞态；Gradio 三输出/排队/超时/版本不兼容/下载损坏；主线程提交前冲突检查；Skip/Replace 来源验证/撤销/重复生成；Preview 临时文件清理；取消、窗口销毁、批次失败隔离；两条音频入口同一安全策略；Edge/Text 回归。
-- **真实 Anki**：在目标 Anki 26.05+ 的内嵌 Python 验证依赖；Mac mini Apple Silicon 真实 \`/synthesize\`；1/10/100 张笔记；Edge/Kokoro、Kokoro 离线→Retry→恢复、Profile 保存→退出→重启、旧 user_files 升级、Preview 不增加媒体、重复生成 Skip、Replace 只处理确证归属音频、Cancel/关闭/重复点击、撤销/重做、浏览器/编辑器入口、Anki 媒体同步到手机播放；检查现有 UI 截图对照和纯英语范围。
-- 每个验收项记录环境、版本、命令/操作、实际结果和证据；未执行标记 \`NOT TESTED\`，失败标记 \`FAIL\`，**不得用 mock PASS 代替真实端到端证据**。任一必需真实验收项 \`FAIL\`/\`NOT TESTED\` 时不得宣称发布通过；仅可说明当前阻断项及受限测试结论。任何非目标平台未验证，须在发布声明中排除该平台或阻断跨平台发布。
+- **真实 Anki**：在目标 Anki 26.05+ 的内嵌 Python 验证依赖；Mac mini Apple Silicon 真实 `/synthesize`；1/10/100 张笔记；Edge/Kokoro、Kokoro 离线→Retry→恢复、Profile 保存→退出→重启、旧 user_files 升级、Preview 不增加媒体、重复生成 Skip、Replace 只处理确证归属音频、Cancel/关闭/重复点击、撤销/重做、浏览器/编辑器入口、Anki 媒体同步到手机播放；检查现有 UI 截图对照和纯英语范围。
+- 每个验收项记录环境、版本、命令/操作、实际结果和证据；未执行标记 `NOT TESTED`，失败标记 `FAIL`，**不得用 mock PASS 代替真实端到端证据**。任一必需真实验收项 `FAIL`/`NOT TESTED` 时不得宣称发布通过；仅可说明当前阻断项及受限测试结论。任何非目标平台未验证，须在发布声明中排除该平台或阻断跨平台发布。
 
 ## 14. 实施纪律
 
