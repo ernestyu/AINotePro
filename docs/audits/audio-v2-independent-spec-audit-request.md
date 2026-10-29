@@ -6,8 +6,8 @@
 
 **审计对象（固定版本）**：
 - SPEC：`docs/specs/audio-v2-kokoro-profiles-implementation-spec.md`
-- SPEC 冻结提交：`65ceb4752fee0556b64bd61768e268432465af69`
-- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/65ceb4752fee0556b64bd61768e268432465af69/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
+- SPEC 冻结提交：`8756fabbe9336b9b0ea34873143f76c04a6ec5b6`
+- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/8756fabbe9336b9b0ea34873143f76c04a6ec5b6/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
 - AINotePro 原代码基线：`2f3efa526b5e16f0d8b0eb5443d42f38c91e7e3c`（v1.0.0）
 - Kokoro TTS 服务端基线：`ernestyu/kokoro-tts@d3f8333765d4e3432e51a5ead831b80096064a4e`（私有仓库；如无访问权限请明确标注未核验，不得假设）
 - 官方音色资料：`docs/reference/kokoro-official-voice-language-catalog.md`（提交 `d84873e186b786fbf857ca6c3cee8541e0775a98`），原作者资料：https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
@@ -24,6 +24,21 @@ AINotePro 是 Anki 桌面插件，现有 Audio 标签通过 Edge TTS 将笔记�
 新增官方资料核验：Kokoro v1.0 官方为 8 种语言、9 个语言/口音组、54 个音色，官方音色表带部分 Overall Grade。**现有 Mac mini Gradio 只允许 28 个英语音色**；Audio V2 第一阶段要提供友好分组（语言/口音、男女、名称、官方评级），非英语扩展需修改服务端并验证 G2P，作为另行批准的第二阶段，不能误报已支持。
 
 用户明确要求：保留三个 Voice 区块及随机选音；Kokoro 沿用现有界面但换音色库和有效参数；新增可命名/保存/加载/删除的完整 Audio Profile（包括 Provider 与全部三个 Voice 参数）；选择 Kokoro 时先探测服务，离线不得生成，但可保留和加载 Profile；解决同步阻塞、重复音频追加、Preview 污染 Anki 媒体库。
+
+## 一-A、上一轮审计整改复核（2026-10-29）
+
+SPEC 第 13 节已针对上一轮审计意见补入**八项规范性实施契约**。本次请先进行逐条整改核销（CLOSED / PARTIAL / OPEN），不要仅以“已写入 SPEC”判定已满足：
+
+1. Gradio `gradio_client` 版本/依赖/Anki Python 兼容、三输出、超时、错误分类、下载校验与轻量 HTTP 的实测门槛。
+2. 版本化 `audio.profiles` JSON Schema、稳定 ID、完整默认值、legacy 迁移、删除不复活、原子写、损坏配置恢复。
+3. Profile 持久化、UI 草稿、Provider 在线状态三者隔离；探测请求 ID、过期响应丢弃和生成参数冻结。
+4. 三 Voice 每笔记均匀抽完整参数、零有效区块阻断、Preview 固定区块与确定性随机测试。
+5. Anki 后台合成与合法 collection 提交、重验证、取消、关闭、撤销、失败分类和回调生命周期。
+6. 默认 Skip、可验证来源索引、严格 Replace、跨设备同步与未知音频保守处理。
+7. `TTSTab`、`AIManager`、`MainDialog` 等音频入口统一安全策略；Edge/Text 与既有 Audio UI 兼容。
+8. 自动化及真实 Anki 1/10/100 张、macOS Apple Silicon、移动端播放、发布阻断规则。
+
+**本轮新增审计任务**：验证第 13.2 节 JSON Schema 在 Draft 2020-12 校验器中可实际使用，尤其旧配置迁移、删除后配置与 provider 独立三 Voice 的兼容；检查第 13 节与第 3–12 节是否冲突，给出精确修订文本。Kokoro 本轮**仅英语**，Edge TTS 原多语言不得削减。不得把“设计契约已补齐”误写为“已在 Anki 环境实测”。
 
 ## 二、审计目标
 
