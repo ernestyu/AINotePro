@@ -81,23 +81,25 @@ def _load_prompts() -> Dict[str, str]:
     migrate_legacy_user_data()
     prompts: Dict[str, str] = dict(DEFAULT_PROMPTS)
 
-    user_cfg = _read_json_file(USER_CONFIG_FILE)
-    prompts.update(_extract_prompts(user_cfg))
-
+    # Legacy prompt.json is a fallback/mirror; user_config.json is authoritative.
     prompt_file_data = _read_json_file(PROMPT_FILE)
     if prompt_file_data:
         prompts.update({str(k): str(v) for k, v in prompt_file_data.items()})
 
+    user_cfg = _read_json_file(USER_CONFIG_FILE)
+    prompts.update(_extract_prompts(user_cfg))
     return prompts
 
 
 def _save_prompts(data: Dict[str, str]) -> None:
     data = {str(k): str(v) for k, v in data.items()}
-    _write_json_file(PROMPT_FILE, data)
-
-    # The shared user_config.json must only be written through ConfigManager.
-    # A Text prompt save must not overwrite Audio Profiles from a stale snapshot.
+    # Persist to the shared config first; a stale mirror must not mask saves.
     ConfigManager().update_text_fields({"prompts": data})
+    try:
+        _write_json_file(PROMPT_FILE, data)
+    except OSError as exc:
+        # Config already contains the saved prompt; mirror is optional.
+        print(f"[AINotePro] Prompt saved in config; prompt.json mirror failed: {exc}")
 
 
 def _get_last_used_prompt() -> str:
@@ -301,6 +303,9 @@ class TextTab(QWidget):
         name_row.addWidget(QLabel("<b>Prompt Name:</b>"))
         self.prompt_list_combo = QComboBox()
         self.prompt_list_combo.setEditable(True)
+        # Only Save creates a prompt; disable implicit Qt insertion/completion.
+        self.prompt_list_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.prompt_list_combo.setCompleter(None)
         self.prompt_list_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
         self.prompt_list_combo.setToolTip("Select an existing prompt or type a new name before saving.")
         name_row.addWidget(self.prompt_list_combo, 1)
@@ -488,9 +493,20 @@ class TextTab(QWidget):
         if QMessageBox.question(self, "Confirm Save", "Save this prompt?",
                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
             return
-        data = _load_prompts(); data[name] = content; _save_prompts(data)
-        self.all_prompts = data
-        _set_last_used_prompt(name)
+        try:
+            data = _load_prompts()
+            data[name] = content
+            _save_prompts(data)
+            # Confirm the name and content are on disk, not only in the combo.
+            saved = _load_prompts()
+            if saved.get(name) != content:
+                raise RuntimeError("Saved prompt could not be verified on disk")
+            self.all_prompts = saved
+            _set_last_used_prompt(name)
+        except Exception as exc:
+            print(f"[AINotePro] Prompt save failed name={name!r}: {exc}")
+            showWarning(f"Could not save prompt '{name}': {exc}")
+            return
         self._refresh_prompt_combo_after_save(name)
         self.prompt_edit.setPlainText(content)
         showInfo(f"Prompt saved: {name}")
