@@ -82,26 +82,9 @@ class AIManager:
         mw.reset()
         return count
 
-    # AUDIO
+    # AUDIO (legacy entry intentionally blocked: it bypassed the V2 media policy)
     def generate_audio_for_field(self, req: GenerationRequest) -> int:
-        provider_cfg = self.cfg.get_provider_config(req.service_type, req.provider)
-        provider = create_provider(req.service_type, req.provider, provider_cfg)
-
-        count = 0
-        for nid in req.note_ids:
-            note = mw.col.get_note(nid)
-            if req.source_field not in note:
-                continue
-            text = (note[req.source_field] or "").strip()
-            if not text:
-                continue
-
-            audio_bytes = provider.generate(text=text, config=provider_cfg)
-            stored = add_audio_to_media_collection(audio_bytes, filename_hint=f"ainotepro-{nid}.mp3")
-            # Append [sound:...] tag
-            new_val = f"{get_field_content(note, req.destination_field, '')} [sound:{stored}]".strip()
-            update_field_content(note, req.destination_field, new_val)
-            count += 1
-
-        mw.reset()
-        return count
+        raise RuntimeError(
+            "Legacy AIManager audio entry is disabled. "
+            "Open the Audio tab to use the Audio V2 background/undo/provenance workflow."
+        )
