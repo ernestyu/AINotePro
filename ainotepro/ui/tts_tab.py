@@ -9,7 +9,7 @@ import html
 import os
 import random
 import re
-import tempfile
+from ..core.audio_preview import play_preview, stop_previews
 
 from aqt import mw
 from aqt.qt import (
@@ -90,6 +90,11 @@ class TTSTab(QWidget):
         self._running = False
         self._cancelled = False
         self._closing = False
+        self._close_pending = False
+        self._close_ready = False
+        self._halt_reason = None
+        self._committing = False
+        self._edge_state = "unprobed"
         self._items = []
         self._cursor = 0
         self._results = {}
@@ -223,10 +228,13 @@ class TTSTab(QWidget):
 
     def _refresh_profiles(self):
         self.profile_combo.clear()
+        if not self._profile_id:
+            self.profile_combo.addItem("— Select Profile; click Load —", None)
         for pid, profile in self._audio["profiles"].items():
             self.profile_combo.addItem(profile["name"], pid)
         i = self.profile_combo.findData(self._profile_id)
-        if i >= 0: self.profile_combo.setCurrentIndex(i)
+        if i >= 0:
+            self.profile_combo.setCurrentIndex(i)
 
     def _is_dirty(self):
         self._capture()
@@ -372,17 +380,29 @@ class TTSTab(QWidget):
         lang = self.language_combo.currentData() or "en"
         self._edge_request += 1
         request = self._edge_request
+        self._edge_state = "checking"
+        self.status_label.setText("Edge: Loading voices...")
+        self._refresh_availability()
         def fetch():
             return {gender: get_voices("Edge-TTS", lang, gender) for gender in ("Female", "Male")}
         def done(values):
             if self._closing or request != self._edge_request or self._draft["provider"] != "edge_tts": return
             for gender, voices in values.items(): self._edge_cache[(lang, gender)] = voices
+            self._edge_state = "ready" if any(values.values()) else "unavailable"
+            self.status_label.setText("Edge: Ready" if self._edge_state == "ready" else "Edge: No voices returned")
             self._capture()
             self._loading = True
             for block, voice in zip(self.voice_blocks, self._draft["provider_configs"]["edge_tts"]["voices"]):
                 self._populate_voice(block, voice["voice"])
             self._loading = False
-        _task(fetch, done, lambda err: None if self._closing else self.status_label.setText(f"Edge voice list: {err[:120]}"))
+            self._refresh_availability()
+        def failed(err):
+            if self._closing or request != self._edge_request or self._draft["provider"] != "edge_tts":
+                return
+            self._edge_state = "unavailable"
+            self.status_label.setText(f"Edge: Voice list unavailable · {err[:120]}")
+            self._refresh_availability()
+        _task(fetch, done, failed)
 
     def _probe(self, *_):
         if self._draft["provider"] != "kokoro_gradio": return
@@ -408,7 +428,7 @@ class TTSTab(QWidget):
             self._loading = False
             self._refresh_availability()
         def failed(err):
-            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
+            if self._closing or request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
             if revision != self._draft_revision:
                 self._probe()
                 return
@@ -418,7 +438,8 @@ class TTSTab(QWidget):
         _task(fetch, done, failed)
 
     def _refresh_availability(self):
-        ready = self._draft["provider"] == "edge_tts" or self._probe_state == "ready"
+        ready = (self._edge_state == "ready" if self._draft["provider"] == "edge_tts"
+                 else self._probe_state == "ready")
         for block in self.voice_blocks: block["button"].setEnabled(ready and not self._running)
         parent = self.parent()
         if parent is not None and hasattr(parent, "generate_button") and getattr(parent, "tab_widget", None) is not None:
@@ -500,10 +521,22 @@ class TTSTab(QWidget):
             showWarning(f"Could not delete Profile: {exc}"); return False
 
     def can_close(self):
+        if self._close_ready:
+            self._closing = True
+            stop_previews()
+            return True
         if not self._confirm_discard():
             return False
+        if self._running:
+            # Do not destroy the dialog or progress widget while the worker still
+            # owns a callback. Cancellation prevents a later commit; the dialog
+            # closes asynchronously after the in-flight worker returns.
+            self._close_pending = True
+            self.request_cancel()
+            self.status_label.setText("Cancelling current audio; closing when the worker returns...")
+            return False
         self._closing = True
-        self.request_cancel()
+        stop_previews()
         return True
 
     def request_cancel(self):
@@ -528,11 +561,7 @@ class TTSTab(QWidget):
             if self._closing: return
             self.voice_blocks[index]["button"].setEnabled(True)
             try:
-                with tempfile.NamedTemporaryFile(prefix="ainotepro-preview-", suffix=".mp3", delete=False) as stream:
-                    stream.write(data); path = stream.name
-                from aqt.sound import play
-                play(path)
-                QTimer.singleShot(120000, lambda p=path: os.path.exists(p) and os.unlink(p))
+                play_preview(data)
             except Exception as exc:
                 showWarning(f"Preview failed: {exc}")
         def failed(err):
@@ -575,13 +604,24 @@ class TTSTab(QWidget):
             showWarning("Kokoro is offline; retry before generating."); return
         config = copy.deepcopy(self._draft["provider_configs"][provider])
         voices = config["voices"]
-        if provider == "kokoro_gradio":
-            voices = [v for v in voices if not v["enabled"] or v["voice"] in self._available]
         try:
             validate_audio({"schema_version":2,"profiles":{"legacy-edge-default":self._draft},
                             "last_profile_id":"legacy-edge-default","migration":{"legacy_edge_v1_done":True}})
-            if not any(v["enabled"] and v["voice"] for v in voices):
-                raise ValueError("No valid enabled Voice")
+            active = [(i + 1, v) for i, v in enumerate(voices) if v["enabled"]]
+            if not active:
+                raise ValueError("No enabled Voice")
+            if provider == "kokoro_gradio":
+                unavailable = [i for i, v in active if v["voice"] not in self._available]
+            else:
+                if self._edge_state != "ready":
+                    raise ValueError("Edge voice list is not ready")
+                lang = config["language_code"]
+                unavailable = [i for i, v in active
+                               if v["voice"] not in self._edge_cache.get((lang, v["gender"]), [])]
+            if unavailable:
+                raise ValueError("Enabled Voice block(s) unavailable: " +
+                                 ", ".join(map(str, unavailable)) +
+                                 ". Disable or reconfigure them; random weights were not changed.")
         except Exception as exc:
             showWarning(f"Audio settings are invalid: {exc}"); return
         if not self._confirm_write_risk(ids, src, dst): return
@@ -589,6 +629,9 @@ class TTSTab(QWidget):
                               source=src, destination=dst, replace=self.replace_check.isChecked())
         self._items = ids; self._cursor = 0; self._results = {}
         self._cancelled = False; self._running = True; self._undo_id = None
+        self._halt_reason = None
+        self._close_pending = False
+        self._close_ready = False
         self._progress = QProgressDialog("Generating audio...", "Cancel", 0, len(ids), self)
         self._progress.setWindowTitle("AINotePro Audio")
         self._progress.setMinimumDuration(0)
@@ -643,10 +686,21 @@ class TTSTab(QWidget):
                 self._commit(snapshot, data)
             self._advance()
         def failed(err):
-            self._count("failed_synthesis")
-            print(f"[AINotePro Audio] synthesis {nid}: {err}")
+            if self._closing:
+                return
+            category = str(err).split(":", 1)[0]
+            if category not in ("failed_download", "failed_validation", "failed_probe", "failed_synthesis"):
+                category = "failed_synthesis"
+            self._count(category)
+            print(f"[AINotePro Audio] {category} note={nid}: {err}")
             self._advance()
         _task(work, done, failed)
+
+    def _stop_batch(self, reason):
+        """Stop dispatch without altering the already committed notes."""
+        self._halt_reason = reason
+        self._cancelled = True
+        print(f"[AINotePro Audio] BATCH STOPPED: {reason}")
 
     def _commit(self, snapshot, data):
         if self._closing:
@@ -654,46 +708,105 @@ class TTSTab(QWidget):
         nid, raw, original, old_tag, _text, voice = snapshot
         spec = self._snapshot
         if self._cancelled:
-            self._count("cancelled"); return
+            self._count("cancelled")
+            return
         try:
             note = mw.col.get_note(nid)
             src, dst = spec["source"], spec["destination"]
             if src not in note or dst not in note or note[src] != raw or note[dst] != original:
-                self._count("conflict_skipped"); return
+                self._count("conflict_skipped")
+                return
             if old_tag:
                 if owned_tag(nid, dst, original, mw.col.media.dir()) != old_tag:
-                    self._count("conflict_skipped"); return
+                    self._count("conflict_skipped")
+                    return
             elif SOUND_RE.search(original):
-                self._count("conflict_skipped"); return
-            # Final cancel gate. Once media is written, finish this note's commit.
-            if self._cancelled:
-                self._count("cancelled"); return
-            if self._undo_id is None:
-                add = getattr(mw.col, "add_custom_undo_entry", None)
-                merge = getattr(mw.col, "merge_undo_entries", None)
-                if not callable(add) or not callable(merge):
-                    raise RuntimeError("Anki collection undo grouping API unavailable")
-                self._undo_id = add("AINotePro audio generation")
-            filename = add_audio_to_media_collection(data, f"ainotepro-{nid}.mp3")
-            tag = f"[sound:{filename}]"
-            content = original.replace(old_tag, tag, 1) if old_tag else (original + " " + tag).strip()
-            note[dst] = content
-            try:
-                mw.col.update_note(note)
-                mw.col.merge_undo_entries(self._undo_id)
-            except Exception:
-                self._count("failed_commit")
+                self._count("conflict_skipped")
                 return
-            self._refresh_editor(nid)
+
+            add = getattr(mw.col, "add_custom_undo_entry", None)
+            merge = getattr(mw.col, "merge_undo_entries", None)
+            if not callable(add) or not callable(merge):
+                self._count("failed_commit")
+                self._stop_batch("Anki single-step undo API unavailable; no media was written")
+                return
+
+            # Final cancellation gate: all following media/note/provenance operations
+            # are a single non-interruptible main-thread commit for this note.
+            if self._cancelled:
+                self._count("cancelled")
+                return
+            self._committing = True
             try:
-                record(nid, dst, filename, data, spec["provider"])
-                self._count("success")
-            except Exception as exc:
-                self._count("generated_unmanaged")
-                print(f"[AINotePro Audio] provenance {nid}: {exc}")
+                if self._undo_id is None:
+                    try:
+                        self._undo_id = add("AINotePro audio generation")
+                    except Exception as exc:
+                        self._count("failed_commit")
+                        self._stop_batch(f"Cannot create Anki undo group: {exc}")
+                        return
+                try:
+                    filename = add_audio_to_media_collection(data, f"ainotepro-{nid}.mp3")
+                except Exception as exc:
+                    self._count("failed_commit")
+                    print(f"[AINotePro Audio] media write failed note={nid}: {exc}")
+                    return
+
+                tag = f"[sound:{filename}]"
+                content = (original.replace(old_tag, tag, 1)
+                           if old_tag else (original + " " + tag).strip())
+                note[dst] = content
+                update_error = None
+                try:
+                    mw.col.update_note(note)
+                except Exception as exc:
+                    update_error = exc
+
+                # Re-read even when update_note raised: an exception can happen
+                # after the collection has persisted the field change.
+                try:
+                    persisted = mw.col.get_note(nid)[dst] == content
+                except Exception as exc:
+                    self._count("failed_commit")
+                    self._stop_batch(
+                        f"Cannot determine whether note {nid} was committed: {exc}; "
+                        "inspect collection before retrying")
+                    return
+                if not persisted:
+                    self._count("failed_commit")
+                    if update_error:
+                        print(f"[AINotePro Audio] note update failed note={nid}: {update_error}")
+                    else:
+                        self._stop_batch(f"Note {nid} did not retain its audio reference")
+                    return
+
+                # The note IS committed. An undo merge failure must never turn it
+                # into failed_commit or prevent provenance from being recorded.
+                undo_error = None
+                try:
+                    merge(self._undo_id)
+                except Exception as exc:
+                    undo_error = exc
+                    self._stop_batch(
+                        f"Undo grouping failed after note {nid} was written: {exc}; "
+                        "no further notes will be submitted")
+                try:
+                    record(nid, dst, filename, data, spec["provider"])
+                except Exception as exc:
+                    self._count("generated_unmanaged")
+                    print(f"[AINotePro Audio] provenance unavailable note={nid}: {exc}")
+                else:
+                    self._count("success")
+                if update_error:
+                    print(f"[AINotePro Audio] note={nid} persisted despite update exception: {update_error}")
+                if undo_error:
+                    print(f"[AINotePro Audio] note={nid} persisted; undo grouping requires manual review")
+                self._refresh_editor(nid)
+            finally:
+                self._committing = False
         except Exception as exc:
             self._count("failed_commit")
-            print(f"[AINotePro Audio] commit {nid}: {exc}")
+            self._stop_batch(f"Unexpected commit error for note {nid}: {exc}")
 
     def _advance(self):
         if not self._running or self._closing: return
@@ -710,7 +823,14 @@ class TTSTab(QWidget):
         try: mw.reset()
         except Exception: pass
         summary = ", ".join(f"{k}: {v}" for k, v in sorted(self._results.items()))
-        showInfo("Audio batch complete. " + (summary or "No notes changed."))
+        message = "Audio batch complete. " + (summary or "No notes changed.")
+        if self._halt_reason:
+            message += "\nSTOPPED: " + self._halt_reason
+        print("[AINotePro Audio] " + message)
+        showInfo(message)
+        if self._close_pending:
+            self._close_ready = True
+            QTimer.singleShot(0, lambda: self.window().reject())
 
     def closeEvent(self, event):
         if not self.can_close():
