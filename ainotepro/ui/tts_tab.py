@@ -487,6 +487,9 @@ class TTSTab(QWidget):
 
     def _probe(self, *_):
         if self._draft["provider"] != "kokoro_gradio": return
+        # Retry must use the URL currently visible in the editor, even when
+        # QLineEdit.editingFinished has not fired yet.
+        self._capture()
         self._probe_id += 1
         request = self._probe_id
         revision = self._draft_revision
