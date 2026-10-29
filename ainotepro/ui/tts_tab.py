@@ -74,8 +74,7 @@ class TTSTab(QWidget):
         self.browser, self.editor = browser, editor
         self.note_ids = list(note_ids or [])
         self.cfg = ConfigManager()
-        self._audio = self.cfg.get_audio()
-        self._revision = self.cfg.audio_revision()
+        self._audio, self._revision = self.cfg.get_audio_snapshot()
         self._profile_id = self._audio.get("last_profile_id")
         self._draft = (copy.deepcopy(self._audio["profiles"][self._profile_id])
                        if self._profile_id else default_profile("Unsaved Audio settings"))
