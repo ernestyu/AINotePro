@@ -43,6 +43,20 @@ class OpenAITextProvider(TextProvider):
         except Exception:
             return []
 
+    @staticmethod
+    def _apply_reasoning(body: Dict, config: Dict) -> None:
+        """Map a user's per-model preference to llama.cpp/OpenAI-compatible effort.
+
+        Unsupported endpoints may reject an explicit effort; never silently
+        remove the field or claim the backend applied it.
+        """
+        model = body.get("model", "")
+        choices = (config or {}).get("reasoning_by_model") or {}
+        mode = choices.get(model, "default") if isinstance(choices, dict) else "default"
+        effort = {"off": "none", "low": "low", "medium": "medium", "high": "xhigh"}.get(mode)
+        if effort is not None:
+            body["reasoning_effort"] = effort
+
     def generate(self, prompt: str, config: Dict) -> str:
         body = {
             "model": (config or {}).get("model") or "gpt-4o-mini",
@@ -53,6 +67,7 @@ class OpenAITextProvider(TextProvider):
             "stream": False,
         }
 
+        self._apply_reasoning(body, config)
         url = f"{self._base(config)}/chat/completions"
         headers = self._headers(config)
         print(f"[AINotePro] POST {url} model={body.get('model')}")
@@ -96,6 +111,7 @@ class OpenAITextProvider(TextProvider):
             "stream": False,
         }
 
+        self._apply_reasoning(body, config)
         url = f"{self._base(config)}/chat/completions"
         headers = self._headers(config)
         print(f"[AINotePro] POST {url} (vision) model={body.get('model')}")
