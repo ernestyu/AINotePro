@@ -71,6 +71,13 @@ class AiNoteProConfigDialog(QDialog):
         bottom_layout.addStretch()
         bottom_layout.addWidget(button_box)
         main_layout.addLayout(bottom_layout)
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
+    def _on_tab_changed(self, *_):
+        if self.tab_widget.currentWidget() is self.tabs["Audio"]:
+            self.tabs["Audio"]._refresh_availability()
+        else:
+            self.generate_button.setEnabled(True)
 
     def on_generate(self):
         current_tab = self.tab_widget.currentWidget()
@@ -84,8 +91,12 @@ class AiNoteProConfigDialog(QDialog):
             fn()
 
     def _on_close(self):
-        # Settings are now saved automatically by ConfigManager, no action needed on close.
-        self.accept()
+        if self.tabs["Audio"].can_close():
+            self.accept()
+
+    def reject(self):
+        if self.tabs["Audio"].can_close():
+            super().reject()
 
     def on_help(self):
         openLink("https://github.com/ernestyu/AINotePro/wiki")
