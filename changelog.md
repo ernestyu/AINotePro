@@ -1,5 +1,15 @@
 # Changelog
 
+## Audio V2 - Compact Profile UI candidate (2026-10-29)
+
+- Removed the Audio tab's nested scroll area and tightened margins, row spacing, three Voice blocks and main dialog header/footer.
+- Moved Profile management below Source/Destination, directly above the dialog's Help/Close/Generate footer.
+- Replaced the Profile selector with an editable saved-name list; Save creates or updates by name, Load applies an existing name explicitly, Delete removes a saved name. Removed Save As and New controls.
+- Generate accepts valid unsaved settings without requiring a Profile save or load.
+- Preserve Audio V2's versioned Profile storage, three Voice behavior, and Anki media safety rules.
+- **Per user instruction, no tests or CI were run; layout and behavior require inspection in the user's Anki runtime.**
+
+
 ## Audio V2 - Static audit remediation candidate (2026-10-29)
 
 - Addressed static audit P0-01: separated note persistence verification, undo merge and provenance outcomes; stop the batch on undo failure without misreporting a persisted note as uncommitted; mark indeterminate commits explicitly.
