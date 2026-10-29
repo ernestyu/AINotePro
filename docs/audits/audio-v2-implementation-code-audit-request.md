@@ -2,7 +2,7 @@
 
 - 任务：**Implementation Code Audit / Read-only / No Tests / No CI**
 - 项目：`ernestyu/AINotePro`
-- 实施代码固定基线：`main@13c358bbdac7c68d59ce34dac969b8c8dab3b1f8`
+- 实施代码固定基线：`main@22c92cf3c8aad66ee59a2039871285ec9229ba22`
 - 已通过独立设计审计的 SPEC：`docs/specs/audio-v2-kokoro-profiles-implementation-spec.md`（`de4bce6604f47f40fa850b712b9e53868d53bce9`）
 - 音色资料：`docs/reference/kokoro-official-voice-language-catalog.md`
 - 交付状态：**代码开发候选，未经过 Anki 实机验收，禁止作为已验证发布版本**。
@@ -31,7 +31,7 @@
 
 - **P0/P1：静态正确性**。逐文件检查 Python/Qt API 调用方式、可能的启动异常、信号/槽与线程生命周期、UI 构造时机、关闭窗口后回调；指出具体文件/函数/代码证据。不要将“未实测”直接写成“实测失败”。
 - **Gradio 协议与依赖**。核对 Gradio 5/6 的 `/gradio_api/info`、`/gradio_api/call/synthesize`、SSE、File URL 和三输出解析是否符合现有 Kokoro `/synthesize`。明确指出与 SPEC §13.1 的偏差：当前采用**尚未实测的标准库 HTTP**，并未使用经过 Anki Python 验证的 `gradio_client`；需要用户现场提供哪些验证证据。不得自行假设已经成功。
-- **Profile**。检查 Schema/默认值、迁移幂等、失效 Profile/离线音色恢复、删除不复活、Save/Save As/Load/Delete、切换 Provider 的草稿隔离、配置并发覆盖、Text 保存对 Audio 的影响、源/目标字段缺失行为。
+- **Profile**。特别检查删除当前 Profile 后不自动加载其他 Profile（要求用户显式 Load），以及 Schema/默认值、迁移幂等、失效 Profile/离线音色恢复、删除不复活、Save/Save As/Load/Delete、切换 Provider 的草稿隔离、配置并发覆盖、Text 保存对 Audio 的影响、源/目标字段缺失行为。
 - **三 Voice 与 UI 兼容**。每张笔记均匀抽取完整配置、三个 Preview 独立参数、Kokoro 28 英语音色的美式/英式/男女分组、Edge 原多语言与音量/音调保留、API Key 移除、Provider 探测竞态、未保存配置提示、UI 原位置和滚动。
 - **后台/collection/undo**。是否存在 worker 访问 `mw.col` 或 Qt、主线程阻塞、任务完成后回调到已关闭窗口、取消最后门禁、单笔不可中断提交、同一批次单步撤销、编辑器/浏览器刷新。**Anki 26.05+ 的具体 API 语义只能标记待用户实机确认。**
 - **媒体与来源**。MP3 验证、Preview 临时文件清理、不写媒体库、默认 Skip、Replace 精确来源验证、字段冲突检测、笔记成功而来源记录失败的 `generated_unmanaged`、已生成与失败统计、跨设备同步、媒体不自动删除、来源索引与 Anki collection 非原子事务。
