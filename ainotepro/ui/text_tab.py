@@ -282,20 +282,38 @@ class TextTab(QWidget):
         # Prompt preview
         layout.addWidget(QLabel("<b>Prompt Preview</b>"))
         self.prompt_edit = QTextEdit()
-        self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred))
+        # Let Prompt Preview consume the height freed by removing the
+        # decorative header; keep the other controls at their natural size.
+        self.prompt_edit.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding))
         self.prompt_edit.setMinimumHeight(120)
-        self.prompt_edit.setMaximumHeight(170)
         self.prompt_edit.setPlaceholderText('Prompt must contain "{Source Field}" so the selected source field can be inserted.')
-        layout.addWidget(self.prompt_edit)
+        layout.addWidget(self.prompt_edit, 1)
 
         # Prompt list + buttons
-        pr_row = QHBoxLayout(); pr_row.addWidget(QLabel("<b>Prompt Name:</b>"))
-        self.prompt_list_combo = QComboBox(); self.prompt_list_combo.setEditable(True); pr_row.addWidget(self.prompt_list_combo)
+        # Split the entire row equally (including labels), rather than
+        # allowing Search to squeeze the editable Prompt Name selector.
+        pr_row = QHBoxLayout()
+        pr_row.setContentsMargins(0, 0, 0, 0)
+        pr_row.setSpacing(10)
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        name_row.addWidget(QLabel("<b>Prompt Name:</b>"))
+        self.prompt_list_combo = QComboBox()
+        self.prompt_list_combo.setEditable(True)
+        self.prompt_list_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
         self.prompt_list_combo.setToolTip("Select an existing prompt or type a new name before saving.")
-        pr_row.addWidget(QLabel("<b>Search:</b>"))
-        self.prompt_search_edit = QLineEdit(); self.prompt_search_edit.setPlaceholderText("输入关键词过滤...")
+        name_row.addWidget(self.prompt_list_combo, 1)
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(6)
+        search_row.addWidget(QLabel("<b>Search:</b>"))
+        self.prompt_search_edit = QLineEdit()
+        self.prompt_search_edit.setPlaceholderText("输入关键词过滤...")
         self.prompt_search_edit.textChanged.connect(lambda _text: self._filter_prompts())
-        pr_row.addWidget(self.prompt_search_edit)
+        search_row.addWidget(self.prompt_search_edit, 1)
+        pr_row.addLayout(name_row, 1)
+        pr_row.addLayout(search_row, 1)
         layout.addLayout(pr_row)
 
         # Get standard icons
