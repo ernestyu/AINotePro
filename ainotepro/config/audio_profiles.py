@@ -112,6 +112,8 @@ def validate_audio(audio):
                     raise ValueError("Invalid Voice gender/ID")
                 if not isinstance(v.get("preview_text"), str):
                     raise ValueError("Invalid preview text")
+                if v["enabled"] and not v["voice"].strip():
+                    raise ValueError(f"Enabled {provider} Voice has no ID")
                 if provider == "edge_tts":
                     for field in ("speed", "volume", "pitch"):
                         if type(v.get(field)) is not int or not -50 <= v[field] <= 50:
