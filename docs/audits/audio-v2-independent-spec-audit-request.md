@@ -6,8 +6,8 @@
 
 **审计对象（固定版本）**：
 - SPEC：`docs/specs/audio-v2-kokoro-profiles-implementation-spec.md`
-- SPEC 冻结提交：`af326b55e8fac7c9ba36f7a477a43fa6d8a30791`
-- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/af326b55e8fac7c9ba36f7a477a43fa6d8a30791/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
+- SPEC 冻结提交：`65ceb4752fee0556b64bd61768e268432465af69`
+- SPEC 固定链接：https://github.com/ernestyu/AINotePro/blob/65ceb4752fee0556b64bd61768e268432465af69/docs/specs/audio-v2-kokoro-profiles-implementation-spec.md
 - AINotePro 原代码基线：`2f3efa526b5e16f0d8b0eb5443d42f38c91e7e3c`（v1.0.0）
 - Kokoro TTS 服务端基线：`ernestyu/kokoro-tts@d3f8333765d4e3432e51a5ead831b80096064a4e`（私有仓库；如无访问权限请明确标注未核验，不得假设）
 - 官方音色资料：`docs/reference/kokoro-official-voice-language-catalog.md`（提交 `d84873e186b786fbf857ca6c3cee8541e0775a98`），原作者资料：https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
@@ -18,6 +18,8 @@
 AINotePro 是 Anki 桌面插件，现有 Audio 标签通过 Edge TTS 将笔记源字段转成 MP3，并写入目标字段 `[sound:...]`，由 Anki 同步媒体到手机。UI 提供三个独立的 Voice 区块。产品设计要求：用户勾选多个区块时，**每张笔记随机选择一个已启用音色及其对应参数**，以减轻长期使用同一音色的听觉疲劳。用户反馈其本地使用时有效；但 GitHub `main` 当前 `tts_tab.py` 实现遇到首个启用区块即 `break`。请区分“用户体验”“仓库实际实现”“应当达到的验收要求”，不要把它们混为一谈。
 
 用户已在 Mac mini M4 上部署独立 Kokoro MLX + Gradio 服务：`127.0.0.1:7860`、`/synthesize`，输入 `text/voice/speed`，返回 MP3 文件。通过 `gradio_client` 已实测真实合成成功（MP3 65,324 bytes）；**未证明任意直接 HTTP POST 与 Gradio 客户端等价**。目标是在 AINotePro 内增加 Kokoro 作为可选 Provider，而不改 Kokoro 服务端、不要求手机连接 Kokoro。
+
+**最新范围决策（SPEC 第 12 节）**：本轮 Kokoro **仅英语**，保留美式和英式；**现有 Audio UI 兼容性是硬约束**，包括 Generate using、Language、三个 Voice、各自 Preview、Gender/Speed、Edge 的 Volume/Pitch、Source/Destination 与底部 Generate。Profile 仅增加紧凑工具栏；Kokoro 各 Voice 独立选择美式/英式与男女声，使用友好音色名+官方等级。Kokoro 不支持的控件禁用而非破坏布局；Provider 切换不能混淆滑块单位、重置未保存配置或静默回退。Edge TTS 原有多语言功能不得削减。请以当前 `tts_tab.py` 和用户提供的界面截图作为对照基线。
 
 新增官方资料核验：Kokoro v1.0 官方为 8 种语言、9 个语言/口音组、54 个音色，官方音色表带部分 Overall Grade。**现有 Mac mini Gradio 只允许 28 个英语音色**；Audio V2 第一阶段要提供友好分组（语言/口音、男女、名称、官方评级），非英语扩展需修改服务端并验证 G2P，作为另行批准的第二阶段，不能误报已支持。
 
@@ -34,7 +36,8 @@ AINotePro 是 Anki 桌面插件，现有 Audio 标签通过 Edge TTS 将笔记�
 5. **线程安全与批量执行**：Anki collection 与媒体操作线程约束、后台网络调用、取消与关闭窗口、进度、失败隔离、撤销记录、部分成功后的数据一致性。
 6. **字段/媒体安全**：重复生成的默认跳过与显式替换；如何可靠识别插件拥有的音频；历史未标记音频、跨设备同步、HTML/声音标签清理、同源/目标字段、Preview 临时文件生命周期。
 7. **音色与多语言**：核对官方 54 音色元数据、8 种语言/9 个口音组的区分、官方评级的含义；28 个当前可用英语音色的动态探测与 UI 分组；Profile 中语言/性别/voice ID 的恢复；非英语需要服务端与 G2P 变更是否明确排除在第一阶段外。
-8. **兼容、隐私、发布**：Edge TTS 与 Text 不退化；本机地址与非预期远程连接限制；音频不误发其他 Provider；新增依赖及许可证；Anki 26.05+ 打包；README/发布清单/回归测试覆盖。
+8. **UI 兼容性与纯英语范围（强制审计）**：逐条检查 SPEC 第 12 节的布局不变项、三 Voice 原位置、每 Voice 口音选择、两 Provider 参数映射、禁用不支持控件、Provider 切换与 Profile 状态隔离、Kokoro 离线状态机、Edge 多语言不退化；检查是否存在相互矛盾条款，并给出 UI 回归测试矩阵。
+9. **兼容、隐私、发布**：Edge TTS 与 Text 不退化；本机地址与非预期远程连接限制；音频不误发其他 Provider；新增依赖及许可证；Anki 26.05+ 打包；README/发布清单/回归测试覆盖。
 
 ## 三、审计交付格式
 
