@@ -374,14 +374,14 @@ class TTSTab(QWidget):
         def fetch():
             return {gender: get_voices("Edge-TTS", lang, gender) for gender in ("Female", "Male")}
         def done(values):
-            if request != self._edge_request or self._draft["provider"] != "edge_tts": return
+            if self._closing or request != self._edge_request or self._draft["provider"] != "edge_tts": return
             for gender, voices in values.items(): self._edge_cache[(lang, gender)] = voices
             self._capture()
             self._loading = True
             for block, voice in zip(self.voice_blocks, self._draft["provider_configs"]["edge_tts"]["voices"]):
                 self._populate_voice(block, voice["voice"])
             self._loading = False
-        _task(fetch, done, lambda err: self.status_label.setText(f"Edge voice list: {err[:120]}"))
+        _task(fetch, done, lambda err: None if self._closing else self.status_label.setText(f"Edge voice list: {err[:120]}"))
 
     def _probe(self, *_):
         if self._draft["provider"] != "kokoro_gradio": return
@@ -394,7 +394,7 @@ class TTSTab(QWidget):
         def fetch():
             return create_provider("audio", "kokoro_gradio", {}).probe({"base_url": url})
         def done(voices):
-            if request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
+            if self._closing or request != self._probe_id or self._draft["provider"] != "kokoro_gradio": return
             if revision != self._draft_revision or url != self._draft["provider_configs"]["kokoro_gradio"]["base_url"]:
                 self._probe()
                 return
@@ -520,6 +520,7 @@ class TTSTab(QWidget):
         self.voice_blocks[index]["button"].setEnabled(False)
         def work(): return create_provider("audio", provider, {}).generate(text, config)
         def done(data):
+            if self._closing: return
             self.voice_blocks[index]["button"].setEnabled(True)
             try:
                 with tempfile.NamedTemporaryFile(prefix="ainotepro-preview-", suffix=".mp3", delete=False) as stream:
@@ -530,6 +531,7 @@ class TTSTab(QWidget):
             except Exception as exc:
                 showWarning(f"Preview failed: {exc}")
         def failed(err):
+            if self._closing: return
             self.voice_blocks[index]["button"].setEnabled(True)
             showWarning(f"Preview failed: {err}")
         _task(work, done, failed)
