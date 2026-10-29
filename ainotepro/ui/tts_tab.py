@@ -20,7 +20,7 @@ from aqt.qt import (
 from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager
-from ..config.audio_profiles import default_profile, new_profile_id, validate_audio
+from ..config.audio_profiles import new_profile_id, validate_audio
 from ..gen_audio.models.edge_tts.tts_handler import get_languages, get_voices
 from ..services.provider_factory import create_provider
 from ..core.async_task import AsyncTask
