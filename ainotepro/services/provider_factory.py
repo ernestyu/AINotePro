@@ -34,6 +34,9 @@ def create_provider(service_type: str, provider_name: str, config: Dict[str, Any
     elif service_type == "image":
         raise ValueError("Image generation providers are not available in this build")
     elif service_type == "audio":
+        if provider_name == "kokoro_gradio":
+            from .audio.kokoro_gradio import KokoroGradioProvider
+            return KokoroGradioProvider()
         if provider_name in ("edge_tts", "edge-tts"):
             from .audio.edge_tts import EdgeTTSProvider
             return EdgeTTSProvider()
