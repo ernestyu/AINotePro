@@ -1,5 +1,16 @@
 # Changelog
 
+## Audio V2 - Static audit remediation candidate (2026-10-29)
+
+- Addressed static audit P0-01: separated note persistence verification, undo merge and provenance outcomes; stop the batch on undo failure without misreporting a persisted note as uncommitted; mark indeterminate commits explicitly.
+- Addressed P1-01: staged queue (120s), synthesis + download (300s) and total (420s) Gradio deadlines, categorized download and validation errors. Raw HTTP protocol remains unverified on the user's Gradio.
+- Addressed P1-02: changed-leaf Text settings saves with conflict detection; Text prompt metadata writes use atomic shared config manager.
+- Addressed P1-03: defer dialog close until the active worker returns, then finalize statistics and cleanup.
+- Addressed P1-04: use Qt Multimedia completion/error events and close to manage Preview MP3 lifetime, not a fixed 120-second timer. Runtime availability unverified.
+- Addressed P1-05 and P1-06: reject enabled empty Edge Voice and reject the entire batch if any enabled Kokoro Voice is unavailable; never silently change random selection weights.
+- Addressed P2-01/P2-02/P2-03: explicit no-loaded-Profile selector state, transport error classification and Edge voice-list health gating.
+- **Per user instruction, no tests or CI were run; independent read-only static re-audit and Mac mini Anki field testing are still required.**
+
 ## Audio V2 - Development candidate (2026-10-29, not release-tested)
 
 - Added English-only local Kokoro Gradio Provider and user-visible American/British, Female/Male voice labels with official quality metadata.
