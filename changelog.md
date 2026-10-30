@@ -1,5 +1,12 @@
 # Changelog
 
+## Audio - Select Profile to load immediately (2026-10-30)
+
+- Selecting a saved Audio Profile now loads all settings immediately, matching Text prompt selection. Removed the redundant Load button; typing a name alone never loads a Profile.
+- Switching away from an edited Profile offers Save / Discard / Cancel. Save writes to the previous Profile by ID, never to the newly selected Profile; Cancel restores the previous selection and unchanged draft.
+- Persist last_profile_id before applying the target UI settings. If a concurrent Audio write prevents switching, retain the original draft and restore its selector. Manual Save and unsaved Generate remain unchanged.
+
+
 ## Text - Per-model reasoning and persistent model selection (2026-10-29)
 
 - Added a compact Reasoning selector beside Model: Off, Low, Medium, High, Model Default. It stores the selection per model inside the chosen Text provider's config; existing models default to Model Default to preserve previous request behavior.

@@ -230,8 +230,8 @@ class TTSTab(QWidget):
         root.addLayout(fields)
         root.addStretch(1)
 
-        # Editable list: type a new name and Save, or select an existing name
-        # and explicitly Load. Selecting a name never overwrites the live draft.
+        # Selecting an existing Profile loads it immediately. Typing a new name
+        # only changes the proposed Save target; it never loads another Profile.
         profile_row = QHBoxLayout()
         profile_row.setSpacing(6)
         profile_row.addWidget(QLabel("Profile:"))
@@ -242,11 +242,11 @@ class TTSTab(QWidget):
         self.profile_combo.lineEdit().setPlaceholderText("Enter a name or select a saved Profile")
         profile_row.addWidget(self.profile_combo, 1)
         for label, handler in (("Save", self.save_profile),
-                               ("Load", self.load_profile),
                                ("Delete", self.delete_profile)):
             button = QPushButton(label)
             button.clicked.connect(handler)
             profile_row.addWidget(button)
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_selection_changed)
         root.addLayout(profile_row)
 
         self.generate_combo.currentIndexChanged.connect(self._provider_changed)
@@ -321,8 +321,8 @@ class TTSTab(QWidget):
     def _confirm_discard(self):
         if not self._is_dirty():
             return True
-        # Do not offer Save here: the combo might already name a *different*
-        # Profile selected for Load/Delete, which would be overwritten.
+        # Close/Delete still offer Discard/Cancel. Saving through an editable
+        # combo at this point could target a newly typed name instead.
         return QMessageBox.question(
             self, "Unsaved Audio Settings",
             "The current Audio settings have unsaved changes. Discard them?\n"
@@ -330,6 +330,56 @@ class TTSTab(QWidget):
             QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel
         ) == QMessageBox.StandardButton.Discard
+
+    def _restore_profile_selection(self):
+        # The combo may already show the target of a cancelled switch. Always
+        # restore the Profile that actually owns the visible editor draft.
+        name = (self._audio["profiles"][self._profile_id]["name"]
+                if self._profile_id in self._audio["profiles"] else "")
+        self._refresh_profiles(name)
+
+    def _confirm_profile_switch(self):
+        if not self._is_dirty():
+            return True
+        choice = QMessageBox.question(
+            self, "Unsaved Audio Settings",
+            "Save changes to the current Audio Profile before switching?",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard |
+            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        )
+        if choice == QMessageBox.StandardButton.Discard:
+            return True
+        if choice != QMessageBox.StandardButton.Save:
+            return False
+        # Never use the combo's *new* selection as the Save target: its text
+        # already belongs to the Profile the user is trying to switch to.
+        if self._profile_id not in self._audio["profiles"]:
+            showWarning("The current draft is not a saved Profile. Cancel the "
+                        "switch and save it under a new name first.")
+            return False
+        original = copy.deepcopy(self._draft)
+        original["name"] = self._audio["profiles"][self._profile_id]["name"]
+        try:
+            self._save(self._profile_id, original)
+            return True
+        except Exception as exc:
+            showWarning(f"Could not save current Audio Profile: {exc}")
+            return False
+
+    def _on_profile_selection_changed(self, index):
+        # Typing in the editable combo must not switch Profiles. Only selecting
+        # an actual saved row does so, and _refresh_profiles blocks its signals.
+        if self._loading or index < 0:
+            return
+        pid = self.profile_combo.itemData(index)
+        if pid is None or pid == self._profile_id:
+            return
+        if not self._confirm_profile_switch():
+            self._restore_profile_selection()
+            return
+        if not self._activate_profile(pid):
+            self._restore_profile_selection()
 
     def _capture(self):
         if self._loading: return
@@ -582,22 +632,17 @@ class TTSTab(QWidget):
             showWarning(f"Could not save Audio Profile: {exc}")
             return False
 
-    def load_profile(self, *_):
-        pid = self._selected_profile_id()
-        if not pid:
-            showWarning("Choose a saved Profile from the list, then click Load.")
-            return False
-        if not self._confirm_discard():
-            return False
+    def _activate_profile(self, pid):
         profile = copy.deepcopy(self._audio["profiles"][pid])
-        # Commit selection first, before touching the live Audio controls.
+        # Commit selection before changing the editor; on a CAS failure leave
+        # the previous Profile and its draft intact.
         try:
             new_audio = copy.deepcopy(self._audio)
             new_audio["last_profile_id"] = pid
             self._revision = self.cfg.replace_audio(new_audio, expected_revision=self._revision)
             self._audio = new_audio
         except Exception as exc:
-            showWarning(f"Could not load Profile: {exc}")
+            showWarning(f"Could not select Audio Profile: {exc}")
             return False
         self._profile_id = pid
         self._draft = profile
