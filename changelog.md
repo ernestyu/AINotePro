@@ -1,5 +1,12 @@
 # Changelog
 
+## Text - Explicit prompt actions and protected Default (2026-10-30)
+
+- Replaced the Text prompt controls with right-aligned New, Save, Save As and Delete. New starts an empty draft with a name; Save updates only the active saved prompt or creates the named draft; Save As always requires a new name.
+- Protected the existing Default prompt against UI saves, deletion and imports without resetting any legacy customization. Prompt selection checks for unsaved changes and offers Save / Discard / Cancel, except protected Default (Discard / Cancel).
+- Removed the unused Online prompt button and its obsolete documentation. Import and Export remain available.
+
+
 ## Audio - Select Profile to load immediately (2026-10-30)
 
 - Selecting a saved Audio Profile now loads all settings immediately, matching Text prompt selection. Removed the redundant Load button; typing a name alone never loads a Profile.
@@ -68,7 +75,6 @@
 - Added text generation for selected Anki notes.
 - Added OpenAI-compatible provider presets for OpenAI, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Together, Perplexity, Gemini-compatible endpoint, LM Studio, LocalAI, and Ollama.
 - Added prompt template save, automatic load on selection, delete, import, and export.
-- Disabled the unfinished online prompt sharing button.
 - Added last successful model persistence.
 - Added optional image-source mode for vision-capable models.
 - Added audio generation with Edge TTS and Anki `[sound:...]` field insertion.

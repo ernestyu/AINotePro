@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlparse
 from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
-    QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QCheckBox,
+    QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
     QIcon, QStyle
 )
 from aqt.utils import showInfo, showWarning
@@ -93,6 +93,10 @@ def _load_prompts() -> Dict[str, str]:
 
 def _save_prompts(data: Dict[str, str]) -> None:
     data = {str(k): str(v) for k, v in data.items()}
+    # Protect the user's existing Default, including any legacy customization.
+    # This guard also covers imports and deletions, not just the Save button.
+    if data.get("Default") != _load_prompts()["Default"]:
+        raise ValueError("Default prompt is protected. Use Save As to make a copy.")
     # Persist to the shared config first; a stale mirror must not mask saves.
     ConfigManager().update_text_fields({"prompts": data})
     try:
@@ -201,6 +205,9 @@ class TextTab(QWidget):
         self._reasoning_by_model: Dict[str, str] = {}
         self._loading_provider = False
         self.all_prompts: Dict[str, str] = {}
+        self._active_prompt_name: Optional[str] = None
+        self._new_prompt_name: Optional[str] = None
+        self._saved_prompt_text = ""
         self._is_updating_prompt_combo = False
         self._generation_update_count = 0
         self._generation_success_count = 0
@@ -330,11 +337,13 @@ class TextTab(QWidget):
         name_row.addWidget(QLabel("<b>Prompt Name:</b>"))
         self.prompt_list_combo = QComboBox()
         self.prompt_list_combo.setEditable(True)
-        # Only Save creates a prompt; disable implicit Qt insertion/completion.
+        # Names are selected here, but created only by New / Save As. Keep
+        # editable mode for showing an unsaved new name or filtered selection.
         self.prompt_list_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.prompt_list_combo.setCompleter(None)
+        self.prompt_list_combo.lineEdit().setReadOnly(True)
         self.prompt_list_combo.setSizePolicy(QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed))
-        self.prompt_list_combo.setToolTip("Select an existing prompt or type a new name before saving.")
+        self.prompt_list_combo.setToolTip("Select a saved prompt. Use New or Save As to create a new one.")
         name_row.addWidget(self.prompt_list_combo, 1)
         search_row = QHBoxLayout()
         search_row.setContentsMargins(0, 0, 0, 0)
@@ -354,24 +363,27 @@ class TextTab(QWidget):
         delete_icon = style.standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
         import_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
         export_icon = style.standardIcon(QStyle.StandardPixmap.SP_ArrowUp)
-        online_icon = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
-
         btn_row = QHBoxLayout()
         self.import_button = QPushButton(" Import"); self.import_button.setIcon(import_icon)
         self.export_button = QPushButton(" Export"); self.export_button.setIcon(export_icon)
-        self.online_button = QPushButton(" Online"); self.online_button.setIcon(online_icon)
-        self.online_button.setEnabled(False)
-        self.online_button.setToolTip("Online shared prompts are not available yet.")
         self.import_button.clicked.connect(self._on_import_prompt)
         self.export_button.clicked.connect(self._on_export_prompt)
-        btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button); btn_row.addWidget(self.online_button)
+        btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button)
         btn_row.addStretch(1)
+        self.new_button = QPushButton("New")
         self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
-        self.save_button.setToolTip("Save the current Prompt Preview under the Prompt Name.")
+        self.save_as_button = QPushButton("Save As")
         self.delete_button = QPushButton(" Delete"); self.delete_button.setIcon(delete_icon)
-        self.save_button.clicked.connect(self._on_save_prompt); self.delete_button.clicked.connect(self._on_delete_prompt)
+        self.new_button.setToolTip("Start a blank, unsaved prompt with a new name.")
+        self.save_button.setToolTip("Save the selected prompt. Default is read-only.")
+        self.save_as_button.setToolTip("Save the current text under a new name.")
+        self.new_button.clicked.connect(self._on_new_prompt)
+        self.save_button.clicked.connect(self._on_save_prompt)
+        self.save_as_button.clicked.connect(self._on_save_as_prompt)
+        self.delete_button.clicked.connect(self._on_delete_prompt)
         self.prompt_list_combo.currentIndexChanged.connect(self._on_prompt_selection_changed)
-        btn_row.addWidget(self.save_button); btn_row.addWidget(self.delete_button)
+        for button in (self.new_button, self.save_button, self.save_as_button, self.delete_button):
+            btn_row.addWidget(button)
         layout.addLayout(btn_row)
 
         # Separator
@@ -407,7 +419,9 @@ class TextTab(QWidget):
 
     def _load_prompt_list(self):
         self.all_prompts = _load_prompts()
-        self._filter_prompts(preferred_name=_get_last_used_prompt(), load_selected=True)
+        name = _get_last_used_prompt()
+        self._filter_prompts(preferred_name=name if name in self.all_prompts else "Default",
+                             load_selected=True)
 
     def _filter_prompts(self, preferred_name: Optional[str] = None, load_selected: bool = False):
         search_text = self.prompt_search_edit.text().lower()
@@ -469,10 +483,62 @@ class TextTab(QWidget):
             pass
         return self.prompt_list_combo.currentText().strip()
 
-    def _on_prompt_selection_changed(self, _index: int) -> None:
-        if self._is_updating_prompt_combo:
+    def _restore_prompt_selector(self) -> None:
+        # A rejected switch must restore the name that owns the editor text.
+        name = self._new_prompt_name or self._active_prompt_name or ""
+        self._is_updating_prompt_combo = True
+        try:
+            index = self.prompt_list_combo.findText(name)
+            if index >= 0:
+                self.prompt_list_combo.setCurrentIndex(index)
+            else:
+                self.prompt_list_combo.setEditText(name)
+        finally:
+            self._is_updating_prompt_combo = False
+
+    def _update_prompt_actions(self) -> None:
+        editable = self._active_prompt_name not in (None, "Default")
+        self.save_button.setEnabled(editable or self._new_prompt_name is not None)
+        self.delete_button.setEnabled(editable)
+
+    def _prompt_is_dirty(self) -> bool:
+        return (self._new_prompt_name is not None or
+                (self._active_prompt_name is not None and
+                 self.prompt_edit.toPlainText() != self._saved_prompt_text))
+
+    def _confirm_leave_prompt(self) -> bool:
+        if not self._prompt_is_dirty():
+            return True
+        if self._active_prompt_name == "Default":
+            message = ("Default is protected. Use Save As to keep your changes. "
+                       "Discard the edits and switch?")
+            buttons = (QMessageBox.StandardButton.Discard |
+                       QMessageBox.StandardButton.Cancel)
+        else:
+            message = "Save changes to the current prompt before switching?"
+            buttons = (QMessageBox.StandardButton.Save |
+                       QMessageBox.StandardButton.Discard |
+                       QMessageBox.StandardButton.Cancel)
+        choice = QMessageBox.question(self, "Unsaved Prompt", message, buttons,
+                                      QMessageBox.StandardButton.Cancel)
+        if choice == QMessageBox.StandardButton.Discard:
+            return True
+        if choice == QMessageBox.StandardButton.Save and self._active_prompt_name != "Default":
+            name = self._new_prompt_name or self._active_prompt_name
+            return self._save_prompt_to_name(name, overwrite=self._new_prompt_name is None)
+        return False
+
+    def _on_prompt_selection_changed(self, index: int) -> None:
+        if self._is_updating_prompt_combo or index < 0:
             return
-        self._load_prompt_by_name(self.prompt_list_combo.currentText().strip(), show_missing=False)
+        target = self.prompt_list_combo.itemText(index).strip()
+        if not target or target == self._active_prompt_name:
+            return
+        if not self._confirm_leave_prompt():
+            self._restore_prompt_selector()
+            return
+        if not self._load_prompt_by_name(target, show_missing=False):
+            self._restore_prompt_selector()
 
     def _load_prompt_by_name(self, name: str, show_missing: bool = True) -> bool:
         if not name:
@@ -486,8 +552,43 @@ class TextTab(QWidget):
             return False
         self.prompt_edit.setPlainText(data[name])
         self.all_prompts = data
+        self._active_prompt_name = name
+        self._new_prompt_name = None
+        self._saved_prompt_text = data[name]
+        self._restore_prompt_selector()
+        self._update_prompt_actions()
         _set_last_used_prompt(name)
         return True
+
+    def _valid_new_prompt_name(self, name: str) -> bool:
+        if not name or len(name) > 100:
+            showWarning("Prompt name must contain 1 to 100 characters.")
+            return False
+        if any(existing.casefold() == name.casefold() for existing in _load_prompts()):
+            showWarning("A prompt with this name already exists. Choose another name.")
+            return False
+        return True
+
+    def _set_new_prompt_draft(self, name: str) -> None:
+        self._active_prompt_name = None
+        self._new_prompt_name = name
+        self._saved_prompt_text = ""
+        self.prompt_edit.clear()
+        self._restore_prompt_selector()
+        self._update_prompt_actions()
+        self.prompt_edit.setFocus()
+
+    def _on_new_prompt(self) -> None:
+        name, ok = QInputDialog.getText(self, "New Prompt", "Name for the new prompt:")
+        if not ok:
+            return
+        name = name.strip()
+        if not self._valid_new_prompt_name(name):
+            return
+        if not self._confirm_leave_prompt():
+            self._restore_prompt_selector()
+            return
+        self._set_new_prompt_draft(name)
 
     def _load_note_fields(self):
         try:
@@ -510,53 +611,109 @@ class TextTab(QWidget):
         return list(self.note_ids)
 
     # Prompt ops
-    def _on_save_prompt(self):
-        name = self._prompt_name_text()
-        if not name:
-            showWarning("Prompt name cannot be empty."); return
+    def _save_prompt_to_name(self, name: Optional[str], *, overwrite: bool) -> bool:
+        name = (name or "").strip()
+        if not name or len(name) > 100:
+            showWarning("Prompt name must contain 1 to 100 characters.")
+            return False
+        if name.casefold() == "default":
+            showWarning("Default is protected. Use Save As to create a new prompt.")
+            return False
         content = self.prompt_edit.toPlainText()
         if not content.strip():
-            showWarning("Prompt Preview is empty."); return
-        if QMessageBox.question(self, "Confirm Save", "Save this prompt?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
-            return
+            showWarning("Prompt Preview is empty.")
+            return False
         try:
             data = _load_prompts()
+            if overwrite and name not in data:
+                showWarning("The selected prompt no longer exists. Use Save As.")
+                return False
+            if not overwrite and any(key.casefold() == name.casefold() for key in data):
+                showWarning("That prompt name already exists. Choose a different name.")
+                return False
             data[name] = content
             _save_prompts(data)
-            # Confirm the name and content are on disk, not only in the combo.
             saved = _load_prompts()
             if saved.get(name) != content:
                 raise RuntimeError("Saved prompt could not be verified on disk")
-            self.all_prompts = saved
-            _set_last_used_prompt(name)
-            # Prompt Save should also retain the visible provider/model settings.
-            self._save_current_provider_config()
         except Exception as exc:
             print(f"[AINotePro] Prompt save failed name={name!r}: {exc}")
             showWarning(f"Could not save prompt '{name}': {exc}")
-            return
+            return False
+        self.all_prompts = saved
+        self._active_prompt_name = name
+        self._new_prompt_name = None
+        self._saved_prompt_text = content
         self._refresh_prompt_combo_after_save(name)
-        self.prompt_edit.setPlainText(content)
+        self._update_prompt_actions()
+        try:
+            _set_last_used_prompt(name)
+            # Preserve existing behavior: Prompt Save also saves model settings.
+            self._save_current_provider_config()
+        except Exception as exc:
+            showWarning(f"Prompt saved, but settings could not be updated: {exc}")
         showInfo(f"Prompt saved: {name}")
+        return True
 
-    def _on_delete_prompt(self):
-        name = self._prompt_name_text()
-        if not name:
-            showWarning("Prompt name cannot be empty."); return
-        if QMessageBox.question(self, "Confirm Delete", "Delete this prompt?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
+    def _on_save_prompt(self) -> None:
+        if self._new_prompt_name is not None:
+            self._save_prompt_to_name(self._new_prompt_name, overwrite=False)
             return
-        data = _load_prompts();
-        if name in data:
-            del data[name]; _save_prompts(data)
-            self.all_prompts = data
-            next_name = next(iter(data), "")
-            _set_last_used_prompt(next_name)
-            self._filter_prompts(preferred_name=next_name, load_selected=bool(next_name))
-            if not next_name:
-                self.prompt_edit.clear()
-            showInfo("Prompt deleted.")
+        name = self._active_prompt_name
+        if not name:
+            showWarning("Use New to create a prompt or select a saved prompt.")
+            return
+        if name == "Default":
+            showWarning("Default is protected. Use Save As to keep your changes.")
+            return
+        if QMessageBox.question(
+                self, "Confirm Save", f'Update saved prompt "{name}"?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        self._save_prompt_to_name(name, overwrite=True)
+
+    def _on_save_as_prompt(self) -> None:
+        if not self.prompt_edit.toPlainText().strip():
+            showWarning("Prompt Preview is empty.")
+            return
+        source = self._new_prompt_name or self._active_prompt_name or "New Prompt"
+        name, ok = QInputDialog.getText(
+            self, "Save Prompt As", "New prompt name:", text=f"{source} Copy")
+        if not ok:
+            return
+        self._save_prompt_to_name(name, overwrite=False)
+
+    def _on_delete_prompt(self) -> None:
+        name = self._active_prompt_name
+        if not name:
+            showWarning("Select a saved prompt to delete.")
+            return
+        if name == "Default":
+            showWarning("Default is protected and cannot be deleted.")
+            return
+        if QMessageBox.question(
+                self, "Confirm Delete",
+                f'Delete saved prompt "{name}"? Unsaved edits will be lost.',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            data = _load_prompts()
+            if name not in data:
+                showWarning("The selected prompt no longer exists.")
+                return
+            del data[name]
+            _save_prompts(data)
+            self.all_prompts = _load_prompts()
+            self._active_prompt_name = None
+            self._new_prompt_name = None
+            self._saved_prompt_text = ""
+            self._refresh_prompt_combo_after_save("Default")
+            self._load_prompt_by_name("Default")
+            showInfo(f"Prompt deleted: {name}")
+        except Exception as exc:
+            showWarning(f"Could not delete prompt '{name}': {exc}")
 
     def _on_import_prompt(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Import Prompts", "", "JSON Files (*.json)")
@@ -567,6 +724,11 @@ class TextTab(QWidget):
                 new_prompts = json.load(f)
             if not isinstance(new_prompts, dict):
                 showWarning("Invalid prompt file format. Expected a JSON object."); return
+            if "Default" in new_prompts:
+                del new_prompts["Default"]
+                showWarning("Default is protected and was skipped during import.")
+            if not new_prompts:
+                return
 
             current_prompts = _load_prompts()
             conflicts = [k for k in new_prompts if k in current_prompts]

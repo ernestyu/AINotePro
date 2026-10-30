@@ -65,9 +65,9 @@ The Kokoro adapter currently uses Python standard-library HTTP with queue (120 s
 
 Prompt templates are stored in the add-on's `user_files` folder. Anki preserves this folder during add-on upgrades, so prompts and local settings are not erased when the add-on is updated.
 
-Use the prompt name field to select an existing prompt or type a new name. Selecting a prompt loads it automatically. `Save` stores the current prompt text under that name. `Delete` removes the selected template.
+Select a saved prompt from **Prompt Name** to load it immediately. **New** asks for a name and starts a blank, unsaved prompt; **Save** creates that new prompt or updates the selected saved prompt. **Save As** copies the current editor text to a different, new name. **Delete** removes the selected saved prompt. Import and Export remain on the left; New, Save, Save As and Delete are right-aligned.
 
-The `Online` prompt sharing button is currently disabled; shared prompt publishing is not implemented in this release.
+The built-in **Default** is protected from Save, Delete and Import overwrites. You can edit it temporarily and use Save As to keep a copy. Existing customized Default text is retained; this update does not reset it. When switching away from unsaved changes, the editor offers Save / Discard / Cancel (or Discard / Cancel for Default). The Prompt Name selector is read-only; naming is handled by New and Save As.
 
 ## Provider Notes
 
