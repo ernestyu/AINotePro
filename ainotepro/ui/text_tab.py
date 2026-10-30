@@ -444,6 +444,9 @@ class TextTab(QWidget):
         if idx != -1:
             self.prompt_list_combo.setCurrentIndex(idx)
         elif current_selection:
+            # An editable combo can display text while retaining an old index.
+            # Reset it so choosing the first visible row still emits a change.
+            self.prompt_list_combo.setCurrentIndex(-1)
             self.prompt_list_combo.setEditText(current_selection)
         self._is_updating_prompt_combo = False
         if load_selected:
@@ -492,6 +495,7 @@ class TextTab(QWidget):
             if index >= 0:
                 self.prompt_list_combo.setCurrentIndex(index)
             else:
+                self.prompt_list_combo.setCurrentIndex(-1)
                 self.prompt_list_combo.setEditText(name)
         finally:
             self._is_updating_prompt_combo = False

@@ -70,12 +70,14 @@ class Combo:
     def __init__(self):
         self.items = ["Default", "Alpha", "Beta"]
         self.current = "Default"
+        self.index = 0
     def itemText(self, index):
         return self.items[index]
     def findText(self, name):
         return self.items.index(name) if name in self.items else -1
     def setCurrentIndex(self, index):
-        self.current = self.items[index]
+        self.index = index
+        self.current = self.items[index] if index >= 0 else ""
     def setEditText(self, name):
         self.current = name
 
@@ -165,6 +167,7 @@ class TextPromptActionTests(unittest.TestCase):
         self.tab._on_new_prompt()
         self.assertEqual(self.tab.prompt_edit.value, "")
         self.assertEqual(self.tab._new_prompt_name, "Brand New")
+        self.assertEqual(self.tab.prompt_list_combo.index, -1)
         self.assertNotIn("Brand New", STORE)
         self.assertTrue(self.tab.save_button.enabled)
 
