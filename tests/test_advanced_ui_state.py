@@ -62,6 +62,8 @@ class _Tab(StateMethods):
         self._dirty = True
         self._last_advanced_fields = (["Text"], ["Out"])
         self._advanced_field_selection = (["Text"], ["Out"])
+        self._advanced_invalid_source_fields = set()
+        self._advanced_invalid_destination_fields = set()
         self.advanced_source_fields = _Fields(["Text", "Scenario", "Out"], ["Text", "Scenario"])
         self.advanced_destination_fields = _Fields(["Text", "Scenario", "Out"], ["Out"])
         self.prompt_text = "user draft"
@@ -119,6 +121,35 @@ class AdvancedUiStateTests(unittest.TestCase):
         self.assertEqual(tab._advanced_field_selection, (["Text", "Scenario"], ["Out"]))
         self.assertEqual(tab.load_count, 1)
         self.assertFalse(tab._discarded_dynamic_default)
+
+    def test_changing_visible_fields_preserves_each_unresolved_source_and_destination(self):
+        tab = _Tab()
+        tab._dirty = False
+        tab._advanced_field_selection = (["Text", "Missing Source"], ["Out", "Missing Destination"])
+        tab._advanced_invalid_source_fields = {"Missing Source"}
+        tab._advanced_invalid_destination_fields = {"Missing Destination"}
+        tab.advanced_source_fields.selected = ["Text", "Scenario"]
+        tab._on_advanced_field_selection_changed()
+        self.assertEqual(tab._advanced_field_selection,
+                         (["Text", "Scenario", "Missing Source"],
+                          ["Out", "Missing Destination"]))
+        self.assertEqual(tab._advanced_invalid_source_fields, {"Missing Source"})
+        self.assertEqual(tab._advanced_invalid_destination_fields, {"Missing Destination"})
+
+    def test_explicitly_deselecting_a_returned_invalid_field_resolves_only_that_field(self):
+        tab = _Tab()
+        tab._dirty = False
+        tab.advanced_source_fields = _Fields(["Text", "Missing Source", "Out"], ["Text"])
+        tab.advanced_destination_fields = _Fields(["Text", "Missing Source", "Out"], ["Out"])
+        tab._last_advanced_fields = (["Text", "Missing Source"], ["Out"])
+        tab._advanced_field_selection = (["Text", "Missing Source"], ["Out", "Missing Destination"])
+        tab._advanced_invalid_source_fields = {"Missing Source"}
+        tab._advanced_invalid_destination_fields = {"Missing Destination"}
+        tab._on_advanced_field_selection_changed()
+        self.assertEqual(tab._advanced_field_selection,
+                         (["Text"], ["Out", "Missing Destination"]))
+        self.assertEqual(tab._advanced_invalid_source_fields, set())
+        self.assertEqual(tab._advanced_invalid_destination_fields, {"Missing Destination"})
 
     def test_late_result_and_finish_after_cancel_cannot_schedule_commit(self):
         tab = _Tab()

@@ -83,19 +83,36 @@ class AiNoteProConfigDialog(QDialog):
             fn()
 
     def _on_close(self):
-        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
+        if self._prepare_dialog_close():
             self.accept()
 
     def reject(self):
-        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
+        if self._prepare_dialog_close():
             super().reject()
 
     def closeEvent(self, event):
         # macOS title-bar close must persist the same Text settings as Close/Esc.
-        if self.tabs["Text"].save_settings() and self.tabs["Audio"].can_close():
+        if self._prepare_dialog_close():
             event.accept()
         else:
             event.ignore()
+
+    def _prepare_dialog_close(self):
+        """Use one close gate for Close, Esc and title-bar destruction.
+
+        Prompt confirmation and Audio's own draft guard happen before a Text
+        task is marked closing. Settings are saved synchronously next; only
+        after all three checks pass do we cancel callbacks and allow Qt to
+        destroy the tab.
+        """
+        text = self.tabs["Text"]
+        if not text.can_close():
+            return False
+        if not self.tabs["Audio"].can_close():
+            return False
+        if not text.save_settings():
+            return False
+        return text.prepare_close(confirmed=True)
 
     def on_help(self):
         openLink("https://github.com/ernestyu/AINotePro/wiki")

@@ -149,3 +149,43 @@ python3 -c 'import anki, aqt'                                                   
 3. 在 macOS、Windows、Linux 的 1000×700、870×610 及不同 DPI 下验证多选滚动、方向键/Space、Escape、长字段 tooltip、Prompt 操作和 Generate/Close 可达。
 
 本轮变更模块：`ainotepro/core/advanced_commit.py`、`ainotepro/core/advanced_ledger.py`、`ainotepro/core/advanced_text.py`、`ainotepro/ui/text_tab.py`，以及对应 Advanced 单元/行为测试。实施 Commit 由随后交付记录；未合并 `main`。
+
+## 最终集成验收整改（2026-11-01）
+
+基线：`feat/text-advanced-v1@217a082832c96c6d1fba1dba9648c52c0e32fe9a`。本轮再次复核 SPEC §0–12、前序审计记录、TextTab/MainDialog 的关闭链路与全部本地测试；未修改 SPEC、`main`、Provider 核心或 Audio 实现。
+
+| 审计项 | 处理与代码位置 | 可运行证据 | 状态 |
+|---|---|---|---|
+| AUD-F01 字段状态 | `TextTab` 以独立的 Source/Destination 未解决集合保存失效选择；编辑其他可见字段不会清空它们。失效字段重新可见后，只有用户明确切换该字段才解除阻断；警告逐项标出角色和名称。 | `AdvancedUiStateTests.test_changing_visible_fields_preserves_each_unresolved_source_and_destination`、`test_explicitly_deselecting_a_returned_invalid_field_resolves_only_that_field` | 代码/行为 mock 通过；Qt 实机待验收。 |
+| AUD-F02 关闭生命周期 | `AiNoteProConfigDialog._prepare_dialog_close()` 成为 Close、Esc、标题栏的统一门：先 Prompt 草稿确认、Audio 关闭检查、Text 设置保存，最后以 `prepare_close(confirmed=True)` 设置 cancel/closing。保存或任一确认失败时任务不提前标为 closing。 | `tests/test_main_dialog_close.py` 三项行为测试 | 代码/行为 mock 通过；真实 Qt/CollectionOp 待验收。 |
+| AUD-F03 Anki 事务/Undo | 保留 `advanced_commit.py` 的保守持久化分类和批次停止规则；本环境仍无 `anki`/`aqt` 可导入运行时，没有用 mock 推断官方 Undo 或数据库事务。 | 既有 `AdvancedCommitTests` 故障注入套件 | **未通过实机验收，发布阻断。** |
+| AUD-F04 全局回归 | 重新运行 Advanced 解析、预检、JSON、CAS/迁移、提交总账、Easy Prompt/OCR 相关分流、Provider 输出及 Audio Profile 测试；本轮未改变已符合合同的解析器、Prompt CAS、Audio 或 Provider 代码。 | 完整 unittest 61 项 | 本地通过；Provider/Qt/Anki 实机待验收。 |
+
+### 先前审计项保持状态
+
+- AUD-G01–G09、AUD-ADV-03、AUD-ADV-07/08 仍保持代码级核销；本轮没有放宽 CAS、预检零副作用、JSON 或结果总账合同。
+- AUD-ADV-01/02、AUD-R2C-01/04 仍是“代码/模拟已覆盖、真实 Anki Undo/事务未核销”的状态，不能建议发布。
+- AUD-ADV-04/05/06、AUD-R2C-02/03 继续由 headless 行为测试覆盖；新增主对话框关闭链路后仍需真实 Qt 和三平台验收。
+
+### 本轮 SPEC §0–12 复核矩阵
+
+| 范围 | 本轮结论 |
+|---|---|
+| §0–2 | Easy/Advanced 分流、字段互斥与失效字段阻断保持；新增逐字段失效状态行为证据。 |
+| §3、§12.1 | 模式隔离、CAS、迁移和删除不复活未改动；既有 PromptStoreTests 继续通过。 |
+| §4、§11.1–11.3 | 词法、集合相等、一次替换与严格 JSON 未改动；AdvancedTextTests 继续通过。 |
+| §5、§11.2、§11.8、§12.3 | 批量预检、HTML/Cloze、媒体空输入和零写入路径未改动；单元测试继续通过。 |
+| §6、§11.5–11.7、§12.2 | 单 note 一次写入、快照冲突、取消、ledger 和关闭链路均有代码/mock 依据；真实 Anki/Qt 仍阻断。 |
+| §7–10、§11.9–11.10 | 动态 Default 草稿、主窗口关闭、Easy/Audio 回归维持；三平台尺寸、键盘和真实 Qt 生命周期待验收。 |
+
+### 本轮实际结果与未完成验收
+
+```text
+python3 -m unittest tests.test_main_dialog_close tests.test_advanced_ui_state -v  # 11 passed
+python3 -m unittest discover -s tests -v                                          # 61 passed
+python3 -m compileall -q ainotepro tests                                           # passed
+git diff --check                                                                   # passed
+python3 -c 'import anki, aqt'                                                      # ModuleNotFoundError: No module named 'anki'
+```
+
+未完成且必须在目标 Anki 版本复现：1/10/100 条多字段提交及 Undo/Redo；并发编辑、取消、窗口关闭和 `merge_undo_entries()` 异常的真实数据库状态；CollectionOp 回调与 Editor/Browser 刷新；受支持 macOS、Windows、Linux 在 1000×700、870×610 与不同 DPI 下的多选和窗口关闭操作。任何一项未记录实机结果前，Advanced 发布继续阻断。

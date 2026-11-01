@@ -349,7 +349,11 @@ class TextTab(QWidget):
         self._advanced_field_selection: tuple[list[str], list[str]] = ([], [])
         self._last_advanced_fields: tuple[list[str], list[str]] = ([], [])
         self._advanced_note_type_id: Optional[int] = None
-        self._advanced_invalid_fields: tuple[str, ...] = ()
+        # These are unresolved semantic selections, not merely fields absent
+        # from the currently rendered combo.  A user action on one visible
+        # field must never clear a different invalid selection.
+        self._advanced_invalid_source_fields: set[str] = set()
+        self._advanced_invalid_destination_fields: set[str] = set()
         self._advanced_results: list[tuple[Any, Optional[dict[str, str]], Optional[str], Optional[str]]] = []
         self._advanced_cancel = threading.Event()
         self._advanced_active = False
@@ -660,9 +664,26 @@ class TextTab(QWidget):
         # every click and makes continuous selection and keyboard use brittle.
         self.advanced_source_fields.set_disabled_fields(set(destination))
         self.advanced_destination_fields.set_disabled_fields(set(source))
+        old_source, old_destination = self._last_advanced_fields
+        names = [self.advanced_source_fields.itemText(i)
+                 for i in range(self.advanced_source_fields.count())]
+        source_changed = set(source).symmetric_difference(old_source)
+        destination_changed = set(destination).symmetric_difference(old_destination)
+        saved_source, saved_destination = self._advanced_field_selection
+        # Keep selections absent from this Note Type in the semantic state.
+        # The only way to resolve a previously-invalid field that is visible
+        # again is to explicitly toggle that field; changing another visible
+        # field must leave its invalid status intact.
+        merged_source = ([name for name in names if name in source] +
+                         [name for name in saved_source if name not in names])
+        merged_destination = ([name for name in names if name in destination] +
+                              [name for name in saved_destination if name not in names])
+        self._advanced_invalid_source_fields.intersection_update(merged_source)
+        self._advanced_invalid_destination_fields.intersection_update(merged_destination)
+        self._advanced_invalid_source_fields.difference_update(source_changed)
+        self._advanced_invalid_destination_fields.difference_update(destination_changed)
         self._last_advanced_fields = (list(source), list(destination))
-        self._advanced_field_selection = (list(source), list(destination))
-        self._advanced_invalid_fields = ()
+        self._advanced_field_selection = (merged_source, merged_destination)
         if self._active_prompt_name == "Default" and (discarded or not self._prompt_is_dirty()):
             self._discarded_dynamic_default = False
             self._load_prompt_list()
@@ -871,7 +892,7 @@ class TextTab(QWidget):
             old_source = self.advanced_source_fields.selected_fields()
             old_destination = self.advanced_destination_fields.selected_fields()
             saved_source, saved_destination = self._advanced_field_selection
-            new_source, new_destination, invalid_fields = reconcile_field_selection(
+            new_source, new_destination, _invalid_fields = reconcile_field_selection(
                 saved_source, saved_destination, names,
             )
             if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
@@ -897,7 +918,14 @@ class TextTab(QWidget):
             self._last_advanced_fields = (list(source), list(destination))
             # Keep the old semantic selection as-is: invalid names must block
             # Generate instead of becoming an unannounced smaller request.
-            self._advanced_invalid_fields = invalid_fields
+            # Previously unresolved fields stay unresolved even when a later
+            # Note Type makes them visible, until the user toggles that field.
+            self._advanced_invalid_source_fields.update(
+                name for name in saved_source if name not in names)
+            self._advanced_invalid_destination_fields.update(
+                name for name in saved_destination if name not in names)
+            self._advanced_invalid_source_fields.intersection_update(saved_source)
+            self._advanced_invalid_destination_fields.intersection_update(saved_destination)
             self._advanced_note_type_id = note_type_id
             if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
                     and (discarded or not self._prompt_is_dirty())):
@@ -1388,10 +1416,14 @@ class TextTab(QWidget):
         sources = self.advanced_source_fields.selected_fields()
         destinations = self.advanced_destination_fields.selected_fields()
         prompt = self.prompt_edit.toPlainText()
-        if self._advanced_invalid_fields:
-            showWarning("Selected Advanced fields are unavailable in the current Note Type: "
-                        + ", ".join(self._advanced_invalid_fields)
-                        + ". Choose fields explicitly before generating.")
+        invalid_fields = (
+            [f"Source: {name}" for name in sorted(self._advanced_invalid_source_fields)] +
+            [f"Destination: {name}" for name in sorted(self._advanced_invalid_destination_fields)]
+        )
+        if invalid_fields:
+            showWarning("Selected Advanced fields remain unresolved: "
+                        + ", ".join(invalid_fields)
+                        + ". Re-select or deselect each listed field before generating.")
             return
         if not note_ids:
             showWarning("No notes selected.")
@@ -1596,9 +1628,13 @@ class TextTab(QWidget):
             return
         super().closeEvent(event)
 
-    def prepare_close(self) -> bool:
-        """Called by the owning dialog before it destroys this tab."""
-        if not self._confirm_leave_prompt():
+    def can_close(self) -> bool:
+        """Ask about an unsaved prompt without changing task state."""
+        return self._confirm_leave_prompt()
+
+    def prepare_close(self, *, confirmed: bool = False) -> bool:
+        """Cancel Advanced callbacks immediately before this tab is destroyed."""
+        if not confirmed and not self.can_close():
             return False
         self._advanced_closing = True
         self._advanced_cancel.set()
