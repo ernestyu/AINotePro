@@ -31,6 +31,13 @@ class PromptStoreTests(unittest.TestCase):
             self.store.replace_prompts('easy', {'stale': 'x'}, stale)
         self.assertEqual(digest, self.store.prompt_snapshot('easy')[1])
 
+    def test_first_migration_preserves_legacy_custom_default(self):
+        os.makedirs(os.path.join(self.root, 'gen_text'))
+        with open(os.path.join(self.root, 'gen_text', 'prompt.json'), 'w') as f:
+            json.dump({'Default': 'Historical customized default'}, f)
+        prompts, _digest = self.store.prompt_snapshot('easy')
+        self.assertEqual(prompts['Default'], 'Historical customized default')
+
     def test_domains_do_not_conflict(self):
         easy, token = self.store.prompt_snapshot('easy')
         advanced, other = self.store.prompt_snapshot('advanced')

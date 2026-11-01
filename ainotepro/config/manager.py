@@ -184,6 +184,10 @@ class ConfigManager:
             raw = self._read_raw()
             if raw is None:
                 raw = _get_default_config()
+                # prompt_snapshot() needs to distinguish this synthetic
+                # baseline from an existing user's authoritative Text config
+                # when it imports the legacy prompt.json exactly once.
+                raw["text"]["prompt_config_was_created"] = True
                 raw["audio"] = migrate_audio(raw["audio"])
                 self._atomic_write(raw)
             else:
@@ -290,8 +294,16 @@ class ConfigManager:
                         legacy = json.load(stream)
                     normalize_prompts(legacy, "easy")
                 existing = normalize_prompts(text.get("prompts", {}), "easy")
-                legacy.update(existing)
-                text["prompts"] = legacy
+                if text.pop("prompt_config_was_created", False):
+                    # No user config existed when this file was created; the
+                    # old mirror is the only historical prompt authority.
+                    merged = existing
+                    merged.update(legacy)
+                else:
+                    # An existing config wins name-by-name over its mirror.
+                    merged = legacy
+                    merged.update(existing)
+                text["prompts"] = merged
                 text["prompt_migration_done"] = True
                 changed = True
             for name in ("prompts", "advanced_prompts"):

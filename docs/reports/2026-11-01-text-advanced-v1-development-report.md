@@ -20,6 +20,6 @@ Phase 2 已实现：Text 页面保留 Easy 布局并增加 Easy/Advanced 切换�
 
 Phase 3 已实现代码路径：先以原始字段值建立完整批次快照并执行全量预检；网络线程只接收不可变快照；每个响应按 JSON 合同验证；最后通过 Anki `CollectionOp` 的串行 collection context 重新读取、比较、给同一 note 的全部目标赋值并只调用一次 `update_note()`。取消或窗口销毁会阻止未提交结果；JSON 失败和并发冲突均零写入该笔记。
 
-本地检查：`python3 -m unittest discover -s tests -v`，34 项通过；`python3 -m compileall -q __init__.py ainotepro` 与 `git diff --check` 通过。现有 Easy/Audio 无界面回归测试通过，不能代表实机回归通过。
+本地检查：`python3 -m unittest discover -s tests -v`，35 项通过；`python3 -m compileall -q __init__.py ainotepro` 与 `git diff --check` 通过。现有 Easy/Audio 无界面回归测试通过，不能代表实机回归通过。
 
 尚未完成的验收：实际 Anki 26.9.3 中的 Undo 恢复、多目标写入、取消/关闭竞态、Editor/Browser 刷新和真实 Provider 请求；macOS、Windows、Linux 上 1000×700、870×610 与不同 DPI 的 Qt 多选可操作性。因本机系统 Python 不能加载 Anki app runtime，这些项目未声称通过，必须在目标 Anki 运行时由独立验收完成。
