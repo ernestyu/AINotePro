@@ -50,6 +50,23 @@ The AnkiWeb code will be available after the add-on is published.
 6. Choose the source and destination fields.
 7. Click `Generate`.
 
+### Text Advanced mode
+
+Text also provides an **Advanced** mode for one or more existing source fields
+and one or more existing destination fields on notes of the same Note Type.
+Select the fields at the bottom of the Text page and use each source as
+`{Field Name}`. Declare each requested result once with `{OUT:Field Name}`.
+For example, `{Text}\n{OUT:Translation}\nTranslate naturally.` Advanced checks
+that the selected and declared source/destination sets match before it sends a
+request. It accepts only a JSON object containing exactly the selected target
+field names.
+
+Advanced never runs Image Recognition or OCR. It converts existing readable
+field HTML to text, rejects empty or media-only sources for the whole batch,
+and asks before replacing non-empty targets. Easy prompts, OCR behavior, and
+saved Easy prompts remain separate from Advanced prompts. Literal prompt braces
+must be escaped as `{{` and `}}`.
+
 For Audio V2 (development candidate; no Anki integration testing has been performed; the compact Audio page has no internal scrollbar):
 
 1. Open `Audio`, select `Edge-TTS` or `Kokoro MLX (Local)` under `Generate using`.

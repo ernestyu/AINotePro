@@ -14,8 +14,12 @@
 
 用户随后明确豁免上述冻结标记前置条件，授权直接实施。此前的冻结标记问题不再是实施阻断。
 
-已新增独立的 Advanced Prompt 词法/编译、JSON 响应检查、HTML/Cloze 转换和配置 CAS 原型，以及相应本地测试。这些入口尚未接入 Text UI；旧 Prompt 加载/保存仍未迁移到 CAS，因而 Phase 1 尚未完成，也不能认为删除不复活或并发保护已在产品路径生效。尚需完成完整词法与 Cloze 边界测试、配置旧入口迁移和回归检查。
+Phase 1 已完成：独立的 Advanced Prompt 词法/编译、严格 JSON 响应检查、HTML/Cloze 转换、批量预检、配置域 CAS、一次性旧镜像迁移和删除不复活均已实现并有本地单元测试。Text UI 的 Prompt 加载/保存已接入对应模式的 CAS。
 
-目前未实现 Advanced UI、批次预检、模型请求、Anki 原子写入及 Undo。真实 Anki 与跨平台验收均未执行。不得将此分支视为功能完成或可发布版本。
+Phase 2 已实现：Text 页面保留 Easy 布局并增加 Easy/Advanced 切换、底部单行多选 Source/Destination、互斥禁选、模式独立 Prompt 命名空间、动态 Advanced Default 与草稿保护。Advanced 隐藏并强制绕开 Image Recognition。
 
-本地检查：`python3 -m unittest discover -s tests -v`，27 项通过；`python3 -m compileall -q ainotepro` 通过。现有 Easy/Audio 无界面测试通过，不能代表实机回归通过。
+Phase 3 已实现代码路径：先以原始字段值建立完整批次快照并执行全量预检；网络线程只接收不可变快照；每个响应按 JSON 合同验证；最后通过 Anki `CollectionOp` 的串行 collection context 重新读取、比较、给同一 note 的全部目标赋值并只调用一次 `update_note()`。取消或窗口销毁会阻止未提交结果；JSON 失败和并发冲突均零写入该笔记。
+
+本地检查：`python3 -m unittest discover -s tests -v`，34 项通过；`python3 -m compileall -q __init__.py ainotepro` 与 `git diff --check` 通过。现有 Easy/Audio 无界面回归测试通过，不能代表实机回归通过。
+
+尚未完成的验收：实际 Anki 26.9.3 中的 Undo 恢复、多目标写入、取消/关闭竞态、Editor/Browser 刷新和真实 Provider 请求；macOS、Windows、Linux 上 1000×700、870×610 与不同 DPI 的 Qt 多选可操作性。因本机系统 Python 不能加载 Anki app runtime，这些项目未声称通过，必须在目标 Anki 运行时由独立验收完成。
