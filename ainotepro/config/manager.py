@@ -225,6 +225,11 @@ class ConfigManager:
                 raise RuntimeError("Audio Profiles changed in another window; reopen Audio before saving")
             updated = copy.deepcopy(current)
             mutator(updated)
+            if updated == current:
+                # Avoid replacing user_config.json for unchanged UI events.
+                self.config = _deep_merge_dicts(_get_default_config(), copy.deepcopy(current))
+                self._baseline = copy.deepcopy(self.config)
+                return self._revision()
             if "audio" in updated and "profiles" in updated["audio"]:
                 validate_audio(updated["audio"])
             self._atomic_write(updated)
@@ -267,11 +272,18 @@ class ConfigManager:
         return self._audio_digest(audio)
 
     def set_provider_config(self, service_type, provider_name, provider_cfg):
+        changed = False
         def update(raw):
+            nonlocal changed
             service = raw.setdefault(service_type, {})
-            service.setdefault(provider_name, {}).update(copy.deepcopy(provider_cfg))
+            existing = service.setdefault(provider_name, {})
+            proposed = copy.deepcopy(existing)
+            proposed.update(copy.deepcopy(provider_cfg))
+            changed = proposed != existing or service.get("provider") != provider_name
+            existing.update(copy.deepcopy(provider_cfg))
             service["provider"] = provider_name
         self._replace_raw(update)
+        return changed
 
     def prompt_snapshot(self, mode):
         """Migrate the legacy mirror once, then return the authoritative mapping and CAS token."""
