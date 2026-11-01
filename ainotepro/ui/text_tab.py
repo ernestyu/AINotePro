@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 import os
 import re
 from html import unescape
 from typing import Any, Dict, Optional
+import threading
 from urllib.parse import unquote, urlparse
 
 from aqt import mw
@@ -18,6 +20,10 @@ from aqt.utils import showInfo, showWarning
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
 from ..core.utils import create_undo_checkpoint, update_field_content
+from ..core.advanced_text import (
+    AdvancedRequest, compile_prompt, default_prompt, parse_response,
+    preflight_requests, snapshot_matches,
+)
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
 # user_config.json so they survive the normal add-on settings flow.
@@ -51,6 +57,96 @@ TEXT_PROVIDER_LABEL_ALIASES = {
 }
 
 
+@dataclass
+class AdvancedCommitResult:
+    """CollectionOp-compatible result; ``changes`` is Anki's OpChanges."""
+    changes: Any
+    outcomes: list[tuple[int, str]]
+
+
+class CheckableFieldCombo(QComboBox):
+    """Compact multi-select combo suitable for the Text tab's field row."""
+    selectionChanged = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.lineEdit().setReadOnly(True)
+        self.view().pressed.connect(self._toggle_index)
+
+    def set_fields(self, names: list[str], selected: Optional[list[str]] = None,
+                   disabled: Optional[set[str]] = None) -> None:
+        selected_set = set(selected or [])
+        disabled = disabled or set()
+        self.clear()
+        for name in names:
+            self.addItem(name)
+            item = self.model().item(self.count() - 1)
+            item.setData(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked,
+                         Qt.ItemDataRole.CheckStateRole)
+            if name in disabled:
+                item.setEnabled(False)
+        self._update_label()
+
+    def selected_fields(self) -> list[str]:
+        result = []
+        for index in range(self.count()):
+            item = self.model().item(index)
+            if item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                result.append(self.itemText(index))
+        return result
+
+    def _toggle_index(self, index) -> None:
+        item = self.model().item(index.row())
+        if not item or not item.isEnabled():
+            return
+        state = item.data(Qt.ItemDataRole.CheckStateRole)
+        item.setData(Qt.CheckState.Unchecked if state == Qt.CheckState.Checked else Qt.CheckState.Checked,
+                     Qt.ItemDataRole.CheckStateRole)
+        self._update_label()
+        self.selectionChanged.emit()
+
+    def _update_label(self) -> None:
+        values = self.selected_fields()
+        summary = ', '.join(values)
+        self.lineEdit().setText(summary or 'Select fields…')
+        self.setToolTip(summary or 'Select one or more fields')
+
+
+class AdvancedGenerationWorker(QObject):
+    """Provider-only worker. It does not hold or access Anki notes or Qt widgets."""
+    progressUpdated = pyqtSignal(int)
+    resultReady = pyqtSignal(object)
+    finished = pyqtSignal(str)
+
+    def __init__(self, requests: list[AdvancedRequest], parsed, provider, config, cancel_event):
+        super().__init__()
+        self.requests = requests
+        self.parsed = parsed
+        self.provider = provider
+        self.config = config
+        self.cancel_event = cancel_event
+
+    def run(self):
+        completed = 0
+        try:
+            for request in self.requests:
+                if self.cancel_event.is_set():
+                    break
+                try:
+                    response = self.provider.generate(
+                        compile_prompt(self.parsed, request.snapshot.input_values), self.config)
+                    values = parse_response(response, [name for name, _ in self.parsed[1]])
+                    self.resultReady.emit((request.snapshot, values, None))
+                except Exception as exc:
+                    self.resultReady.emit((request.snapshot, None, str(exc)))
+                completed += 1
+                self.progressUpdated.emit(completed)
+            self.finished.emit('Generation cancelled.' if self.cancel_event.is_set() else 'Generation complete.')
+        except Exception as exc:
+            self.finished.emit(f'Advanced generation failed: {exc}')
+
+
 def _read_json_file(path: str) -> Dict[str, Any]:
     try:
         if os.path.exists(path):
@@ -77,45 +173,43 @@ def _extract_prompts(data: Dict[str, Any]) -> Dict[str, str]:
     return {str(k): str(v) for k, v in prompts.items()}
 
 
-def _load_prompts() -> Dict[str, str]:
-    migrate_legacy_user_data()
-    prompts: Dict[str, str] = dict(DEFAULT_PROMPTS)
+def _load_prompts(mode: str = "easy") -> Dict[str, str]:
+    """Load the authoritative per-mode prompt mapping.
 
-    # Legacy prompt.json is a fallback/mirror; user_config.json is authoritative.
-    prompt_file_data = _read_json_file(PROMPT_FILE)
-    if prompt_file_data:
-        prompts.update({str(k): str(v) for k, v in prompt_file_data.items()})
-
-    user_cfg = _read_json_file(USER_CONFIG_FILE)
-    prompts.update(_extract_prompts(user_cfg))
+    ``prompt.json`` is intentionally not read here: ConfigManager performs its
+    single migration before this function sees a snapshot, so deleted prompts
+    cannot be resurrected by a stale compatibility mirror.
+    """
+    prompts, _digest = ConfigManager().prompt_snapshot(mode)
+    if mode == "easy":
+        prompts.setdefault("Default", DEFAULT_PROMPTS["Default"])
     return prompts
 
 
-def _save_prompts(data: Dict[str, str]) -> None:
+def _save_prompts(data: Dict[str, str], mode: str = "easy", expected_digest: Optional[str] = None) -> str:
     data = {str(k): str(v) for k, v in data.items()}
-    # Protect the user's existing Default, including any legacy customization.
-    # This guard also covers imports and deletions, not just the Save button.
-    if data.get("Default") != _load_prompts()["Default"]:
+    current, current_digest = ConfigManager().prompt_snapshot(mode)
+    if mode == "easy" and data.get("Default") != current.get("Default", DEFAULT_PROMPTS["Default"]):
         raise ValueError("Default prompt is protected. Use Save As to make a copy.")
-    # Persist to the shared config first; a stale mirror must not mask saves.
-    ConfigManager().update_text_fields({"prompts": data})
-    try:
-        _write_json_file(PROMPT_FILE, data)
-    except OSError as exc:
-        # Config already contains the saved prompt; mirror is optional.
-        print(f"[AINotePro] Prompt saved in config; prompt.json mirror failed: {exc}")
+    digest = ConfigManager().replace_prompts(mode, data, expected_digest or current_digest)
+    if mode == "easy":
+        try:
+            _write_json_file(PROMPT_FILE, data)
+        except OSError as exc:
+            print(f"[AINotePro] Prompt saved in config; prompt.json mirror failed: {exc}")
+    return digest
 
 
-def _get_last_used_prompt() -> str:
+def _get_last_used_prompt(mode: str = "easy") -> str:
     user_cfg = _read_json_file(USER_CONFIG_FILE)
     text_cfg = user_cfg.get("text", {})
     if isinstance(text_cfg, dict):
-        return str(text_cfg.get("last_used_prompt", "Default"))
+        return str(text_cfg.get("advanced_last_used_prompt" if mode == "advanced" else "last_used_prompt", "Default"))
     return "Default"
 
 
-def _set_last_used_prompt(name: str) -> None:
-    ConfigManager().update_text_fields({"last_used_prompt": name})
+def _set_last_used_prompt(name: str, mode: str = "easy") -> None:
+    ConfigManager().update_text_fields({"advanced_last_used_prompt" if mode == "advanced" else "last_used_prompt": name})
 
 class GenerationWorker(QObject):
     """
@@ -208,11 +302,24 @@ class TextTab(QWidget):
         self._active_prompt_name: Optional[str] = None
         self._new_prompt_name: Optional[str] = None
         self._saved_prompt_text = ""
+        self._prompt_digest = ""
         self._is_updating_prompt_combo = False
         self._generation_update_count = 0
         self._generation_success_count = 0
         self._generation_failure_count = 0
         self._generation_failures: list[str] = []
+        self._field_mode = str(self.cfg.get_all().get("text", {}).get("field_mode", "easy"))
+        if self._field_mode not in ("easy", "advanced"):
+            self._field_mode = "easy"
+        self._easy_field_selection: tuple[str, str] = ("", "")
+        self._advanced_field_selection: tuple[list[str], list[str]] = ([], [])
+        self._last_advanced_fields: tuple[list[str], list[str]] = ([], [])
+        self._advanced_results: list[tuple[Any, Optional[dict[str, str]], Optional[str]]] = []
+        self._advanced_cancel = threading.Event()
+        self._advanced_active = False
+        self.destroyed.connect(lambda *_args: self._advanced_cancel.set())
+        if parent is not None:
+            parent.destroyed.connect(lambda *_args: self._advanced_cancel.set())
 
         self._build_ui()
         self._load_note_fields()
@@ -394,10 +501,29 @@ class TextTab(QWidget):
         fields_row = QHBoxLayout()
         fields_row.setContentsMargins(0, 0, 0, 0)
         fields_row.setSpacing(6)
-        fields_row.addWidget(QLabel("<b>Source Field:</b>"))
+        fields_row.addWidget(QLabel("<b>Mode:</b>"))
+        self.field_mode_combo = QComboBox()
+        self.field_mode_combo.addItem("Easy", "easy")
+        self.field_mode_combo.addItem("Advanced", "advanced")
+        self.field_mode_combo.setCurrentIndex(self.field_mode_combo.findData(self._field_mode))
+        self.field_mode_combo.currentIndexChanged.connect(self._on_field_mode_changed)
+        fields_row.addWidget(self.field_mode_combo, 0)
+        self.easy_source_label = QLabel("<b>Source Field:</b>")
+        fields_row.addWidget(self.easy_source_label)
         self.source_field_combo = QComboBox(); fields_row.addWidget(self.source_field_combo, 1)
-        fields_row.addWidget(QLabel("<b>Destination Field:</b>"))
+        self.easy_destination_label = QLabel("<b>Destination Field:</b>")
+        fields_row.addWidget(self.easy_destination_label)
         self.destination_field_combo = QComboBox(); fields_row.addWidget(self.destination_field_combo, 1)
+        self.advanced_source_label = QLabel("<b>Source Fields:</b>")
+        self.advanced_source_fields = CheckableFieldCombo()
+        self.advanced_destination_label = QLabel("<b>Destination Fields:</b>")
+        self.advanced_destination_fields = CheckableFieldCombo()
+        self.advanced_source_fields.selectionChanged.connect(self._on_advanced_field_selection_changed)
+        self.advanced_destination_fields.selectionChanged.connect(self._on_advanced_field_selection_changed)
+        fields_row.addWidget(self.advanced_source_label)
+        fields_row.addWidget(self.advanced_source_fields, 1)
+        fields_row.addWidget(self.advanced_destination_label)
+        fields_row.addWidget(self.advanced_destination_fields, 1)
         self.image_checkbox = QCheckBox("Image Recognition")
         self.image_checkbox.setToolTip(
             "Read images from the source field and send them to a vision-capable model. "
@@ -407,6 +533,7 @@ class TextTab(QWidget):
         layout.addLayout(fields_row)
 
         self.setLayout(layout)
+        self._update_field_mode_widgets()
         self._populate_provider_cfg()
 
     def _toggle_pw(self):
@@ -418,10 +545,96 @@ class TextTab(QWidget):
             self.api_key_edit.setEchoMode(QLineEdit.Normal if mode != QLineEdit.Normal else QLineEdit.Password)
 
     def _load_prompt_list(self):
-        self.all_prompts = _load_prompts()
-        name = _get_last_used_prompt()
+        mode = self._field_mode
+        prompts, self._prompt_digest = self.cfg.prompt_snapshot(mode)
+        self.all_prompts = dict(prompts)
+        if mode == "easy":
+            self.all_prompts.setdefault("Default", DEFAULT_PROMPTS["Default"])
+        else:
+            self.all_prompts["Default"] = default_prompt(
+                self.advanced_source_fields.selected_fields(),
+                self.advanced_destination_fields.selected_fields(),
+            )
+        name = _get_last_used_prompt(mode)
         self._filter_prompts(preferred_name=name if name in self.all_prompts else "Default",
                              load_selected=True)
+
+    def _on_field_mode_changed(self, _index: int) -> None:
+        requested = self.field_mode_combo.currentData() or "easy"
+        if requested == self._field_mode:
+            return
+        if not self._confirm_leave_prompt():
+            self.field_mode_combo.blockSignals(True)
+            self.field_mode_combo.setCurrentIndex(self.field_mode_combo.findData(self._field_mode))
+            self.field_mode_combo.blockSignals(False)
+            return
+        self._easy_field_selection = (self.source_field_combo.currentText(),
+                                      self.destination_field_combo.currentText())
+        self._advanced_field_selection = (self.advanced_source_fields.selected_fields(),
+                                          self.advanced_destination_fields.selected_fields())
+        self._field_mode = requested
+        self._update_field_mode_widgets()
+        try:
+            self.cfg.update_text_fields({"field_mode": requested})
+        except Exception as exc:
+            showWarning(f"Could not save Text mode: {exc}")
+        self._load_prompt_list()
+
+    def _update_field_mode_widgets(self) -> None:
+        advanced = self._field_mode == "advanced"
+        for widget in (self.easy_source_label, self.source_field_combo,
+                       self.easy_destination_label, self.destination_field_combo):
+            widget.setVisible(not advanced)
+        for widget in (self.advanced_source_label, self.advanced_source_fields,
+                       self.advanced_destination_label, self.advanced_destination_fields):
+            widget.setVisible(advanced)
+        self.image_checkbox.setVisible(not advanced)
+        self.image_checkbox.setEnabled(not advanced)
+        if advanced:
+            self.prompt_edit.setPlaceholderText(
+                'Use {Field} for inputs and {OUT:Field} for output declarations. '
+                'Escape literal braces as {{ and }}.')
+        else:
+            self.prompt_edit.setPlaceholderText(
+                'Prompt must contain "{Source Field}" so the selected source field can be inserted.')
+
+    def _on_advanced_field_selection_changed(self) -> None:
+        if self._field_mode != "advanced":
+            return
+        source = self.advanced_source_fields.selected_fields()
+        destination = self.advanced_destination_fields.selected_fields()
+        if self._active_prompt_name == "Default" and self._prompt_is_dirty():
+            if not self._confirm_dynamic_default_regeneration():
+                old_source, old_destination = self._last_advanced_fields
+                names = [self.advanced_source_fields.itemText(i)
+                         for i in range(self.advanced_source_fields.count())]
+                self.advanced_source_fields.set_fields(names, old_source, set(old_destination))
+                self.advanced_destination_fields.set_fields(names, old_destination, set(old_source))
+                return
+        # An item that is selected on the other side is disabled before it can
+        # be selected. Existing selections are never silently removed.
+        names = [self.advanced_source_fields.itemText(i)
+                 for i in range(self.advanced_source_fields.count())]
+        self.advanced_source_fields.set_fields(names, source, set(destination))
+        self.advanced_destination_fields.set_fields(names, destination, set(source))
+        self._last_advanced_fields = (list(source), list(destination))
+        if self._active_prompt_name == "Default" and not self._prompt_is_dirty():
+            self._load_prompt_list()
+
+    def _confirm_dynamic_default_regeneration(self) -> bool:
+        """Offer Save As before a dynamic Default is regenerated."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved Advanced Default")
+        box.setText("Field changes will regenerate Advanced Default. Keep this draft?")
+        save_as = box.addButton("Save As", QMessageBox.ButtonRole.ActionRole)
+        discard = box.addButton(QMessageBox.StandardButton.Discard)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked == save_as:
+            self._on_save_as_prompt()
+            return self._active_prompt_name != "Default" and not self._prompt_is_dirty()
+        return clicked == discard
 
     def _filter_prompts(self, preferred_name: Optional[str] = None, load_selected: bool = False):
         search_text = self.prompt_search_edit.text().lower()
@@ -514,6 +727,8 @@ class TextTab(QWidget):
         if not self._prompt_is_dirty():
             return True
         if self._active_prompt_name == "Default":
+            if self._field_mode == "advanced":
+                return self._confirm_dynamic_default_regeneration()
             message = ("Default is protected. Use Save As to keep your changes. "
                        "Discard the edits and switch?")
             buttons = (QMessageBox.StandardButton.Discard |
@@ -549,7 +764,7 @@ class TextTab(QWidget):
             if show_missing:
                 showWarning("Prompt name cannot be empty.")
             return False
-        data = _load_prompts()
+        data = self.all_prompts
         if name not in data:
             if show_missing:
                 showWarning("Prompt not found.")
@@ -561,14 +776,14 @@ class TextTab(QWidget):
         self._saved_prompt_text = data[name]
         self._restore_prompt_selector()
         self._update_prompt_actions()
-        _set_last_used_prompt(name)
+        _set_last_used_prompt(name, self._field_mode)
         return True
 
     def _valid_new_prompt_name(self, name: str) -> bool:
         if not name or len(name) > 100:
             showWarning("Prompt name must contain 1 to 100 characters.")
             return False
-        if any(existing.casefold() == name.casefold() for existing in _load_prompts()):
+        if any(existing.casefold() == name.casefold() for existing in self.all_prompts):
             showWarning("A prompt with this name already exists. Choose another name.")
             return False
         return True
@@ -603,6 +818,17 @@ class TextTab(QWidget):
             names = [f["name"] for f in n.note_type()["flds"]]
             self.source_field_combo.clear(); self.destination_field_combo.clear()
             self.source_field_combo.addItems(names); self.destination_field_combo.addItems(names)
+            source, destination = self._easy_field_selection
+            if source in names:
+                self.source_field_combo.setCurrentIndex(self.source_field_combo.findText(source))
+            if destination in names:
+                self.destination_field_combo.setCurrentIndex(self.destination_field_combo.findText(destination))
+            saved_source, saved_destination = self._advanced_field_selection
+            source = [name for name in saved_source if name in names]
+            destination = [name for name in saved_destination if name in names]
+            self.advanced_source_fields.set_fields(names, source, set(destination))
+            self.advanced_destination_fields.set_fields(names, destination, set(source))
+            self._last_advanced_fields = (list(source), list(destination))
         except Exception:
             pass
 
@@ -628,7 +854,9 @@ class TextTab(QWidget):
             showWarning("Prompt Preview is empty.")
             return False
         try:
-            data = _load_prompts()
+            data = dict(self.all_prompts)
+            if self._field_mode == "advanced":
+                data.pop("Default", None)
             if overwrite and name not in data:
                 showWarning("The selected prompt no longer exists. Use Save As.")
                 return False
@@ -636,8 +864,13 @@ class TextTab(QWidget):
                 showWarning("That prompt name already exists. Choose a different name.")
                 return False
             data[name] = content
-            _save_prompts(data)
-            saved = _load_prompts()
+            self._prompt_digest = _save_prompts(data, self._field_mode, self._prompt_digest)
+            saved = dict(data)
+            if self._field_mode == "advanced":
+                saved["Default"] = default_prompt(
+                    self.advanced_source_fields.selected_fields(),
+                    self.advanced_destination_fields.selected_fields(),
+                )
             if saved.get(name) != content:
                 raise RuntimeError("Saved prompt could not be verified on disk")
         except Exception as exc:
@@ -651,7 +884,7 @@ class TextTab(QWidget):
         self._refresh_prompt_combo_after_save(name)
         self._update_prompt_actions()
         try:
-            _set_last_used_prompt(name)
+            _set_last_used_prompt(name, self._field_mode)
             # Preserve existing behavior: Prompt Save also saves model settings.
             self._save_current_provider_config()
         except Exception as exc:
@@ -703,13 +936,20 @@ class TextTab(QWidget):
                 QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
             return
         try:
-            data = _load_prompts()
+            data = dict(self.all_prompts)
+            if self._field_mode == "advanced":
+                data.pop("Default", None)
             if name not in data:
                 showWarning("The selected prompt no longer exists.")
                 return
             del data[name]
-            _save_prompts(data)
-            self.all_prompts = _load_prompts()
+            self._prompt_digest = _save_prompts(data, self._field_mode, self._prompt_digest)
+            self.all_prompts = dict(data)
+            if self._field_mode == "advanced":
+                self.all_prompts["Default"] = default_prompt(
+                    self.advanced_source_fields.selected_fields(),
+                    self.advanced_destination_fields.selected_fields(),
+                )
             self._active_prompt_name = None
             self._new_prompt_name = None
             self._saved_prompt_text = ""
@@ -725,16 +965,32 @@ class TextTab(QWidget):
             return
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                new_prompts = json.load(f)
-            if not isinstance(new_prompts, dict):
+                imported = json.load(f)
+            if not isinstance(imported, dict):
                 showWarning("Invalid prompt file format. Expected a JSON object."); return
+            if "mode" in imported or "prompts" in imported:
+                imported_mode = imported.get("mode")
+                new_prompts = imported.get("prompts")
+                if imported_mode != self._field_mode:
+                    showWarning(f"This is a {imported_mode!r} Prompt export; switch modes before importing it.")
+                    return
+            else:
+                if self._field_mode != "easy":
+                    showWarning("Legacy prompt files can only be imported in Easy mode.")
+                    return
+                new_prompts = imported
+            if not isinstance(new_prompts, dict) or any(not isinstance(key, str) or not isinstance(value, str)
+                                                        for key, value in new_prompts.items()):
+                showWarning("Invalid prompt names or contents."); return
             if "Default" in new_prompts:
                 del new_prompts["Default"]
                 showWarning("Default is protected and was skipped during import.")
             if not new_prompts:
                 return
 
-            current_prompts = _load_prompts()
+            current_prompts = dict(self.all_prompts)
+            if self._field_mode == "advanced":
+                current_prompts.pop("Default", None)
             conflicts = [k for k in new_prompts if k in current_prompts]
             if conflicts:
                 if QMessageBox.question(self, "Confirm Overwrite", 
@@ -745,8 +1001,13 @@ class TextTab(QWidget):
                         del new_prompts[k]
             
             current_prompts.update(new_prompts)
-            _save_prompts(current_prompts)
+            self._prompt_digest = _save_prompts(current_prompts, self._field_mode, self._prompt_digest)
             self.all_prompts = current_prompts
+            if self._field_mode == "advanced":
+                self.all_prompts["Default"] = default_prompt(
+                    self.advanced_source_fields.selected_fields(),
+                    self.advanced_destination_fields.selected_fields(),
+                )
             self._filter_prompts()
             showInfo(f"Successfully imported {len(new_prompts)} prompts.")
 
@@ -764,7 +1025,8 @@ class TextTab(QWidget):
             return
         try:
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump({name: content}, f, ensure_ascii=False, indent=2)
+                json.dump({"version": 1, "mode": self._field_mode,
+                           "prompts": {name: content}}, f, ensure_ascii=False, indent=2)
             showInfo(f"Prompt '{name}' exported successfully.")
         except Exception as e:
             showWarning(f"Failed to export prompt: {e}")
@@ -893,6 +1155,12 @@ class TextTab(QWidget):
 
     # Public slot called by parent dialog
     def on_generate_text(self) -> None:
+        if self._advanced_active:
+            showWarning("Advanced generation is already running.")
+            return
+        if self._field_mode == "advanced":
+            self._start_advanced_generation()
+            return
         note_ids = self._selected_note_ids()
         if not note_ids:
             showWarning("No notes selected."); return
@@ -1036,6 +1304,180 @@ class TextTab(QWidget):
         self._generation_failure_count = 0
         self._generation_failures = []
         self.thread.start()
+
+    def _start_advanced_generation(self) -> None:
+        """Complete all local checks before constructing a provider request."""
+        note_ids = self._selected_note_ids()
+        sources = self.advanced_source_fields.selected_fields()
+        destinations = self.advanced_destination_fields.selected_fields()
+        prompt = self.prompt_edit.toPlainText()
+        if not note_ids:
+            showWarning("No notes selected.")
+            return
+        if not prompt.strip():
+            showWarning("Prompt Preview is empty.")
+            return
+        records = []
+        try:
+            for note_id in note_ids:
+                note = mw.col.get_note(note_id)
+                note_type = note.note_type()
+                field_names = [field["name"] for field in note_type["flds"]]
+                records.append({
+                    "note_id": int(note_id),
+                    "note_type_id": int(note_type["id"]),
+                    "field_names": field_names,
+                    "raw_values": {name: note[name] for name in field_names if name in note},
+                })
+            parsed, snapshots = preflight_requests(records, sources, destinations, prompt,
+                                                   records[0]["field_names"])
+        except Exception as exc:
+            # Zero provider calls, writes, undo checkpoints, and config saves.
+            showWarning(str(exc))
+            return
+        overwrites = [f"Note {snapshot.note_id}: {name}" for snapshot in snapshots
+                      for name in destinations if snapshot.raw_values[name].strip()]
+        if overwrites:
+            preview = "\n".join(overwrites[:12])
+            if len(overwrites) > 12:
+                preview += f"\n…and {len(overwrites) - 12} more"
+            answer = QMessageBox.question(
+                self, "Confirm Advanced overwrite",
+                "The following target fields contain existing content and will be replaced:\n\n"
+                + preview + "\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        request_cfg = self._current_provider_config()
+        if not request_cfg["base_url"] or not request_cfg["model"]:
+            showWarning("Provider Base URL and Model are required.")
+            return
+        request_cfg["preserve_output"] = True
+        self._advanced_cancel = threading.Event()
+        self._advanced_active = True
+        self._advanced_sources = tuple(sources)
+        self._advanced_destinations = tuple(destinations)
+        self._advanced_results = []
+        self._set_advanced_ui_busy(True)
+        self._advanced_progress = QProgressDialog("Generating structured responses…", "Cancel", 0,
+                                                  len(snapshots), self)
+        self._advanced_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self._advanced_progress.setMinimumDuration(0)
+        self._advanced_progress.canceled.connect(self._cancel_advanced)
+        self._advanced_thread = QThread()
+        self._advanced_worker = AdvancedGenerationWorker(
+            [AdvancedRequest(snapshot, prompt) for snapshot in snapshots], parsed,
+            create_provider("text", self._service_map(), {}), dict(request_cfg), self._advanced_cancel)
+        self._advanced_worker.moveToThread(self._advanced_thread)
+        self._advanced_thread.started.connect(self._advanced_worker.run)
+        self._advanced_worker.resultReady.connect(self._collect_advanced_result)
+        self._advanced_worker.progressUpdated.connect(self._advanced_progress.setValue)
+        self._advanced_worker.finished.connect(self._advanced_thread.quit)
+        self._advanced_worker.finished.connect(self._advanced_worker.deleteLater)
+        self._advanced_thread.finished.connect(self._advanced_thread.deleteLater)
+        self._advanced_worker.finished.connect(self._finish_advanced_requests)
+        self._advanced_thread.start()
+
+    def _cancel_advanced(self) -> None:
+        self._advanced_cancel.set()
+
+    def _collect_advanced_result(self, result) -> None:
+        if not self._advanced_cancel.is_set():
+            self._advanced_results.append(result)
+
+    def _finish_advanced_requests(self, message: str) -> None:
+        if self._advanced_cancel.is_set() or not self.isVisible():
+            self._finish_advanced_ui("Generation cancelled. No uncommitted results were written.")
+            return
+        valid = [result for result in self._advanced_results if result[1] is not None]
+        failures = [f"Note {snapshot.note_id}: {error}" for snapshot, _values, error
+                    in self._advanced_results if error]
+        if not valid:
+            self._finish_advanced_ui(message + " No valid responses were returned."
+                                     + ("\n" + "\n".join(failures[:8]) if failures else ""))
+            return
+        self._advanced_progress.setLabelText("Committing validated results…")
+        self._commit_advanced_results(valid, failures)
+
+    def _commit_advanced_results(self, valid_results, failures: list[str]) -> None:
+        """Final re-read through CollectionOp; the inner unit never yields."""
+        sources = self._advanced_sources
+        destinations = self._advanced_destinations
+        cancel_event = self._advanced_cancel
+
+        def operation(col):
+            from anki.collection import OpChanges
+            changes = OpChanges()
+            outcomes = []
+            for snapshot, values, _error in valid_results:
+                if cancel_event.is_set():
+                    outcomes.append((snapshot.note_id, "cancelled"))
+                    continue
+                note = col.get_note(snapshot.note_id)
+                note_type = note.note_type()
+                names = [field["name"] for field in note_type["flds"]]
+                raw = {name: note[name] for name in set(sources + destinations) if name in note}
+                if not snapshot_matches(note_type["id"], names, raw, snapshot, sources, destinations):
+                    outcomes.append((snapshot.note_id, "conflict"))
+                    continue
+                if cancel_event.is_set():
+                    outcomes.append((snapshot.note_id, "cancelled"))
+                    continue
+                for name in destinations:
+                    note[name] = values[name]
+                changes = col.update_note(note)  # one supported Anki update per note
+                outcomes.append((snapshot.note_id, "updated"))
+            return AdvancedCommitResult(changes, outcomes)
+
+        def committed(result: AdvancedCommitResult):
+            for note_id, status in result.outcomes:
+                if status == "conflict":
+                    failures.append(f"Note {note_id}: fields changed while generation was running")
+                elif status == "cancelled":
+                    failures.append(f"Note {note_id}: cancelled before commit")
+            updated = sum(status == "updated" for _note_id, status in result.outcomes)
+            if updated:
+                self._save_current_provider_config()
+                try:
+                    mw.reset()
+                except Exception:
+                    pass
+            summary = f"Advanced generation complete. Updated {updated} notes."
+            if failures:
+                summary += "\n\nSkipped/failed: " + str(len(failures)) + "\n" + "\n".join(failures[:8])
+            self._finish_advanced_ui(summary)
+
+        def failed(exc: Exception):
+            self._finish_advanced_ui(f"Advanced commit failed; no success was reported: {exc}")
+
+        try:
+            from aqt.operations import CollectionOp
+            CollectionOp(parent=self, op=operation).success(committed).failure(failed).run_in_background(
+                initiator=self)
+        except Exception as exc:
+            failed(exc)
+
+    def _finish_advanced_ui(self, message: str) -> None:
+        if getattr(self, "_advanced_progress", None) is not None:
+            self._advanced_progress.close()
+        self._advanced_active = False
+        self._set_advanced_ui_busy(False)
+        if self.isVisible():
+            showInfo(message)
+
+    def _set_advanced_ui_busy(self, busy: bool) -> None:
+        self.field_mode_combo.setEnabled(not busy)
+        self.advanced_source_fields.setEnabled(not busy)
+        self.advanced_destination_fields.setEnabled(not busy)
+        generate = getattr(self.window(), "generate_button", None)
+        if generate is not None:
+            generate.setEnabled(not busy)
+
+    def closeEvent(self, event) -> None:
+        self._advanced_cancel.set()
+        super().closeEvent(event)
 
     # Helpers
     def _confirm_write_risk(self, note_ids: list[int], src: str, dst: str) -> bool:
