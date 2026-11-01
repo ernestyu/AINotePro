@@ -44,7 +44,8 @@ class OllamaTextProvider(TextProvider):
         msg = (data.get("message") or {}).get("content", "")
         content = (msg or "").strip()
         print(f"[AINotePro] Response received: chars={len(content)}")
-        return clean_html_output(remove_think_tags(content))
+        cleaned = remove_think_tags(content)
+        return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
 
     def list_models(self, config: Dict) -> list[str]:
         # Ollama tags endpoint

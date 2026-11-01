@@ -93,7 +93,10 @@ class OpenAITextProvider(TextProvider):
         message = choices[0].get("message", {})
         content = (message.get("content", "") or "").strip()
         print(f"[AINotePro] Response received: chars={len(content)}")
-        return clean_html_output(remove_think_tags(content))
+        cleaned = remove_think_tags(content)
+        # Advanced uses a strict JSON protocol where line breaks are meaningful
+        # for the only accepted fenced-response form.
+        return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         body = {
