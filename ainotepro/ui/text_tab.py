@@ -12,7 +12,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QEvent
+    QIcon, QStyle, QEvent, QMenu
 )
 from aqt.utils import showInfo, showWarning
 
@@ -349,6 +349,7 @@ class TextTab(QWidget):
         self._advanced_field_selection: tuple[list[str], list[str]] = ([], [])
         self._last_advanced_fields: tuple[list[str], list[str]] = ([], [])
         self._advanced_note_type_id: Optional[int] = None
+        self._advanced_field_names: tuple[str, ...] = ()
         # These are unresolved semantic selections, not merely fields absent
         # from the currently rendered combo.  A user action on one visible
         # field must never clear a different invalid selection.
@@ -569,6 +570,12 @@ class TextTab(QWidget):
         fields_row.addWidget(self.advanced_source_fields, 1)
         fields_row.addWidget(self.advanced_destination_label)
         fields_row.addWidget(self.advanced_destination_fields, 1)
+        self.resolve_invalid_fields_button = QToolButton()
+        self.resolve_invalid_fields_button.setText("Resolve…")
+        self.resolve_invalid_fields_button.setToolTip(
+            "Remove an unavailable Advanced Source or Destination selection.")
+        self.resolve_invalid_fields_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        fields_row.addWidget(self.resolve_invalid_fields_button, 0)
         self.image_checkbox = QCheckBox("Image Recognition")
         self.image_checkbox.setToolTip(
             "Read images from the source field and send them to a vision-capable model. "
@@ -615,8 +622,9 @@ class TextTab(QWidget):
             return
         self._easy_field_selection = (self.source_field_combo.currentText(),
                                       self.destination_field_combo.currentText())
-        self._advanced_field_selection = (self.advanced_source_fields.selected_fields(),
-                                          self.advanced_destination_fields.selected_fields())
+        # Advanced semantic selections may contain unavailable fields. They
+        # are maintained by the Advanced field handlers and must survive a
+        # mode switch until the user explicitly resolves them.
         self._field_mode = requested
         self._update_field_mode_widgets()
         try:
@@ -631,7 +639,8 @@ class TextTab(QWidget):
                        self.easy_destination_label, self.destination_field_combo):
             widget.setVisible(not advanced)
         for widget in (self.advanced_source_label, self.advanced_source_fields,
-                       self.advanced_destination_label, self.advanced_destination_fields):
+                       self.advanced_destination_label, self.advanced_destination_fields,
+                       self.resolve_invalid_fields_button):
             widget.setVisible(advanced)
         self.image_checkbox.setVisible(not advanced)
         self.image_checkbox.setEnabled(not advanced)
@@ -642,6 +651,7 @@ class TextTab(QWidget):
         else:
             self.prompt_edit.setPlaceholderText(
                 'Prompt must contain "{Source Field}" so the selected source field can be inserted.')
+        self._update_invalid_field_resolver()
 
     def _on_advanced_field_selection_changed(self) -> None:
         if self._field_mode != "advanced":
@@ -684,6 +694,64 @@ class TextTab(QWidget):
         self._advanced_invalid_destination_fields.difference_update(destination_changed)
         self._last_advanced_fields = (list(source), list(destination))
         self._advanced_field_selection = (merged_source, merged_destination)
+        self._update_invalid_field_resolver()
+        if self._active_prompt_name == "Default" and (discarded or not self._prompt_is_dirty()):
+            self._discarded_dynamic_default = False
+            self._load_prompt_list()
+
+    def _invalid_advanced_field_entries(self):
+        return ([('source', name) for name in sorted(self._advanced_invalid_source_fields)] +
+                [('destination', name) for name in sorted(self._advanced_invalid_destination_fields)])
+
+    def _update_invalid_field_resolver(self) -> None:
+        """Expose each unresolved semantic selection as an explicit action."""
+        button = self.resolve_invalid_fields_button
+        entries = self._invalid_advanced_field_entries()
+        menu = QMenu(button)
+        for role, name in entries:
+            label = f"{role.title()}: {name} — remove selection"
+            action = menu.addAction(label)
+            action.setToolTip(label)
+            action.triggered.connect(
+                lambda _checked=False, field_role=role, field_name=name:
+                self._resolve_invalid_field(field_role, field_name))
+        button.setMenu(menu)
+        button.setEnabled(bool(entries))
+        button.setToolTip(
+            "No unavailable Advanced fields." if not entries else
+            "Remove unavailable fields: " + ", ".join(
+                f"{role.title()}: {name}" for role, name in entries))
+
+    def _resolve_invalid_field(self, role: str, name: str) -> None:
+        """Explicitly remove one unavailable selection without touching peers."""
+        if role not in ('source', 'destination'):
+            return
+        invalid = (self._advanced_invalid_source_fields if role == 'source'
+                   else self._advanced_invalid_destination_fields)
+        if name not in invalid:
+            return
+        discarded = False
+        if self._active_prompt_name == "Default" and self._prompt_is_dirty():
+            if not self._confirm_dynamic_default_regeneration():
+                return
+            discarded = self._discarded_dynamic_default
+        saved_source, saved_destination = self._advanced_field_selection
+        if role == 'source':
+            saved_source = [field for field in saved_source if field != name]
+        else:
+            saved_destination = [field for field in saved_destination if field != name]
+        invalid.discard(name)
+        names = [self.advanced_source_fields.itemText(i)
+                 for i in range(self.advanced_source_fields.count())]
+        visible_source = [field for field in self.advanced_source_fields.selected_fields()
+                          if field != name or role != 'source']
+        visible_destination = [field for field in self.advanced_destination_fields.selected_fields()
+                               if field != name or role != 'destination']
+        self.advanced_source_fields.set_fields(names, visible_source, set(visible_destination))
+        self.advanced_destination_fields.set_fields(names, visible_destination, set(visible_source))
+        self._last_advanced_fields = (visible_source, visible_destination)
+        self._advanced_field_selection = (saved_source, saved_destination)
+        self._update_invalid_field_resolver()
         if self._active_prompt_name == "Default" and (discarded or not self._prompt_is_dirty()):
             self._discarded_dynamic_default = False
             self._load_prompt_list()
@@ -884,7 +952,7 @@ class TextTab(QWidget):
         try:
             note_ids = self._selected_note_ids()
             if not note_ids:
-                return
+                return False
             n = mw.col.get_note(note_ids[0])
             note_type = n.note_type()
             note_type_id = int(note_type["id"])
@@ -903,7 +971,7 @@ class TextTab(QWidget):
                 # A Note Type refresh can invalidate selections just as a click
                 # can; never replace an edited dynamic Default without consent.
                 if not self._confirm_dynamic_default_regeneration():
-                    return
+                    return False
             discarded = self._discarded_dynamic_default
             self.source_field_combo.clear(); self.destination_field_combo.clear()
             self.source_field_combo.addItems(names); self.destination_field_combo.addItems(names)
@@ -927,12 +995,26 @@ class TextTab(QWidget):
             self._advanced_invalid_source_fields.intersection_update(saved_source)
             self._advanced_invalid_destination_fields.intersection_update(saved_destination)
             self._advanced_note_type_id = note_type_id
+            self._advanced_field_names = tuple(names)
+            self._update_invalid_field_resolver()
             if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
                     and (discarded or not self._prompt_is_dirty())):
                 self._discarded_dynamic_default = False
                 self._load_prompt_list()
+            return True
         except Exception:
-            pass
+            return False
+
+    def _advanced_field_definition_is_current(self, note_ids: list[int]) -> bool:
+        """Detect Browser/Editor selection changes before any Advanced preflight."""
+        try:
+            note = mw.col.get_note(note_ids[0])
+            note_type = note.note_type()
+            names = tuple(field['name'] for field in note_type['flds'])
+            return (int(note_type['id']) == self._advanced_note_type_id and
+                    names == self._advanced_field_names)
+        except Exception:
+            return False
 
     def _selected_note_ids(self) -> list[int]:
         if self.browser:
@@ -1413,6 +1495,16 @@ class TextTab(QWidget):
             showWarning("Advanced generation is already running.")
             return
         note_ids = self._selected_note_ids()
+        if not note_ids:
+            showWarning("No notes selected.")
+            return
+        if not self._advanced_field_definition_is_current(note_ids):
+            if self._load_note_fields():
+                showWarning("Selected Note Type fields changed. Field choices were refreshed; "
+                            "review selections and Prompt before generating.")
+            else:
+                showWarning("Field refresh was cancelled or failed; the existing draft and selections were kept.")
+            return
         sources = self.advanced_source_fields.selected_fields()
         destinations = self.advanced_destination_fields.selected_fields()
         prompt = self.prompt_edit.toPlainText()
@@ -1424,9 +1516,6 @@ class TextTab(QWidget):
             showWarning("Selected Advanced fields remain unresolved: "
                         + ", ".join(invalid_fields)
                         + ". Re-select or deselect each listed field before generating.")
-            return
-        if not note_ids:
-            showWarning("No notes selected.")
             return
         if not prompt.strip():
             showWarning("Prompt Preview is empty.")

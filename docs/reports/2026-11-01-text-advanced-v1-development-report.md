@@ -189,3 +189,40 @@ python3 -c 'import anki, aqt'                                                   
 ```
 
 未完成且必须在目标 Anki 版本复现：1/10/100 条多字段提交及 Undo/Redo；并发编辑、取消、窗口关闭和 `merge_undo_entries()` 异常的真实数据库状态；CollectionOp 回调与 Editor/Browser 刷新；受支持 macOS、Windows、Linux 在 1000×700、870×610 与不同 DPI 下的多选和窗口关闭操作。任何一项未记录实机结果前，Advanced 发布继续阻断。
+
+## 第五轮全局审计整体整改（2026-11-01）
+
+基线：`feat/text-advanced-v1@4b719c403f23f46fcdcc2d1d47e2018b8bf9c0a0`。本轮完整复核字段选择、Note Type 切换、动态 Default、Prompt 管理和 Generate 预检的调用关系；仅修改 TextTab 的字段状态/同步路径及其行为测试，不改 SPEC、`main`、事务层、Provider 或 Audio。
+
+| 审计项 | 代码处理 | 普通 Python/行为测试 | 状态 |
+|---|---|---|---|
+| AUD-F5-01 | `TextTab` 新增 Advanced-only 的 `Resolve…` 菜单。每个未解决字段按 `Source`/`Destination` 和真实名称列出；用户可单独移除当前 Note Type 中已不可见的选择。菜单操作仅移除目标字段，保留其他选择/失效字段；Default 脏草稿仍走 Save As/Discard/Cancel。 | `test_resolver_entries_always_show_role_and_each_field`、`test_resolver_menu_action_removes_only_the_chosen_unavailable_field`、`test_resolver_cancel_keeps_dynamic_default_draft_and_all_selections` | 代码/状态行为通过；真实 Qt 菜单交互待用户验收。 |
+| AUD-F5-02 | TextTab 保存当前 Note Type ID 和完整字段定义；每次 Advanced Generate 前重新读取第一条选中笔记。变化时先刷新字段行并要求用户检查选择/Prompt，再次点击才预检；刷新或动态 Default Cancel 不丢草稿/语义选择。混合 Note Type 仍由全批 `preflight_requests()` 拒绝。 | `test_note_type_definition_check_detects_browser_selection_change`，既有 `test_batch_preflight_rejects_everything_on_one_invalid_note` | 代码/状态行为通过；真实 Browser 选择变化待用户验收。 |
+
+### 前四轮代码级核销复查
+
+- AUD-G01–G09、AUD-ADV-03、AUD-ADV-07/08：保持核销；本轮没有放宽持久化不确定分类、CAS、预检零副作用、JSON、Prompt 隔离或结果总账。
+- AUD-ADV-01/02、AUD-R2C-01/04：仍仅有 mock/故障注入证据，真实 Anki 单次多字段写入、Undo/Redo 和 Undo 合并异常仍是发布阻断。
+- AUD-ADV-04/05/06、AUD-R2C-02/03、AUD-F01–F04：动态 Default、关闭门、run ID、取消及迟到结果均保持 headless 行为覆盖；实际 Qt 生命周期与跨平台 UI 未验收。
+
+### SPEC §0–12 代码合规结论
+
+| SPEC 范围 | 代码级结论 | 实机状态 |
+|---|---|---|
+| §0–2 | Easy/Advanced 隔离、Advanced 无 OCR、真实字段集合、冲突禁选及失效字段显式解除保持。 | Qt 多选待用户验证。 |
+| §3、§12.1 | 独立 Prompt 命名空间、CAS、Default、迁移和删除不复活未改动，现有 PromptStoreTests 通过。 | 配置文件实际升级待用户验证。 |
+| §4、§11.1–11.3 | 词法、集合相等、一次渲染、严格 JSON 和单 note 响应隔离未改动，AdvancedTextTests 通过。 | Provider 实际响应待用户验证。 |
+| §5、§11.2、§11.8、§12.3 | HTML/Cloze、媒体空输入、批量预检零副作用未改动；Note Type 同步在预检前增加刷新门，混类型仍整批拒绝。 | Anki Browser 实际选择待用户验证。 |
+| §6、§11.5–11.7、§12.2 | 单 note 多字段写入、保守 Undo/异常分类、取消、关闭、run ID 和 ledger 未改动。 | Anki 事务/Undo/关闭仍未验收、发布阻断。 |
+| §7–10、§11.9–11.10 | 本轮只增加紧凑 `Resolve…` 菜单；动态 Default 草稿防丢保持，Easy/Audio 回归通过。 | 870×610、跨平台和 DPI 待用户验证。 |
+
+### 第五轮实际命令与结果
+
+```text
+python3 -m unittest tests.test_advanced_ui_state -v  # 11 passed
+python3 -m unittest discover -s tests -v             # 65 passed
+python3 -m compileall -q ainotepro tests              # passed
+git diff --check                                      # passed
+```
+
+本轮未尝试真实 Anki/Qt 集成或跨平台测试。用户应在 Anki 中验证：失效字段菜单逐项移除、Browser 选择/Note Type 变化后的“刷新后再次 Generate”流程、混 Note Type 整批拒绝、动态 Default Save As/Discard/Cancel、真实多字段写入/Undo/Redo、取消/关闭以及最小窗口尺寸下的菜单与字段行可操作性。完成前仍不得宣称发布验收通过。

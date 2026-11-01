@@ -17,6 +17,8 @@ TAB = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node
 WANTED = {
     "_on_advanced_field_selection_changed", "_collect_advanced_result",
     "_finish_advanced_requests", "_handle_advanced_commit_result",
+    "_resolve_invalid_field", "_advanced_field_definition_is_current",
+    "_invalid_advanced_field_entries",
 }
 METHODS = [node for node in TAB.body if isinstance(node, ast.FunctionDef) and node.name in WANTED]
 MODULE = ast.Module(body=[ast.ClassDef(name="StateMethods", bases=[], keywords=[],
@@ -85,6 +87,9 @@ class _Tab(StateMethods):
     def _load_prompt_list(self):
         self.load_count += 1
 
+    def _update_invalid_field_resolver(self):
+        pass
+
     def _finish_advanced_ui(self, message):
         self.finished.append(message)
 
@@ -150,6 +155,52 @@ class AdvancedUiStateTests(unittest.TestCase):
                          (["Text"], ["Out", "Missing Destination"]))
         self.assertEqual(tab._advanced_invalid_source_fields, set())
         self.assertEqual(tab._advanced_invalid_destination_fields, {"Missing Destination"})
+
+    def test_resolver_menu_action_removes_only_the_chosen_unavailable_field(self):
+        tab = _Tab()
+        tab._active_prompt_name = "Custom"
+        tab._advanced_field_selection = (["Text", "Missing Source"], ["Out", "Missing Destination"])
+        tab._advanced_invalid_source_fields = {"Missing Source"}
+        tab._advanced_invalid_destination_fields = {"Missing Destination"}
+        tab._resolve_invalid_field("source", "Missing Source")
+        self.assertEqual(tab._advanced_field_selection,
+                         (["Text"], ["Out", "Missing Destination"]))
+        self.assertEqual(tab._advanced_invalid_source_fields, set())
+        self.assertEqual(tab._advanced_invalid_destination_fields, {"Missing Destination"})
+        self.assertEqual(tab.advanced_source_fields.selected_fields(), ["Text", "Scenario"])
+        self.assertEqual(tab.prompt_text, "user draft")
+
+    def test_resolver_cancel_keeps_dynamic_default_draft_and_all_selections(self):
+        tab = _Tab()
+        tab._advanced_field_selection = (["Text", "Missing Source"], ["Out"])
+        tab._advanced_invalid_source_fields = {"Missing Source"}
+        tab._resolve_invalid_field("source", "Missing Source")
+        self.assertEqual(tab._advanced_field_selection, (["Text", "Missing Source"], ["Out"]))
+        self.assertEqual(tab._advanced_invalid_source_fields, {"Missing Source"})
+        self.assertEqual(tab.prompt_text, "user draft")
+
+    def test_resolver_entries_always_show_role_and_each_field(self):
+        tab = _Tab()
+        tab._advanced_invalid_source_fields = {"Z source", "A source"}
+        tab._advanced_invalid_destination_fields = {"Out"}
+        self.assertEqual(tab._invalid_advanced_field_entries(), [
+            ("source", "A source"), ("source", "Z source"), ("destination", "Out"),
+        ])
+
+    def test_note_type_definition_check_detects_browser_selection_change(self):
+        class Note:
+            def __init__(self, type_id, fields):
+                self.type_id, self.fields = type_id, fields
+            def note_type(self):
+                return {"id": self.type_id, "flds": [{"name": name} for name in self.fields]}
+
+        tab = _Tab()
+        tab._advanced_note_type_id = 7
+        tab._advanced_field_names = ("Text", "Out")
+        SCOPE["mw"] = SimpleNamespace(col=SimpleNamespace(get_note=lambda _note_id: Note(7, ["Text", "Out"])))
+        self.assertTrue(tab._advanced_field_definition_is_current([1]))
+        SCOPE["mw"] = SimpleNamespace(col=SimpleNamespace(get_note=lambda _note_id: Note(8, ["Text", "Out"])))
+        self.assertFalse(tab._advanced_field_definition_is_current([1]))
 
     def test_late_result_and_finish_after_cancel_cannot_schedule_commit(self):
         tab = _Tab()
