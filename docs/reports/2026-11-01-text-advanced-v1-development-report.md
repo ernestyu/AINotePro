@@ -58,3 +58,37 @@ git diff --check                           # passed
 6. 在 macOS、Windows、Linux 各自的受支持 Anki/Qt 版本，检查 1000×700 和 870×610、中文长字段名、10+ 选择项和 DPI 缩放：连续鼠标勾选、方向键/Space、Escape、滚动、禁选 tooltip 以及 Generate/Close/Prompt 操作均须可用。
 
 提交本候选前仍需独立第二轮全文代码与 SPEC 一致性复审；该复审必须覆盖上述八项之外的回归，不得仅形式核销。
+
+## 第二轮全局审计集中整改（2026-11-01）
+
+基线：`feat/text-advanced-v1@b5b0bb7b9d75a48c5168d78e335650e4dad7ba0d`。本轮未修改 SPEC、未触碰 main，也未将 mock 行为称为 Anki 实机通过。
+
+| 审计项 | 处理与代码位置 | 测试证据 | 状态 |
+|---|---|---|---|
+| AUD-R2C-01 | `ainotepro/core/advanced_commit.py` 将 `update_note()` 已返回后 `merge_undo_entries()` 抛错建模为 `persisted-undo-uncertain`：明确数据可能已持久化、未回滚、Undo 状态未知，并停止后续提交。`update_note()` 自身抛错会重读：只在能确认目标没有持久化时标记 `commit-failed` 并隔离继续；否则是 `commit-uncertain` 并停止。 | `AdvancedCommitTests.test_failed_undo_merge_reports_persisted_undo_uncertainty_and_stops`、`test_confirmed_nonpersistent_update_failure_is_isolated_from_later_notes`、`test_persistent_update_error_is_explicitly_uncertain_and_stops` | 代码/mock 通过；真实事务仍是发布阻断。 |
+| AUD-R2C-02 | `TextTab._handle_advanced_commit_result()` 和 `_advanced_summary()` 统一显示 updated、provider-failed、json-failed、conflict、cancelled、commit-failed、commit-uncertain、persisted-undo-uncertain、settings-save-failed、ui-refresh-failed。Provider 设置写失败不改变已知 note 提交结果，且仍会完成 UI 收尾。 | `AdvancedUiStateTests.test_provider_config_save_failure_preserves_commit_outcome_and_finishes_ui` | mock 通过。 |
+| AUD-R2C-03 | `AdvancedGenerationWorker` 以 run ID 携带 progress/result/finished 信号；`TextTab` 只接受当前 run 且非 cancel/closing 的结果。关闭时取消，收尾幂等，且不再在 closing 中操作 Qt 子控件。 | `AdvancedUiStateTests.test_stale_worker_result_is_ignored_before_it_reaches_commit_queue`、`test_late_result_and_finish_after_cancel_cannot_schedule_commit` | mock 通过；真实 Qt 生命周期待验收。 |
+| AUD-R2C-04 | 一个批次只创建一个 custom Undo entry；每个已经确认更新的 note 都尝试合并到该 entry。冲突、取消与已确认未持久化的失败不影响此前已成功条目；任何持久化/Undo 不确定状态都会停止，不声称回滚。 | `test_each_note_is_updated_once_and_all_op_changes_are_aggregated`、`test_cancel_after_non_interruptible_first_submit_skips_later_notes`、上述 Undo 失败注入测试 | 实际 Anki Undo 分组语义待验收。 |
+| AUD-ADV-01 | `OpChanges.MergeFrom()` 汇总每次 `update_note()` 与 Undo merge 的变化通知，且每 note 只执行一次目标字段写入。 | `test_each_note_is_updated_once_and_all_op_changes_are_aggregated` | 真实 Undo/数据库待验收。 |
+| AUD-ADV-04 | 第一轮动态 Default 的 Save As / Discard / Cancel 及 Note Type 刷新防丢稿代码未回退。 | `AdvancedUiStateTests.test_cancelled_dynamic_default_selection_restores_original_selection_and_draft`、`test_discarded_dynamic_default_selection_regenerates_after_selection_changes` | Qt 实机待验收。 |
+| AUD-ADV-05 | 取消临界点、迟到响应、旧 run 回调与关闭窗口均在提交前拒绝；真正已进入单 note 提交的操作只能完成当前 note。 | `test_cancel_after_non_interruptible_first_submit_skips_later_notes`、`test_late_result_and_finish_after_cancel_cannot_schedule_commit`、`test_stale_worker_result_is_ignored_before_it_reaches_commit_queue` | Anki/Qt 实机待验收。 |
+| AUD-ADV-06 | 第一轮连续勾选、键盘、tooltip、冲突禁选与滚动实现保留；本轮没有改变组件语义。 | Python 编译、完整单元回归 | macOS/Windows/Linux UI 待验收。 |
+
+### 第二轮本地实际结果
+
+```text
+python3 -m unittest discover -s tests -v  # 48 passed
+python3 -m compileall -q ainotepro tests  # passed
+git diff --check                           # passed
+```
+
+Anki 官方文档确认 collection 修改应使用 `CollectionOp`，其负责 Undoable collection operation 与 UI change 通知；本实现仍以该串行边界运行最终检查与提交。当前环境仅能检查安装包版本，不能在仓库 Python 中加载 `aqt`/PyQt 或真实 collection，因此不能证明 `merge_undo_entries()` 在目标 Anki 的失败回滚/分组细节。
+
+### 第二轮必须实机补验（发布阻断）
+
+1. 在 Anki 26.09.3 的临时 profile 中执行 1、10、100 note 的 Advanced 批次；分别引入目标字段覆盖、并发编辑、Cancel 与窗口关闭，记录每条 note 的结果计数和实际字段值。
+2. 成功批次、部分成功批次、第一条后 Cancel 与数据库失败后分别执行 Undo/Redo，记录 Undo 菜单显示和每个目标字段的恢复值。特别验证 `add_custom_undo_entry()` 后每次 `update_note()` 与 `merge_undo_entries()` 的真实分组。
+3. 在测试副本中使 `merge_undo_entries()` 抛异常；确认已返回成功的 `update_note()` 数据是否保留，并确认界面只报告 `persisted-undo-uncertain`，停止后续 note，不提示已回滚或完全成功。
+4. 使用延迟 Provider 和非法 JSON，验证 Provider/JSON 失败计数、迟到响应丢弃、关闭后的无 Qt 回调；然后在 macOS、Windows、Linux 的 1000×700 和 870×610 执行第一轮 UI 清单。
+
+第三轮必须先核销上述待验收的旧问题，再做全文代码与 SPEC 一致性审计；不得只审查本轮改动行。

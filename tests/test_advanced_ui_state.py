@@ -6,6 +6,9 @@ from enum import IntFlag
 from pathlib import Path
 import threading
 import unittest
+from types import SimpleNamespace
+
+from ainotepro.core.advanced_commit import AdvancedCommitResult
 
 
 SOURCE = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
@@ -13,12 +16,17 @@ TREE = ast.parse(SOURCE)
 TAB = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
 WANTED = {
     "_on_advanced_field_selection_changed", "_collect_advanced_result",
-    "_finish_advanced_requests",
+    "_finish_advanced_requests", "_handle_advanced_commit_result", "_advanced_summary",
 }
 METHODS = [node for node in TAB.body if isinstance(node, ast.FunctionDef) and node.name in WANTED]
 MODULE = ast.Module(body=[ast.ClassDef(name="StateMethods", bases=[], keywords=[],
                                        body=METHODS, decorator_list=[])], type_ignores=[])
-SCOPE = {"Optional": __import__("typing").Optional}
+SCOPE = {
+    "Optional": __import__("typing").Optional,
+    "Dict": __import__("typing").Dict,
+    "AdvancedCommitResult": AdvancedCommitResult,
+    "mw": SimpleNamespace(reset=lambda: None),
+}
 exec(compile(ast.fix_missing_locations(MODULE), "<advanced state methods>", "exec"), SCOPE)
 StateMethods = SCOPE["StateMethods"]
 
@@ -60,6 +68,8 @@ class _Tab(StateMethods):
         self.load_count = 0
         self._advanced_results = []
         self._advanced_cancel = threading.Event()
+        self._advanced_run_id = 1
+        self._advanced_closing = False
         self.finished = []
         self.commit_calls = []
 
@@ -77,6 +87,9 @@ class _Tab(StateMethods):
 
     def _commit_advanced_results(self, valid, failures):
         self.commit_calls.append((valid, failures))
+
+    def _save_current_provider_config(self):
+        raise RuntimeError("settings disk unavailable")
 
     def isVisible(self):
         return True
@@ -109,12 +122,34 @@ class AdvancedUiStateTests(unittest.TestCase):
     def test_late_result_and_finish_after_cancel_cannot_schedule_commit(self):
         tab = _Tab()
         tab._advanced_cancel.set()
-        result = (type("Snapshot", (), {"note_id": 1})(), {"Out": "value"}, None)
+        result = (1, type("Snapshot", (), {"note_id": 1})(), {"Out": "value"}, None, None)
         tab._collect_advanced_result(result)
-        tab._finish_advanced_requests("Generation cancelled.")
+        tab._finish_advanced_requests((1, "Generation cancelled.", None))
         self.assertEqual(tab._advanced_results, [])
         self.assertEqual(tab.commit_calls, [])
         self.assertEqual(tab.finished, ["Generation cancelled. No uncommitted results were written."])
+
+    def test_stale_worker_result_is_ignored_before_it_reaches_commit_queue(self):
+        tab = _Tab()
+        stale = (0, type("Snapshot", (), {"note_id": 1})(), {"Out": "value"}, None, None)
+        tab._collect_advanced_result(stale)
+        self.assertEqual(tab._advanced_results, [])
+
+    def test_terminal_worker_failure_is_counted_without_scheduling_commit(self):
+        tab = _Tab()
+        tab._finish_advanced_requests((1, "worker broke", "worker-failed"))
+        self.assertEqual(tab.commit_calls, [])
+        self.assertIn("worker-failed=1", tab.finished[0])
+
+    def test_provider_config_save_failure_preserves_commit_outcome_and_finishes_ui(self):
+        tab = _Tab()
+        result = AdvancedCommitResult(SimpleNamespace(), [(1, "updated")])
+        failures = []
+        tab._handle_advanced_commit_result(result, failures)
+        self.assertEqual(len(tab.finished), 1)
+        self.assertIn("Updated 1 notes", tab.finished[0])
+        self.assertIn("settings-save-failed=1", tab.finished[0])
+        self.assertEqual(failures[0][0], "settings-save-failed")
 
 
 if __name__ == "__main__":

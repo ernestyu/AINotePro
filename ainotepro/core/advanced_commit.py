@@ -19,6 +19,7 @@ class AdvancedCommitResult:
     changes: Any
     outcomes: list[tuple[int, str]]
     fatal_error: str | None = None
+    fatal_status: str | None = None
 
 
 def _merge_changes(target: Any, incoming: Any) -> None:
@@ -29,6 +30,25 @@ def _merge_changes(target: Any, incoming: Any) -> None:
     if not callable(merge):
         raise TypeError("OpChanges does not provide MergeFrom()")
     merge(incoming)
+
+
+def _persistence_after_update_error(col: Any, snapshot: Any,
+                                    destinations: tuple[str, ...],
+                                    values: dict[str, str]) -> bool | None:
+    """Return whether a failed update is observably persisted, or ``None``.
+
+    A raising backend call can occur after persistence.  A re-read can prove a
+    changed target value was *not* retained, but cannot prove anything when the
+    generated values equal the snapshot's existing targets or the re-read
+    itself fails.  Those cases deliberately remain indeterminate.
+    """
+    if not any(snapshot.raw_values[name] != values[name] for name in destinations):
+        return None
+    try:
+        note = col.get_note(snapshot.note_id)
+        return all(name in note and note[name] == values[name] for name in destinations)
+    except Exception:
+        return None
 
 
 def commit_validated_results(
@@ -43,10 +63,12 @@ def commit_validated_results(
 
     A single custom undo entry is created before any update. Each note is
     re-read, checked, populated with *all* destination values and updated once.
-    ``merge_undo_entries()`` is required after every update, so a missing or
-    failed undo contract stops the batch rather than reporting an unsafe write
-    as success. The surrounding CollectionOp provides the serialized execution
-    context; this function must not be called from a provider/Qt worker.
+    ``merge_undo_entries()`` is required after every update. A merge failure
+    after a successful ``update_note()`` is *not* a rollback: the note may
+    already be durable while its undo state is unknown. That condition is
+    reported as ``persisted-undo-uncertain`` and stops the batch. The
+    surrounding CollectionOp provides the serialized execution context; this
+    function must not be called from a provider/Qt worker.
     """
     changes = changes_factory()
     outcomes: list[tuple[int, str]] = []
@@ -56,6 +78,7 @@ def commit_validated_results(
         return AdvancedCommitResult(
             changes, outcomes,
             "Anki undo grouping API is unavailable; no Advanced results were written.",
+            "undo-unavailable",
         )
     if cancel_event.is_set():
         return AdvancedCommitResult(changes, outcomes)
@@ -65,6 +88,7 @@ def commit_validated_results(
         return AdvancedCommitResult(
             changes, outcomes,
             f"Could not create Anki undo group; no Advanced results were written: {exc}",
+            "undo-create-failed",
         )
 
     for snapshot, values, _error in valid_results:
@@ -86,16 +110,44 @@ def commit_validated_results(
                 continue
             for name in destinations:
                 note[name] = values[name]
-            _merge_changes(changes, col.update_note(note))
-            # Anki's supported custom undo API merges this note update into the
-            # entry created above. Do not claim success if this step fails.
-            _merge_changes(changes, merge_undo(undo_id))
-            outcomes.append((snapshot.note_id, "updated"))
         except Exception as exc:
-            outcomes.append((snapshot.note_id, "commit-failed"))
+            persisted = _persistence_after_update_error(col, snapshot, destinations, values)
+            if persisted is False:
+                outcomes.append((snapshot.note_id, "commit-failed"))
+                continue
+            outcomes.append((snapshot.note_id, "commit-uncertain"))
             return AdvancedCommitResult(
                 changes, outcomes,
-                f"Commit for note {snapshot.note_id} could not be verified: {exc}. "
-                "No later notes were submitted; inspect Anki before retrying.",
+                f"Commit for note {snapshot.note_id} raised an error and persistence could not "
+                f"be ruled out: {exc}. No later notes were submitted; this was not rolled back.",
+                "commit-uncertain",
             )
+        try:
+            _merge_changes(changes, col.update_note(note))
+        except Exception as exc:
+            persisted = _persistence_after_update_error(col, snapshot, destinations, values)
+            if persisted is False:
+                outcomes.append((snapshot.note_id, "commit-failed"))
+                continue
+            outcomes.append((snapshot.note_id, "commit-uncertain"))
+            return AdvancedCommitResult(
+                changes, outcomes,
+                f"Commit for note {snapshot.note_id} raised an error and persistence could not "
+                f"be ruled out: {exc}. No later notes were submitted; this was not rolled back.",
+                "commit-uncertain",
+            )
+        try:
+            # A successful update has already been submitted. If this merge
+            # raises, Anki has not promised a rollback; never label it failed.
+            _merge_changes(changes, merge_undo(undo_id))
+        except Exception as exc:
+            outcomes.append((snapshot.note_id, "persisted-undo-uncertain"))
+            return AdvancedCommitResult(
+                changes, outcomes,
+                f"Note {snapshot.note_id} was updated before Anki Undo grouping failed: {exc}. "
+                "Its data may be persisted and Undo state is uncertain; it was not rolled back. "
+                "No later notes were submitted; inspect Anki before retrying or undoing.",
+                "persisted-undo-uncertain",
+            )
+        outcomes.append((snapshot.note_id, "updated"))
     return AdvancedCommitResult(changes, outcomes)

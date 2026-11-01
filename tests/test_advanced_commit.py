@@ -27,13 +27,17 @@ class _Note(dict):
 
 
 class _Collection:
-    def __init__(self, notes, *, cancel_after_first=None, fail_merge=False):
+    def __init__(self, notes, *, cancel_after_first=None, fail_merge=False,
+                 fail_update_for=None, persist_update_error=True):
         self.notes = notes
+        self.original_notes = {note_id: dict(note) for note_id, note in notes.items()}
         self.update_calls = []
         self.undo_add_calls = []
         self.undo_merge_calls = []
         self.cancel_after_first = cancel_after_first
         self.fail_merge = fail_merge
+        self.fail_update_for = set(fail_update_for or [])
+        self.persist_update_error = persist_update_error
 
     def get_note(self, note_id):
         return self.notes[note_id]
@@ -44,6 +48,11 @@ class _Collection:
 
     def update_note(self, note):
         self.update_calls.append(note.id)
+        if note.id in self.fail_update_for:
+            if not self.persist_update_error:
+                note.clear()
+                note.update(self.original_notes[note.id])
+            raise RuntimeError("update failed")
         if self.cancel_after_first is not None and len(self.update_calls) == 1:
             self.cancel_after_first.set()
         return _Changes(f"update:{note.id}")
@@ -110,7 +119,7 @@ class AdvancedCommitTests(unittest.TestCase):
         self.assertEqual(col.update_calls, [])
         self.assertEqual(note["A"], "")
 
-    def test_failed_undo_merge_is_not_reported_as_success_or_continued(self):
+    def test_failed_undo_merge_reports_persisted_undo_uncertainty_and_stops(self):
         first = _Note(1, {"Text": "one", "A": "", "B": ""})
         second = _Note(2, {"Text": "two", "A": "", "B": ""})
         col = _Collection({1: first, 2: second}, fail_merge=True)
@@ -121,8 +130,42 @@ class AdvancedCommitTests(unittest.TestCase):
             ("Text",), ("A", "B"), threading.Event(), _Changes,
         )
         self.assertEqual(col.update_calls, [1])
-        self.assertEqual(result.outcomes, [(1, "commit-failed")])
-        self.assertIn("could not be verified", result.fatal_error)
+        self.assertEqual(result.outcomes, [(1, "persisted-undo-uncertain")])
+        self.assertEqual(result.fatal_status, "persisted-undo-uncertain")
+        self.assertIn("may be persisted", result.fatal_error)
+        self.assertEqual(first["A"], "a")
+        self.assertEqual(second["A"], "")
+
+    def test_confirmed_nonpersistent_update_failure_is_isolated_from_later_notes(self):
+        first = _Note(1, {"Text": "one", "A": "", "B": ""})
+        second = _Note(2, {"Text": "two", "A": "", "B": ""})
+        col = _Collection({1: first, 2: second}, fail_update_for={1}, persist_update_error=False)
+        result = commit_validated_results(
+            col,
+            [(_snapshot(first), {"A": "a", "B": "b"}, None),
+             (_snapshot(second), {"A": "c", "B": "d"}, None)],
+            ("Text",), ("A", "B"), threading.Event(), _Changes,
+        )
+        self.assertIsNone(result.fatal_error)
+        self.assertEqual(result.outcomes, [(1, "commit-failed"), (2, "updated")])
+        self.assertEqual(first["A"], "")
+        self.assertEqual(second["A"], "c")
+
+    def test_persistent_update_error_is_explicitly_uncertain_and_stops(self):
+        first = _Note(1, {"Text": "one", "A": "", "B": ""})
+        second = _Note(2, {"Text": "two", "A": "", "B": ""})
+        col = _Collection({1: first, 2: second}, fail_update_for={1}, persist_update_error=True)
+        result = commit_validated_results(
+            col,
+            [(_snapshot(first), {"A": "a", "B": "b"}, None),
+             (_snapshot(second), {"A": "c", "B": "d"}, None)],
+            ("Text",), ("A", "B"), threading.Event(), _Changes,
+        )
+        self.assertEqual(result.outcomes, [(1, "commit-uncertain")])
+        self.assertEqual(result.fatal_status, "commit-uncertain")
+        self.assertEqual(col.update_calls, [1])
+        self.assertEqual(first["A"], "a")
+        self.assertEqual(second["A"], "")
 
 
 if __name__ == "__main__":
