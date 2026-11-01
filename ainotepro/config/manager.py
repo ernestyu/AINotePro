@@ -104,6 +104,22 @@ def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
             destination[key] = value
     return destination
 
+def normalize_prompts(raw, mode):
+    if mode not in ("easy", "advanced") or not isinstance(raw, dict):
+        raise ValueError("Invalid prompt configuration")
+    if any(not isinstance(k, str) or not isinstance(v, str) for k, v in raw.items()):
+        raise ValueError("Invalid prompt name or content")
+    if mode == "advanced" and "Default" in raw:
+        raise ValueError("Advanced Default must be virtual")
+    return dict(sorted(raw.items()))
+
+
+def prompt_digest(raw, mode):
+    data = normalize_prompts(raw, mode)
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False, sort_keys=True,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
 class ConfigManager:
     """Single writer for settings; Audio profiles are always replaced, never deep-merged."""
 
@@ -249,6 +265,55 @@ class ConfigManager:
             service.setdefault(provider_name, {}).update(copy.deepcopy(provider_cfg))
             service["provider"] = provider_name
         self._replace_raw(update)
+
+    def prompt_snapshot(self, mode):
+        """Migrate the legacy mirror once, then return the authoritative mapping and CAS token."""
+        key = {"easy": "prompts", "advanced": "advanced_prompts"}.get(mode)
+        if key is None:
+            raise ValueError("Invalid prompt mode")
+        with _CONFIG_LOCK:
+            raw = self._read_raw()
+            if raw is None:
+                raise ValueError("Configuration file disappeared")
+            text = raw.setdefault("text", {})
+            if not isinstance(text, dict):
+                raise ValueError("Invalid Text configuration")
+            changed = False
+            if not text.get("prompt_migration_done", False):
+                mirror = os.path.join(USER_FILES_DIR, "gen_text", "prompt.json")
+                legacy = {}
+                if os.path.exists(mirror):
+                    with open(mirror, encoding="utf-8") as stream:
+                        legacy = json.load(stream)
+                    normalize_prompts(legacy, "easy")
+                existing = normalize_prompts(text.get("prompts", {}), "easy")
+                legacy.update(existing)
+                text["prompts"] = legacy
+                text["prompt_migration_done"] = True
+                changed = True
+            for name in ("prompts", "advanced_prompts"):
+                if name not in text:
+                    text[name] = {}
+                    changed = True
+            data = normalize_prompts(text[key], mode)
+            if changed:
+                self._atomic_write(raw)
+            return copy.deepcopy(data), prompt_digest(data, mode)
+
+    def replace_prompts(self, mode, prompts, expected_digest):
+        key = {"easy": "prompts", "advanced": "advanced_prompts"}.get(mode)
+        if key is None:
+            raise ValueError("Invalid prompt mode")
+        proposed = normalize_prompts(prompts, mode)
+        def update(raw):
+            text = raw.get("text")
+            if not isinstance(text, dict) or key not in text or not text.get("prompt_migration_done"):
+                raise ValueError("Prompt migration required")
+            if prompt_digest(text[key], mode) != expected_digest:
+                raise RuntimeError("Prompts changed in another window; reload before saving")
+            text[key] = copy.deepcopy(proposed)
+        self._replace_raw(update)
+        return prompt_digest(proposed, mode)
 
     def update_text_fields(self, fields):
         """Write only the named Text keys; preserve Audio and all other Text settings."""
