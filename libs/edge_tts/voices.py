@@ -3,7 +3,7 @@ correct voice based on their attributes."""
 
 import json
 import ssl
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import aiohttp
 import certifi
@@ -12,6 +12,8 @@ from typing_extensions import Unpack
 from .constants import SEC_MS_GEC_VERSION, VOICE_HEADERS, VOICE_LIST
 from .drm import DRM
 from .typing import Voice, VoicesManagerFind, VoicesManagerVoice
+
+_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
 
 async def __list_voices(
@@ -33,25 +35,22 @@ async def __list_voices(
     async with session.get(
         f"{VOICE_LIST}&Sec-MS-GEC={DRM.generate_sec_ms_gec()}"
         f"&Sec-MS-GEC-Version={SEC_MS_GEC_VERSION}",
-        headers=VOICE_HEADERS,
+        headers=DRM.headers_with_muid(VOICE_HEADERS),
         proxy=proxy,
         ssl=ssl_ctx,
         raise_for_status=True,
     ) as url:
-        data: List[Voice] = json.loads(await url.text())
+        data: List[Any] = json.loads(await url.text())
 
     for voice in data:
-        # Remove leading and trailing whitespace from categories and personalities.
-        # This has only happened in one case with the zh-CN-YunjianNeural voice
-        # where there was a leading space in one of the categories.
-        voice["VoiceTag"]["ContentCategories"] = [
-            category.strip()  # type: ignore
-            for category in voice["VoiceTag"]["ContentCategories"]
-        ]
-        voice["VoiceTag"]["VoicePersonalities"] = [
-            personality.strip()  # type: ignore
-            for personality in voice["VoiceTag"]["VoicePersonalities"]
-        ]
+        if "VoiceTag" not in voice:
+            voice["VoiceTag"] = {}
+
+        if "ContentCategories" not in voice["VoiceTag"]:
+            voice["VoiceTag"]["ContentCategories"] = []
+
+        if "VoicePersonalities" not in voice["VoiceTag"]:
+            voice["VoiceTag"]["VoicePersonalities"] = []
 
     return data
 
@@ -72,16 +71,15 @@ async def list_voices(
     Returns:
         List[Voice]: A list of voices and their attributes.
     """
-    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     async with aiohttp.ClientSession(connector=connector, trust_env=True) as session:
         try:
-            data = await __list_voices(session, ssl_ctx, proxy)
+            data = await __list_voices(session, _SSL_CTX, proxy)
         except aiohttp.ClientResponseError as e:
             if e.status != 403:
                 raise
 
             DRM.handle_client_response_error(e)
-            data = await __list_voices(session, ssl_ctx, proxy)
+            data = await __list_voices(session, _SSL_CTX, proxy)
     return data
 
 

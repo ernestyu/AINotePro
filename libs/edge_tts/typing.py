@@ -10,59 +10,18 @@ from typing_extensions import Literal, NotRequired, TypedDict
 class TTSChunk(TypedDict):
     """TTS chunk data."""
 
-    type: Literal["audio", "WordBoundary"]
+    type: Literal["audio", "WordBoundary", "SentenceBoundary"]
     data: NotRequired[bytes]  # only for audio
-    duration: NotRequired[float]  # only for WordBoundary
-    offset: NotRequired[float]  # only for WordBoundary
-    text: NotRequired[str]  # only for WordBoundary
+    duration: NotRequired[float]  # only for WordBoundary and SentenceBoundary
+    offset: NotRequired[float]  # only for WordBoundary and SentenceBoundary
+    text: NotRequired[str]  # only for WordBoundary and SentenceBoundary
 
 
 class VoiceTag(TypedDict):
     """VoiceTag data."""
 
-    ContentCategories: List[
-        Literal[
-            "Cartoon",
-            "Conversation",
-            "Copilot",
-            "Dialect",
-            "General",
-            "News",
-            "Novel",
-            "Sports",
-        ]
-    ]
-    VoicePersonalities: List[
-        Literal[
-            "Approachable",
-            "Authentic",
-            "Authority",
-            "Bright",
-            "Caring",
-            "Casual",
-            "Cheerful",
-            "Clear",
-            "Comfort",
-            "Confident",
-            "Considerate",
-            "Conversational",
-            "Cute",
-            "Expressive",
-            "Friendly",
-            "Honest",
-            "Humorous",
-            "Lively",
-            "Passion",
-            "Pleasant",
-            "Positive",
-            "Professional",
-            "Rational",
-            "Reliable",
-            "Sincere",
-            "Sunshine",
-            "Warm",
-        ]
-    ]
+    ContentCategories: List[str]
+    VoicePersonalities: List[str]
 
 
 class Voice(TypedDict):
@@ -72,9 +31,9 @@ class Voice(TypedDict):
     ShortName: str
     Gender: Literal["Female", "Male"]
     Locale: str
-    SuggestedCodec: Literal["audio-24khz-48kbitrate-mono-mp3"]
+    SuggestedCodec: str
     FriendlyName: str
-    Status: Literal["GA"]
+    Status: Literal["Deprecated", "GA", "Preview"]
     VoiceTag: VoiceTag
 
 
@@ -99,3 +58,5 @@ class CommunicateState(TypedDict):
     offset_compensation: float
     last_duration_offset: float
     stream_was_called: bool
+    chunk_audio_bytes: int  # bytes received in the current chunk
+    cumulative_audio_bytes: int  # bytes received across all completed chunks

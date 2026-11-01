@@ -10,6 +10,8 @@ from tabulate import tabulate
 from . import Communicate, SubMaker, list_voices
 from .constants import DEFAULT_VOICE
 from .data_classes import UtilArgs
+from .progress import ProgressBar
+from .version import __version__
 
 
 async def _print_voices(*, proxy: Optional[str]) -> None:
@@ -27,6 +29,26 @@ async def _print_voices(*, proxy: Optional[str]) -> None:
         for voice in voices
     ]
     print(tabulate(table, headers))
+
+
+def _should_show_progress(args: UtilArgs) -> bool:
+    """
+    Decides whether to draw a progress bar for this run.
+
+    The bar is drawn on stderr, so anything else that wants stderr wins, and
+    there is no point drawing it when stderr is not a terminal.
+
+    Args:
+        args (UtilArgs): The parsed command line arguments.
+
+    Returns:
+        bool: True if the progress bar should be drawn.
+    """
+    if args.no_progress:
+        return False
+    if args.write_subtitles == "-":
+        return False
+    return sys.stderr.isatty()
 
 
 async def _run_tts(args: UtilArgs) -> None:
@@ -55,6 +77,7 @@ async def _run_tts(args: UtilArgs) -> None:
         proxy=args.proxy,
     )
     submaker = SubMaker()
+    progress = ProgressBar(args.text) if _should_show_progress(args) else None
     try:
         audio_file = (
             open(args.write_media, "wb")
@@ -72,15 +95,28 @@ async def _run_tts(args: UtilArgs) -> None:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 audio_file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
+                if progress is not None:
+                    progress.add_audio_bytes(len(chunk["data"]))
+            elif chunk["type"] in ("WordBoundary", "SentenceBoundary"):
                 submaker.feed(chunk)
+                if progress is not None:
+                    progress.advance(chunk["text"])
+                    progress.set_audio_timeline(
+                        int(chunk["offset"] + chunk["duration"])
+                    )
+            if progress is not None:
+                progress.render()
 
-        if args.words_in_cue > 0:
-            submaker.merge_cues(args.words_in_cue)
+        if progress is not None:
+            progress.finish()
 
         if sub_file is not None:
             sub_file.write(submaker.get_srt())
     finally:
+        # No-op if the run already completed; this is for the paths where it
+        # did not, so a failed run does not leave a bar sitting at 99%.
+        if progress is not None:
+            progress.close()
         if audio_file is not sys.stdout.buffer:
             audio_file.close()
         if sub_file is not None and sub_file is not sys.stderr:
@@ -111,12 +147,6 @@ async def amain() -> None:
     parser.add_argument("--volume", help="set TTS volume. Default +0%%.", default="+0%")
     parser.add_argument("--pitch", help="set TTS pitch. Default +0Hz.", default="+0Hz")
     parser.add_argument(
-        "--words-in-cue",
-        help="number of words in a subtitle cue. Default: 10.",
-        default=10,
-        type=int,
-    )
-    parser.add_argument(
         "--write-media", help="send media output to file instead of stdout"
     )
     parser.add_argument(
@@ -124,6 +154,14 @@ async def amain() -> None:
         help="send subtitle output to provided file instead of stderr",
     )
     parser.add_argument("--proxy", help="use a proxy for TTS and voice list.")
+    parser.add_argument(
+        "--no-progress",
+        help="do not show the progress bar on stderr",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"edge-tts {__version__}"
+    )
     args = parser.parse_args(namespace=UtilArgs())
 
     if args.list_voices:
@@ -134,7 +172,7 @@ async def amain() -> None:
         if args.file in ("-", "/dev/stdin"):
             args.text = sys.stdin.read()
         else:
-            with open(args.file, "r", encoding="utf-8") as file:
+            with open(args.file, encoding="utf-8") as file:
                 args.text = file.read()
 
     if args.text is not None:
