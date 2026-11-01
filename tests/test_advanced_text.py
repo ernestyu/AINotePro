@@ -1,5 +1,8 @@
 import unittest
-from ainotepro.core.advanced_text import parse_prompt, validate_prompt, compile_prompt, parse_response, field_to_text, default_prompt
+from ainotepro.core.advanced_text import (
+    build_snapshot, compile_prompt, default_prompt, field_to_text, parse_prompt,
+    parse_response, preflight_requests, snapshot_matches, validate_prompt,
+)
 
 
 class AdvancedTextTests(unittest.TestCase):
@@ -32,6 +35,23 @@ class AdvancedTextTests(unittest.TestCase):
         for source in ['{{c0::x}}', '{{c01::x}}', '{{c1::}}', '{{c1::x', '{{c1::x::{{c2::y}}}}']:
             with self.subTest(source=source), self.assertRaises(ValueError):
                 field_to_text(source)
+
+    def test_batch_preflight_rejects_everything_on_one_invalid_note(self):
+        records = [
+            {"note_id": 1, "note_type_id": 9, "field_names": ["Text", "Out"],
+             "raw_values": {"Text": "hello", "Out": ""}},
+            {"note_id": 2, "note_type_id": 9, "field_names": ["Text", "Out"],
+             "raw_values": {"Text": "<img src='x'>", "Out": ""}},
+        ]
+        with self.assertRaisesRegex(ValueError, "Note 2"):
+            preflight_requests(records, ["Text"], ["Out"], "{Text} {OUT:Out} translate", ["Text", "Out"])
+
+    def test_snapshot_compares_raw_values_and_full_definition(self):
+        snapshot = build_snapshot(1, 3, ["Text", "Out"], {"Text": "A<br>B", "Out": ""}, ["Text"], ["Out"])
+        self.assertEqual(snapshot.input_values, {"Text": "A\nB"})
+        self.assertTrue(snapshot_matches(3, ["Text", "Out"], {"Text": "A<br>B", "Out": ""}, snapshot, ["Text"], ["Out"]))
+        self.assertFalse(snapshot_matches(3, ["Text", "Out"], {"Text": "A\nB", "Out": ""}, snapshot, ["Text"], ["Out"]))
+        self.assertFalse(snapshot_matches(3, ["Out", "Text"], {"Text": "A<br>B", "Out": ""}, snapshot, ["Text"], ["Out"]))
 
 if __name__ == '__main__':
     unittest.main()

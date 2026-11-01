@@ -12,6 +12,22 @@ class Token:
     position: int
 
 
+@dataclass(frozen=True)
+class NoteSnapshot:
+    """Immutable data collected before an Advanced request leaves Anki."""
+    note_id: int
+    note_type_id: int
+    field_names: tuple[str, ...]
+    raw_values: dict[str, str]
+    input_values: dict[str, str]
+
+
+@dataclass(frozen=True)
+class AdvancedRequest:
+    snapshot: NoteSnapshot
+    prompt: str
+
+
 def parse_prompt(prompt):
     tokens = []
     i = 0
@@ -88,6 +104,70 @@ def compile_prompt(parsed, inputs):
 
 def default_prompt(sources, destinations):
     return 'Inputs:\n' + '\n'.join(f'{x}: {{{x}}}' for x in sources) + '\n\nGenerate the following:\n' + '\n\n'.join(f'{{OUT:{x}}}\nGenerate content for this field.' for x in destinations)
+
+
+def build_snapshot(note_id, note_type_id, field_names, raw_values, sources, destinations,
+                   *, max_field_chars=50000):
+    """Validate and snapshot one already-read note without any Anki dependency."""
+    names = tuple(field_names)
+    wanted = tuple(dict.fromkeys(tuple(sources) + tuple(destinations)))
+    missing = [name for name in wanted if name not in names or name not in raw_values]
+    if missing:
+        raise ValueError('Missing fields: ' + ', '.join(missing))
+    original = {name: str(raw_values[name] or '') for name in wanted}
+    input_values = {}
+    for name in sources:
+        if len(original[name]) > max_field_chars:
+            raise ValueError(f'Source field {name!r} exceeds {max_field_chars} characters')
+        converted = field_to_text(original[name])
+        if not converted:
+            raise ValueError(f'Source field {name!r} has no readable text')
+        input_values[name] = converted
+    return NoteSnapshot(int(note_id), int(note_type_id), names, original, input_values)
+
+
+def preflight_requests(records, sources, destinations, prompt, fields,
+                       *, max_notes=100, max_field_chars=50000):
+    """Validate all selected notes before a provider request can be made.
+
+    ``records`` contains only immutable primitive data obtained on Anki's safe
+    collection context.  Errors are aggregated so callers can reject the whole
+    batch before a write checkpoint, setting save, or network request.
+    """
+    records = list(records)
+    if not records:
+        raise ValueError('No notes selected')
+    if len(records) > max_notes:
+        raise ValueError(f'Advanced generation is limited to {max_notes} notes per batch')
+    parsed = validate_prompt(prompt, sources, destinations, fields)
+    expected_names = tuple(fields)
+    expected_type = records[0]['note_type_id']
+    errors, snapshots = [], []
+    for record in records:
+        note_id = record.get('note_id', '?')
+        try:
+            if record.get('note_type_id') != expected_type:
+                raise ValueError('Selected notes have different note types')
+            if tuple(record.get('field_names', ())) != expected_names:
+                raise ValueError('Selected notes have incompatible field definitions')
+            snapshots.append(build_snapshot(
+                record['note_id'], record['note_type_id'], record['field_names'],
+                record['raw_values'], sources, destinations,
+                max_field_chars=max_field_chars,
+            ))
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f'Note {note_id}: {exc}')
+    if errors:
+        raise ValueError('Advanced preflight failed:\n' + '\n'.join(errors))
+    return parsed, snapshots
+
+
+def snapshot_matches(note_type_id, field_names, raw_values, snapshot, sources, destinations):
+    """Compare raw stored values. Derived plain text is deliberately excluded."""
+    if int(note_type_id) != snapshot.note_type_id or tuple(field_names) != snapshot.field_names:
+        return False
+    return all(str(raw_values.get(name, '') or '') == snapshot.raw_values[name]
+               for name in tuple(dict.fromkeys(tuple(sources) + tuple(destinations))))
 
 
 def parse_response(response, destinations, max_size=1048576):

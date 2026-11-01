@@ -8,7 +8,7 @@ import unittest
 SOURCE = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
 assert "online_button" not in SOURCE
 assert "self.new_button" in SOURCE and "self.save_as_button" in SOURCE
-assert 'data.get("Default") != _load_prompts()["Default"]' in SOURCE
+assert "prompt_snapshot" in SOURCE and "replace_prompts" in SOURCE
 
 STORE = {}
 WARNINGS, INFOS, LAST_USED = [], [], []
@@ -18,11 +18,12 @@ def load_prompts():
     return copy.deepcopy(STORE)
 
 
-def save_prompts(data):
+def save_prompts(data, *_args):
     if data.get("Default") != STORE["Default"]:
         raise ValueError("Default protected")
     STORE.clear()
     STORE.update(copy.deepcopy(data))
+    return "digest"
 
 
 class Buttons(IntFlag):
@@ -105,7 +106,7 @@ scope = {
     "QMessageBox": MessageBox, "QInputDialog": InputDialog,
     "showWarning": WARNINGS.append, "showInfo": INFOS.append,
     "_load_prompts": load_prompts, "_save_prompts": save_prompts,
-    "_set_last_used_prompt": LAST_USED.append,
+    "_set_last_used_prompt": lambda name, *_args: LAST_USED.append(name),
     "Optional": __import__("typing").Optional,
 }
 exec(compile(ast.fix_missing_locations(subset), "<text prompt methods>", "exec"), scope)
@@ -120,6 +121,8 @@ class Tab(PromptMethods):
         self.delete_button = Button()
         self._is_updating_prompt_combo = False
         self._active_prompt_name = "Default"
+        self._field_mode = "easy"
+        self._prompt_digest = "digest"
         self._new_prompt_name = None
         self._saved_prompt_text = STORE["Default"]
         self.prompt_edit.value = STORE["Default"]

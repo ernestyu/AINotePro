@@ -80,6 +80,9 @@ def _get_default_config() -> Dict[str, Any]:
                 "Default": "Translate the following text to English: {Source Field}",
             },
             "last_used_prompt": "Default",
+            "advanced_prompts": {},
+            "advanced_last_used_prompt": "Default",
+            "field_mode": "easy",
         },
         "audio": {
             "provider": "edge_tts",
@@ -317,7 +320,8 @@ class ConfigManager:
 
     def update_text_fields(self, fields):
         """Write only the named Text keys; preserve Audio and all other Text settings."""
-        allowed = {"prompts", "last_used_prompt"}
+        allowed = {"prompts", "last_used_prompt", "advanced_prompts",
+                   "advanced_last_used_prompt", "field_mode"}
         if not isinstance(fields, dict) or set(fields) - allowed:
             raise ValueError("Unsupported Text field update")
         def update(raw):
