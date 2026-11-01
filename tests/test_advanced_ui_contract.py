@@ -1,9 +1,4 @@
-"""Static safety checks for the Anki-bound Advanced UI path.
-
-The Qt/Anki runtime is intentionally not imported by the repository test
-environment, so this covers structural guarantees that are otherwise only
-exercisable in a live Anki profile.
-"""
+"""Lightweight wiring checks; commit behavior is mock-tested separately."""
 from pathlib import Path
 import unittest
 
@@ -23,8 +18,7 @@ class AdvancedUiContractTests(unittest.TestCase):
         end = SOURCE.index("    def _finish_advanced_ui", start)
         body = SOURCE[start:end]
         self.assertIn("CollectionOp", body)
-        self.assertIn("snapshot_matches", body)
-        self.assertIn("changes = col.update_note(note)", body)
+        self.assertIn("commit_validated_results", body)
         self.assertNotIn("update_field_content", body)
         self.assertNotIn("await ", body)
 

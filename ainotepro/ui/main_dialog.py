@@ -302,6 +302,13 @@ class MainDialog(QDialog):
         Override the close event to save settings from all tabs.
         This assumes the dialog holds references to tab widgets.
         """
+        # Text Advanced may have an edited virtual Default or an in-flight
+        # provider result. Give it the same Save As/Discard/Cancel protection
+        # as an in-tab mode or prompt switch before child widgets are torn down.
+        if hasattr(self, 'text_tab') and hasattr(self.text_tab, 'prepare_close'):
+            if not self.text_tab.prepare_close():
+                event.ignore()
+                return
         print("[AINotePro] Main dialog closing, saving all settings...")
         # This is a guess based on a likely tabbed structure.
         # If the tabs are named differently, these lines need adjustment.

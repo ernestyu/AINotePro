@@ -1,7 +1,6 @@
 ﻿from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 import os
 import re
 from html import unescape
@@ -13,7 +12,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle
+    QIcon, QStyle, QEvent
 )
 from aqt.utils import showInfo, showWarning
 
@@ -22,8 +21,9 @@ from ..services.provider_factory import create_provider
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
-    preflight_requests, snapshot_matches,
+    preflight_requests,
 )
+from ..core.advanced_commit import AdvancedCommitResult, commit_validated_results
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
 # user_config.json so they survive the normal add-on settings flow.
@@ -57,13 +57,6 @@ TEXT_PROVIDER_LABEL_ALIASES = {
 }
 
 
-@dataclass
-class AdvancedCommitResult:
-    """CollectionOp-compatible result; ``changes`` is Anki's OpChanges."""
-    changes: Any
-    outcomes: list[tuple[int, str]]
-
-
 class CheckableFieldCombo(QComboBox):
     """Compact multi-select combo suitable for the Text tab's field row."""
     selectionChanged = pyqtSignal()
@@ -72,7 +65,10 @@ class CheckableFieldCombo(QComboBox):
         super().__init__(parent)
         self.setEditable(True)
         self.lineEdit().setReadOnly(True)
+        self.setMaxVisibleItems(12)
+        self._keep_popup_open = False
         self.view().pressed.connect(self._toggle_index)
+        self.view().installEventFilter(self)
 
     def set_fields(self, names: list[str], selected: Optional[list[str]] = None,
                    disabled: Optional[set[str]] = None) -> None:
@@ -84,9 +80,30 @@ class CheckableFieldCombo(QComboBox):
             item = self.model().item(self.count() - 1)
             item.setData(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked,
                          Qt.ItemDataRole.CheckStateRole)
+            item.setToolTip(name)
             if name in disabled:
                 item.setEnabled(False)
+                item.setToolTip(f"{name} (selected in the other field set)")
         self._update_label()
+
+    def set_disabled_fields(self, disabled: set[str]) -> None:
+        """Refresh conflict availability without recreating the open popup."""
+        for index in range(self.count()):
+            item = self.model().item(index)
+            name = self.itemText(index)
+            is_disabled = name in disabled and name not in self.selected_fields()
+            item.setEnabled(not is_disabled)
+            item.setToolTip(f"{name} (selected in the other field set)" if is_disabled else name)
+
+    def eventFilter(self, watched, event):
+        if watched is self.view() and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key in (Qt.Key.Key_Space, Qt.Key.Key_Select):
+                index = self.view().currentIndex()
+                if index.isValid():
+                    self._toggle_index(index)
+                return True
+        return super().eventFilter(watched, event)
 
     def selected_fields(self) -> list[str]:
         result = []
@@ -103,8 +120,17 @@ class CheckableFieldCombo(QComboBox):
         state = item.data(Qt.ItemDataRole.CheckStateRole)
         item.setData(Qt.CheckState.Unchecked if state == Qt.CheckState.Checked else Qt.CheckState.Checked,
                      Qt.ItemDataRole.CheckStateRole)
+        self._keep_popup_open = True
         self._update_label()
         self.selectionChanged.emit()
+
+    def hidePopup(self) -> None:
+        # A check action should permit consecutive mouse/keyboard selections;
+        # clicking elsewhere or Escape uses the normal QComboBox close path.
+        if self._keep_popup_open:
+            self._keep_popup_open = False
+            return
+        super().hidePopup()
 
     def _update_label(self) -> None:
         values = self.selected_fields()
@@ -314,9 +340,12 @@ class TextTab(QWidget):
         self._easy_field_selection: tuple[str, str] = ("", "")
         self._advanced_field_selection: tuple[list[str], list[str]] = ([], [])
         self._last_advanced_fields: tuple[list[str], list[str]] = ([], [])
+        self._advanced_note_type_id: Optional[int] = None
         self._advanced_results: list[tuple[Any, Optional[dict[str, str]], Optional[str]]] = []
         self._advanced_cancel = threading.Event()
         self._advanced_active = False
+        self._advanced_closing = False
+        self._discarded_dynamic_default = False
         self.destroyed.connect(lambda *_args: self._advanced_cancel.set())
         if parent is not None:
             parent.destroyed.connect(lambda *_args: self._advanced_cancel.set())
@@ -603,6 +632,7 @@ class TextTab(QWidget):
             return
         source = self.advanced_source_fields.selected_fields()
         destination = self.advanced_destination_fields.selected_fields()
+        discarded = False
         if self._active_prompt_name == "Default" and self._prompt_is_dirty():
             if not self._confirm_dynamic_default_regeneration():
                 old_source, old_destination = self._last_advanced_fields
@@ -611,14 +641,17 @@ class TextTab(QWidget):
                 self.advanced_source_fields.set_fields(names, old_source, set(old_destination))
                 self.advanced_destination_fields.set_fields(names, old_destination, set(old_source))
                 return
+            discarded = self._discarded_dynamic_default
         # An item that is selected on the other side is disabled before it can
         # be selected. Existing selections are never silently removed.
-        names = [self.advanced_source_fields.itemText(i)
-                 for i in range(self.advanced_source_fields.count())]
-        self.advanced_source_fields.set_fields(names, source, set(destination))
-        self.advanced_destination_fields.set_fields(names, destination, set(source))
+        # Do not recreate either model here: doing so closes the popup after
+        # every click and makes continuous selection and keyboard use brittle.
+        self.advanced_source_fields.set_disabled_fields(set(destination))
+        self.advanced_destination_fields.set_disabled_fields(set(source))
         self._last_advanced_fields = (list(source), list(destination))
-        if self._active_prompt_name == "Default" and not self._prompt_is_dirty():
+        self._advanced_field_selection = (list(source), list(destination))
+        if self._active_prompt_name == "Default" and (discarded or not self._prompt_is_dirty()):
+            self._discarded_dynamic_default = False
             self._load_prompt_list()
 
     def _confirm_dynamic_default_regeneration(self) -> bool:
@@ -632,9 +665,13 @@ class TextTab(QWidget):
         box.exec()
         clicked = box.clickedButton()
         if clicked == save_as:
+            self._discarded_dynamic_default = False
             self._on_save_as_prompt()
             return self._active_prompt_name != "Default" and not self._prompt_is_dirty()
-        return clicked == discard
+        if clicked == discard:
+            self._discarded_dynamic_default = True
+            return True
+        return False
 
     def _filter_prompts(self, preferred_name: Optional[str] = None, load_selected: bool = False):
         search_text = self.prompt_search_edit.text().lower()
@@ -815,7 +852,23 @@ class TextTab(QWidget):
             if not note_ids:
                 return
             n = mw.col.get_note(note_ids[0])
-            names = [f["name"] for f in n.note_type()["flds"]]
+            note_type = n.note_type()
+            note_type_id = int(note_type["id"])
+            names = [f["name"] for f in note_type["flds"]]
+            old_source = self.advanced_source_fields.selected_fields()
+            old_destination = self.advanced_destination_fields.selected_fields()
+            new_source = [name for name in self._advanced_field_selection[0] if name in names]
+            new_destination = [name for name in self._advanced_field_selection[1] if name in names]
+            if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
+                    and self._prompt_is_dirty()
+                    and (self._advanced_note_type_id is not None
+                         and (self._advanced_note_type_id != note_type_id
+                              or old_source != new_source or old_destination != new_destination))):
+                # A Note Type refresh can invalidate selections just as a click
+                # can; never replace an edited dynamic Default without consent.
+                if not self._confirm_dynamic_default_regeneration():
+                    return
+            discarded = self._discarded_dynamic_default
             self.source_field_combo.clear(); self.destination_field_combo.clear()
             self.source_field_combo.addItems(names); self.destination_field_combo.addItems(names)
             source, destination = self._easy_field_selection
@@ -823,12 +876,16 @@ class TextTab(QWidget):
                 self.source_field_combo.setCurrentIndex(self.source_field_combo.findText(source))
             if destination in names:
                 self.destination_field_combo.setCurrentIndex(self.destination_field_combo.findText(destination))
-            saved_source, saved_destination = self._advanced_field_selection
-            source = [name for name in saved_source if name in names]
-            destination = [name for name in saved_destination if name in names]
+            source, destination = new_source, new_destination
             self.advanced_source_fields.set_fields(names, source, set(destination))
             self.advanced_destination_fields.set_fields(names, destination, set(source))
             self._last_advanced_fields = (list(source), list(destination))
+            self._advanced_field_selection = (list(source), list(destination))
+            self._advanced_note_type_id = note_type_id
+            if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
+                    and (discarded or not self._prompt_is_dirty())):
+                self._discarded_dynamic_default = False
+                self._load_prompt_list()
         except Exception:
             pass
 
@@ -1388,7 +1445,7 @@ class TextTab(QWidget):
             self._advanced_results.append(result)
 
     def _finish_advanced_requests(self, message: str) -> None:
-        if self._advanced_cancel.is_set() or not self.isVisible():
+        if self._advanced_cancel.is_set() or self._advanced_closing or not self.isVisible():
             self._finish_advanced_ui("Generation cancelled. No uncommitted results were written.")
             return
         valid = [result for result in self._advanced_results if result[1] is not None]
@@ -1409,34 +1466,23 @@ class TextTab(QWidget):
 
         def operation(col):
             from anki.collection import OpChanges
-            changes = OpChanges()
-            outcomes = []
-            for snapshot, values, _error in valid_results:
-                if cancel_event.is_set():
-                    outcomes.append((snapshot.note_id, "cancelled"))
-                    continue
-                note = col.get_note(snapshot.note_id)
-                note_type = note.note_type()
-                names = [field["name"] for field in note_type["flds"]]
-                raw = {name: note[name] for name in set(sources + destinations) if name in note}
-                if not snapshot_matches(note_type["id"], names, raw, snapshot, sources, destinations):
-                    outcomes.append((snapshot.note_id, "conflict"))
-                    continue
-                if cancel_event.is_set():
-                    outcomes.append((snapshot.note_id, "cancelled"))
-                    continue
-                for name in destinations:
-                    note[name] = values[name]
-                changes = col.update_note(note)  # one supported Anki update per note
-                outcomes.append((snapshot.note_id, "updated"))
-            return AdvancedCommitResult(changes, outcomes)
+            # CollectionOp serializes collection access. The helper performs
+            # final read/compare/cancel/assignment/update with no await, event
+            # loop, UI call or task dispatch between validation and submission.
+            return commit_validated_results(
+                col, valid_results, sources, destinations, cancel_event, OpChanges,
+            )
 
         def committed(result: AdvancedCommitResult):
+            if result.fatal_error:
+                failures.append(result.fatal_error)
             for note_id, status in result.outcomes:
                 if status == "conflict":
                     failures.append(f"Note {note_id}: fields changed while generation was running")
                 elif status == "cancelled":
                     failures.append(f"Note {note_id}: cancelled before commit")
+                elif status == "commit-failed":
+                    failures.append(f"Note {note_id}: commit or undo verification failed")
             updated = sum(status == "updated" for _note_id, status in result.outcomes)
             if updated:
                 self._save_current_provider_config()
@@ -1464,7 +1510,7 @@ class TextTab(QWidget):
             self._advanced_progress.close()
         self._advanced_active = False
         self._set_advanced_ui_busy(False)
-        if self.isVisible():
+        if not self._advanced_closing and self.isVisible():
             showInfo(message)
 
     def _set_advanced_ui_busy(self, busy: bool) -> None:
@@ -1476,8 +1522,18 @@ class TextTab(QWidget):
             generate.setEnabled(not busy)
 
     def closeEvent(self, event) -> None:
-        self._advanced_cancel.set()
+        if not self._advanced_closing and not self.prepare_close():
+            event.ignore()
+            return
         super().closeEvent(event)
+
+    def prepare_close(self) -> bool:
+        """Called by the owning dialog before it destroys this tab."""
+        if not self._confirm_leave_prompt():
+            return False
+        self._advanced_closing = True
+        self._advanced_cancel.set()
+        return True
 
     # Helpers
     def _confirm_write_risk(self, note_ids: list[int], src: str, dst: str) -> bool:

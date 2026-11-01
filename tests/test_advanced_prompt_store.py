@@ -58,5 +58,19 @@ class PromptStoreTests(unittest.TestCase):
             self.store.prompt_snapshot('easy')
         self.assertEqual(before, self.store._revision())
 
+    def test_prompt_maps_cannot_bypass_mode_cas(self):
+        self.store.prompt_snapshot('easy')
+        before = self.store._read_raw()
+        with self.assertRaises(ValueError):
+            self.store.update_text_fields({'prompts': {'Bypass': 'no'}})
+        proposed = self.store.get_all()
+        proposed['text']['prompts']['Bypass'] = 'no'
+        with self.assertRaises(ValueError):
+            self.store.save_all(proposed)
+        after = self.store._read_raw()
+        self.assertEqual(after['text']['prompts'], before['text']['prompts'])
+        self.assertEqual(after['text']['openai'], before['text']['openai'])
+        self.assertEqual(after['audio'], before['audio'])
+
 if __name__ == '__main__':
     unittest.main()

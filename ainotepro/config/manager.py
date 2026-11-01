@@ -331,9 +331,14 @@ class ConfigManager:
         return prompt_digest(proposed, mode)
 
     def update_text_fields(self, fields):
-        """Write only the named Text keys; preserve Audio and all other Text settings."""
-        allowed = {"prompts", "last_used_prompt", "advanced_prompts",
-                   "advanced_last_used_prompt", "field_mode"}
+        """Write non-Prompt Text UI state without weakening Prompt CAS.
+
+        Prompt mappings are authoritative CAS domains and may only be changed
+        through ``replace_prompts()``.  Keeping them out of this convenience
+        method prevents last-used/mode saves from accidentally becoming a
+        whole-mapping overwrite path.
+        """
+        allowed = {"last_used_prompt", "advanced_last_used_prompt", "field_mode"}
         if not isinstance(fields, dict) or set(fields) - allowed:
             raise ValueError("Unsupported Text field update")
         def update(raw):
@@ -369,6 +374,9 @@ class ConfigManager:
                                     copy.deepcopy(previous) if previous is not missing else missing))
 
         collect(baseline, proposed)
+        if any(path[:2] == ("text", "prompts") or
+               path[:2] == ("text", "advanced_prompts") for path, _value, _old in changes):
+            raise ValueError("Prompt mappings must be changed with replace_prompts()")
         if not changes:
             return
 
