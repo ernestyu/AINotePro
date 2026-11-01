@@ -1241,8 +1241,8 @@ class TextTab(QWidget):
 
     def _save_current_provider_config(self, provider_key: Optional[str] = None) -> None:
         pv = provider_key or self._active_provider or self._service_map()
-        self.cfg.set_provider_config("text", pv, self._current_provider_config())
-        print(f"[AINotePro] Saved settings for Text/{pv}")
+        if self.cfg.set_provider_config("text", pv, self._current_provider_config()):
+            print(f"[AINotePro] Saved settings for Text/{pv}")
 
     def _model_selection_changed(self, *_):
         if self._loading_provider:
@@ -1866,7 +1866,6 @@ class TextTab(QWidget):
         """Persist Text settings on dialog close, including model and reasoning."""
         try:
             self._model_selection_changed()
-            self._save_current_provider_config()
             return True
         except Exception as exc:
             showWarning(f"Could not save Text provider settings: {exc}")
