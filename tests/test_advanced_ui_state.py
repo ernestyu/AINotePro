@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import ast
-from enum import IntFlag
 from pathlib import Path
 import threading
 import unittest
 from types import SimpleNamespace
 
 from ainotepro.core.advanced_commit import AdvancedCommitResult
+from ainotepro.core.advanced_ledger import AdvancedBatchLedger
 
 
 SOURCE = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
@@ -16,7 +16,7 @@ TREE = ast.parse(SOURCE)
 TAB = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
 WANTED = {
     "_on_advanced_field_selection_changed", "_collect_advanced_result",
-    "_finish_advanced_requests", "_handle_advanced_commit_result", "_advanced_summary",
+    "_finish_advanced_requests", "_handle_advanced_commit_result",
 }
 METHODS = [node for node in TAB.body if isinstance(node, ast.FunctionDef) and node.name in WANTED]
 MODULE = ast.Module(body=[ast.ClassDef(name="StateMethods", bases=[], keywords=[],
@@ -67,6 +67,7 @@ class _Tab(StateMethods):
         self.prompt_text = "user draft"
         self.load_count = 0
         self._advanced_results = []
+        self._advanced_ledger = AdvancedBatchLedger.for_notes([1, 2])
         self._advanced_cancel = threading.Event()
         self._advanced_run_id = 1
         self._advanced_closing = False
@@ -85,8 +86,8 @@ class _Tab(StateMethods):
     def _finish_advanced_ui(self, message):
         self.finished.append(message)
 
-    def _commit_advanced_results(self, valid, failures):
-        self.commit_calls.append((valid, failures))
+    def _commit_advanced_results(self, valid):
+        self.commit_calls.append(valid)
 
     def _save_current_provider_config(self):
         raise RuntimeError("settings disk unavailable")
@@ -127,7 +128,7 @@ class AdvancedUiStateTests(unittest.TestCase):
         tab._finish_advanced_requests((1, "Generation cancelled.", None))
         self.assertEqual(tab._advanced_results, [])
         self.assertEqual(tab.commit_calls, [])
-        self.assertEqual(tab.finished, ["Generation cancelled. No uncommitted results were written."])
+        self.assertIn("cancelled=2", tab.finished[0])
 
     def test_stale_worker_result_is_ignored_before_it_reaches_commit_queue(self):
         tab = _Tab()
@@ -139,17 +140,17 @@ class AdvancedUiStateTests(unittest.TestCase):
         tab = _Tab()
         tab._finish_advanced_requests((1, "worker broke", "worker-failed"))
         self.assertEqual(tab.commit_calls, [])
-        self.assertIn("worker-failed=1", tab.finished[0])
+        self.assertIn("not-run=2", tab.finished[0])
+        self.assertIn("worker-failed: worker broke", tab.finished[0])
 
     def test_provider_config_save_failure_preserves_commit_outcome_and_finishes_ui(self):
         tab = _Tab()
+        tab._advanced_ledger.record_worker(1, None, None)
         result = AdvancedCommitResult(SimpleNamespace(), [(1, "updated")])
-        failures = []
-        tab._handle_advanced_commit_result(result, failures)
+        tab._handle_advanced_commit_result(result)
         self.assertEqual(len(tab.finished), 1)
         self.assertIn("Updated 1 notes", tab.finished[0])
-        self.assertIn("settings-save-failed=1", tab.finished[0])
-        self.assertEqual(failures[0][0], "settings-save-failed")
+        self.assertIn("settings-save-failed: settings disk unavailable", tab.finished[0])
 
 
 if __name__ == "__main__":

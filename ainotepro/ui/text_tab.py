@@ -21,9 +21,10 @@ from ..services.provider_factory import create_provider
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
-    preflight_requests,
+    preflight_requests, reconcile_field_selection,
 )
 from ..core.advanced_commit import AdvancedCommitResult, commit_validated_results
+from ..core.advanced_ledger import AdvancedBatchLedger
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
 # user_config.json so they survive the normal add-on settings flow.
@@ -348,16 +349,18 @@ class TextTab(QWidget):
         self._advanced_field_selection: tuple[list[str], list[str]] = ([], [])
         self._last_advanced_fields: tuple[list[str], list[str]] = ([], [])
         self._advanced_note_type_id: Optional[int] = None
+        self._advanced_invalid_fields: tuple[str, ...] = ()
         self._advanced_results: list[tuple[Any, Optional[dict[str, str]], Optional[str], Optional[str]]] = []
         self._advanced_cancel = threading.Event()
         self._advanced_active = False
         self._advanced_closing = False
         self._advanced_run_id = 0
         self._advanced_ui_finished = False
+        self._advanced_ledger = AdvancedBatchLedger.for_notes([])
         self._discarded_dynamic_default = False
-        self.destroyed.connect(lambda *_args: self._advanced_cancel.set())
+        self.destroyed.connect(self._abandon_advanced_task)
         if parent is not None:
-            parent.destroyed.connect(lambda *_args: self._advanced_cancel.set())
+            parent.destroyed.connect(self._abandon_advanced_task)
 
         self._build_ui()
         self._load_note_fields()
@@ -659,6 +662,7 @@ class TextTab(QWidget):
         self.advanced_destination_fields.set_disabled_fields(set(source))
         self._last_advanced_fields = (list(source), list(destination))
         self._advanced_field_selection = (list(source), list(destination))
+        self._advanced_invalid_fields = ()
         if self._active_prompt_name == "Default" and (discarded or not self._prompt_is_dirty()):
             self._discarded_dynamic_default = False
             self._load_prompt_list()
@@ -866,8 +870,10 @@ class TextTab(QWidget):
             names = [f["name"] for f in note_type["flds"]]
             old_source = self.advanced_source_fields.selected_fields()
             old_destination = self.advanced_destination_fields.selected_fields()
-            new_source = [name for name in self._advanced_field_selection[0] if name in names]
-            new_destination = [name for name in self._advanced_field_selection[1] if name in names]
+            saved_source, saved_destination = self._advanced_field_selection
+            new_source, new_destination, invalid_fields = reconcile_field_selection(
+                saved_source, saved_destination, names,
+            )
             if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
                     and self._prompt_is_dirty()
                     and (self._advanced_note_type_id is not None
@@ -889,7 +895,9 @@ class TextTab(QWidget):
             self.advanced_source_fields.set_fields(names, source, set(destination))
             self.advanced_destination_fields.set_fields(names, destination, set(source))
             self._last_advanced_fields = (list(source), list(destination))
-            self._advanced_field_selection = (list(source), list(destination))
+            # Keep the old semantic selection as-is: invalid names must block
+            # Generate instead of becoming an unannounced smaller request.
+            self._advanced_invalid_fields = invalid_fields
             self._advanced_note_type_id = note_type_id
             if (self._field_mode == "advanced" and self._active_prompt_name == "Default"
                     and (discarded or not self._prompt_is_dirty())):
@@ -1373,10 +1381,18 @@ class TextTab(QWidget):
 
     def _start_advanced_generation(self) -> None:
         """Complete all local checks before constructing a provider request."""
+        if self._advanced_active:
+            showWarning("Advanced generation is already running.")
+            return
         note_ids = self._selected_note_ids()
         sources = self.advanced_source_fields.selected_fields()
         destinations = self.advanced_destination_fields.selected_fields()
         prompt = self.prompt_edit.toPlainText()
+        if self._advanced_invalid_fields:
+            showWarning("Selected Advanced fields are unavailable in the current Note Type: "
+                        + ", ".join(self._advanced_invalid_fields)
+                        + ". Choose fields explicitly before generating.")
+            return
         if not note_ids:
             showWarning("No notes selected.")
             return
@@ -1429,6 +1445,7 @@ class TextTab(QWidget):
         self._advanced_sources = tuple(sources)
         self._advanced_destinations = tuple(destinations)
         self._advanced_results = []
+        self._advanced_ledger = AdvancedBatchLedger.for_notes(snapshot.note_id for snapshot in snapshots)
         self._set_advanced_ui_busy(True)
         self._advanced_progress = QProgressDialog("Generating structured responses…", "Cancel", 0,
                                                   len(snapshots), self)
@@ -1453,6 +1470,11 @@ class TextTab(QWidget):
     def _cancel_advanced(self) -> None:
         self._advanced_cancel.set()
 
+    def _abandon_advanced_task(self, *_args) -> None:
+        """Detach callbacks before Qt can destroy this tab or its parent."""
+        self._advanced_closing = True
+        self._advanced_cancel.set()
+
     def _update_advanced_progress(self, payload) -> None:
         run_id, value = payload
         if (run_id != self._advanced_run_id or self._advanced_closing
@@ -1467,33 +1489,36 @@ class TextTab(QWidget):
         if (run_id == self._advanced_run_id and not self._advanced_closing
                 and not self._advanced_cancel.is_set()):
             self._advanced_results.append((snapshot, values, error, category))
+            self._advanced_ledger.record_worker(snapshot.note_id, category, error)
 
     def _finish_advanced_requests(self, payload) -> None:
         run_id, message, terminal_category = payload
         if run_id != self._advanced_run_id:
             return
         if self._advanced_cancel.is_set() or self._advanced_closing or not self.isVisible():
-            self._finish_advanced_ui("Generation cancelled. No uncommitted results were written.")
+            self._advanced_ledger.cancel_pending()
+            self._finish_advanced_ui(self._advanced_ledger.summary("Generation cancelled."))
             return
         if terminal_category:
-            self._finish_advanced_ui(self._advanced_summary(message, 0, [(terminal_category, message)]))
+            self._advanced_ledger.mark_pending("not-run", message)
+            self._advanced_ledger.add_issue(terminal_category, message)
+            self._finish_advanced_ui(self._advanced_ledger.summary(message))
             return
         valid = [(snapshot, values, error) for snapshot, values, error, _category
                  in self._advanced_results if values is not None]
-        failures = [(category or "provider-failed", f"Note {snapshot.note_id}: {error}")
-                    for snapshot, _values, error, category in self._advanced_results if error]
         if not valid:
-            self._finish_advanced_ui(self._advanced_summary(message + " No valid responses were returned.",
-                                                            0, failures))
+            self._advanced_ledger.mark_pending("not-run")
+            self._finish_advanced_ui(self._advanced_ledger.summary(message + " No valid responses were returned."))
             return
         self._advanced_progress.setLabelText("Committing validated results…")
-        self._commit_advanced_results(valid, failures)
+        self._commit_advanced_results(valid)
 
-    def _commit_advanced_results(self, valid_results, failures: list[tuple[Optional[str], str]]) -> None:
+    def _commit_advanced_results(self, valid_results) -> None:
         """Final re-read through CollectionOp; the inner unit never yields."""
         sources = self._advanced_sources
         destinations = self._advanced_destinations
         cancel_event = self._advanced_cancel
+        run_id = self._advanced_run_id
 
         def operation(col):
             from anki.collection import OpChanges
@@ -1505,12 +1530,13 @@ class TextTab(QWidget):
             )
 
         def committed(result: AdvancedCommitResult):
-            self._handle_advanced_commit_result(result, failures)
+            if run_id == self._advanced_run_id:
+                self._handle_advanced_commit_result(result)
 
         def failed(exc: Exception):
-            if not self._advanced_closing:
-                self._finish_advanced_ui(self._advanced_summary(
-                    "Advanced commit task failed.", 0, [("commit-task-failed", str(exc))]))
+            if run_id == self._advanced_run_id and not self._advanced_closing:
+                self._advanced_ledger.mark_pending("commit-task-failed", str(exc))
+                self._finish_advanced_ui(self._advanced_ledger.summary("Advanced commit task failed."))
 
         try:
             from aqt.operations import CollectionOp
@@ -1519,42 +1545,24 @@ class TextTab(QWidget):
         except Exception as exc:
             failed(exc)
 
-    def _handle_advanced_commit_result(self, result: AdvancedCommitResult,
-                                       failures: list[tuple[Optional[str], str]]) -> None:
+    def _handle_advanced_commit_result(self, result: AdvancedCommitResult) -> None:
         """Render a terminal commit result without changing its data outcome."""
         if self._advanced_closing:
             return
-        outcome_statuses = {status for _note_id, status in result.outcomes}
-        if result.fatal_error:
-            # A terminal message may explain the same note outcome. Keep it in
-            # details without double-counting that note in the summary.
-            category = (None if result.fatal_status in outcome_statuses
-                        else result.fatal_status or "commit-uncertain")
-            failures.append((category, result.fatal_error))
-        for note_id, status in result.outcomes:
-            if status == "conflict":
-                failures.append((status, f"Note {note_id}: fields changed while generation was running"))
-            elif status == "cancelled":
-                failures.append((status, f"Note {note_id}: cancelled before commit"))
-            elif status == "commit-failed":
-                failures.append((status, f"Note {note_id}: database update failed without persistence"))
-            elif status == "commit-uncertain":
-                failures.append((status, f"Note {note_id}: commit persistence is uncertain"))
-            elif status == "persisted-undo-uncertain":
-                failures.append((status, f"Note {note_id}: data was updated but Undo grouping is uncertain"))
-        updated = sum(status == "updated" for _note_id, status in result.outcomes)
+        self._advanced_ledger.apply_commit_result(result)
+        updated = self._advanced_ledger.count("updated")
         if updated:
             try:
                 self._save_current_provider_config()
             except Exception as exc:
                 # The database outcome is already known. Saving current UI
                 # settings is separate and must not poison completion.
-                failures.append(("settings-save-failed", f"Provider settings were not saved: {exc}"))
+                self._advanced_ledger.add_issue("settings-save-failed", str(exc))
             try:
                 mw.reset()
             except Exception:
-                failures.append(("ui-refresh-failed", "Anki UI refresh failed; reopen the note to verify."))
-        self._finish_advanced_ui(self._advanced_summary("Advanced generation complete.", updated, failures))
+                self._advanced_ledger.add_issue("ui-refresh-failed", "reopen the note to verify")
+        self._finish_advanced_ui(self._advanced_ledger.summary("Advanced generation complete."))
 
     def _finish_advanced_ui(self, message: str) -> None:
         if self._advanced_ui_finished:
@@ -1573,21 +1581,6 @@ class TextTab(QWidget):
             return
         if not self._advanced_closing and self.isVisible():
             showInfo(message)
-
-    @staticmethod
-    def _advanced_summary(prefix: str, updated: int,
-                          failures: list[tuple[Optional[str], str]]) -> str:
-        counts: Dict[str, int] = {}
-        for category, _detail in failures:
-            if category:
-                counts[category] = counts.get(category, 0) + 1
-        summary = f"{prefix} Updated {updated} notes."
-        if counts:
-            summary += "\n\nResults: " + ", ".join(
-                f"{category}={count}" for category, count in sorted(counts.items())
-            )
-            summary += "\n" + "\n".join(detail for _category, detail in failures[:8])
-        return summary
 
     def _set_advanced_ui_busy(self, busy: bool) -> None:
         self.field_mode_combo.setEnabled(not busy)

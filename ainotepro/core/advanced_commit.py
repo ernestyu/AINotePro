@@ -32,23 +32,38 @@ def _merge_changes(target: Any, incoming: Any) -> None:
     merge(incoming)
 
 
-def _persistence_after_update_error(col: Any, snapshot: Any,
-                                    destinations: tuple[str, ...],
-                                    values: dict[str, str]) -> bool | None:
-    """Return whether a failed update is observably persisted, or ``None``.
+def _observed_persistence_after_update_error(col: Any, snapshot: Any,
+                                             destinations: tuple[str, ...],
+                                             values: dict[str, str]) -> str:
+    """Classify two fresh storage observations without claiming a transaction.
 
-    A raising backend call can occur after persistence.  A re-read can prove a
-    changed target value was *not* retained, but cannot prove anything when the
-    generated values equal the snapshot's existing targets or the re-read
-    itself fails.  Those cases deliberately remain indeterminate.
+    The changed in-memory ``Note`` is never used as evidence. Two fresh
+    ``get_note()`` reads are copied into primitive strings. Even two observed
+    old values cannot prove an update did not reach storage, so every
+    ``update_note()`` exception remains terminally uncertain; this diagnostic
+    only tells the user whether none/some/all requested target values were
+    observed after the failure.
     """
-    if not any(snapshot.raw_values[name] != values[name] for name in destinations):
-        return None
+    readings = []
     try:
-        note = col.get_note(snapshot.note_id)
-        return all(name in note and note[name] == values[name] for name in destinations)
+        for _ in range(2):
+            current = col.get_note(snapshot.note_id)
+            readings.append({name: str(current[name] or "") for name in destinations})
     except Exception:
-        return None
+        return "storage-read-failed"
+    if readings[0] != readings[1]:
+        return "storage-changing"
+    observed = readings[0]
+    matched = [name for name in destinations if observed[name] == values[name]]
+    if len(matched) == len(destinations):
+        if all(snapshot.raw_values[name] == values[name] for name in destinations):
+            return "same-as-snapshot"
+        return "all-targets-observed"
+    if matched:
+        return "partial-targets-observed"
+    if all(observed[name] == snapshot.raw_values[name] for name in destinations):
+        return "no-targets-observed"
+    return "storage-values-unexpected"
 
 
 def commit_validated_results(
@@ -111,29 +126,21 @@ def commit_validated_results(
             for name in destinations:
                 note[name] = values[name]
         except Exception as exc:
-            persisted = _persistence_after_update_error(col, snapshot, destinations, values)
-            if persisted is False:
-                outcomes.append((snapshot.note_id, "commit-failed"))
-                continue
-            outcomes.append((snapshot.note_id, "commit-uncertain"))
-            return AdvancedCommitResult(
-                changes, outcomes,
-                f"Commit for note {snapshot.note_id} raised an error and persistence could not "
-                f"be ruled out: {exc}. No later notes were submitted; this was not rolled back.",
-                "commit-uncertain",
-            )
+            # No update was attempted when preparing the final read/compare.
+            outcomes.append((snapshot.note_id, "commit-failed"))
+            continue
         try:
             _merge_changes(changes, col.update_note(note))
         except Exception as exc:
-            persisted = _persistence_after_update_error(col, snapshot, destinations, values)
-            if persisted is False:
-                outcomes.append((snapshot.note_id, "commit-failed"))
-                continue
+            observed = _observed_persistence_after_update_error(
+                col, snapshot, destinations, values,
+            )
             outcomes.append((snapshot.note_id, "commit-uncertain"))
             return AdvancedCommitResult(
                 changes, outcomes,
-                f"Commit for note {snapshot.note_id} raised an error and persistence could not "
-                f"be ruled out: {exc}. No later notes were submitted; this was not rolled back.",
+                f"Commit for note {snapshot.note_id} raised an error after a write was attempted; "
+                f"independent storage observation is {observed}. This is not proof of rollback or "
+                f"durability. No later notes were submitted; this was not rolled back: {exc}.",
                 "commit-uncertain",
             )
         try:

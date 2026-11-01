@@ -1,7 +1,8 @@
 import unittest
 from ainotepro.core.advanced_text import (
     build_snapshot, compile_prompt, default_prompt, field_to_text, parse_prompt,
-    parse_response, preflight_requests, snapshot_matches, validate_prompt,
+    parse_response, preflight_requests, reconcile_field_selection,
+    snapshot_matches, validate_prompt,
 )
 
 
@@ -28,7 +29,7 @@ class AdvancedTextTests(unittest.TestCase):
                 parse_response(value, ['A'])
 
     def test_html_and_cloze(self):
-        cases = {'A<br>B': 'A\nB', '<div>Hello</div><div>world</div>': 'Hello\nworld', '&amp; &lt; &gt;': '& < >', '{{c1::answer::hint}}': 'answer', '<img src="a">[sound:a]': '', '<p>Hi <b>there</b>.</p>': 'Hi there.', '<script>secret</script><p>Good</p>': 'Good', '{{c2::outer {{c1::inner}} tail::hint}}': 'outer inner tail', '{{literal}}': '{{literal}}'}
+        cases = {'A<br>B': 'A\nB', '<div>Hello</div><div>world</div>': 'Hello\nworld', '&amp; &lt; &gt;': '& < >', '{{c1::answer::hint}}': 'answer', '<img src="a">[sound:a]': '', '<p>Hi <b>there</b>.</p>': 'Hi there.', '<script>secret</script><p>Good</p>': 'Good', '{{c2::outer {{c1::inner}} tail::hint}}': 'outer inner tail', '{{literal}}': '{{literal}}', '<span hidden>secret</span><p>Good</p>': 'Good', '<span style="display: none">secret</span>shown': 'shown', '<div aria-hidden="true">secret</div>shown': 'shown', '<template>secret</template>shown': 'shown'}
         for source, expected in cases.items():
             with self.subTest(source=source):
                 self.assertEqual(field_to_text(source), expected)
@@ -52,6 +53,14 @@ class AdvancedTextTests(unittest.TestCase):
         self.assertTrue(snapshot_matches(3, ["Text", "Out"], {"Text": "A<br>B", "Out": ""}, snapshot, ["Text"], ["Out"]))
         self.assertFalse(snapshot_matches(3, ["Text", "Out"], {"Text": "A\nB", "Out": ""}, snapshot, ["Text"], ["Out"]))
         self.assertFalse(snapshot_matches(3, ["Out", "Text"], {"Text": "A<br>B", "Out": ""}, snapshot, ["Text"], ["Out"]))
+
+    def test_note_type_refresh_retains_invalid_selection_for_generate_to_reject(self):
+        visible_sources, visible_destinations, invalid = reconcile_field_selection(
+            ["Text", "Scenario"], ["Out"], ["Text", "Out"],
+        )
+        self.assertEqual(visible_sources, ["Text"])
+        self.assertEqual(visible_destinations, ["Out"])
+        self.assertEqual(invalid, ("Scenario",))
 
 if __name__ == '__main__':
     unittest.main()

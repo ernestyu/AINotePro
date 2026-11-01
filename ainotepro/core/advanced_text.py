@@ -106,6 +106,21 @@ def default_prompt(sources, destinations):
     return 'Inputs:\n' + '\n'.join(f'{x}: {{{x}}}' for x in sources) + '\n\nGenerate the following:\n' + '\n\n'.join(f'{{OUT:{x}}}\nGenerate content for this field.' for x in destinations)
 
 
+def reconcile_field_selection(sources, destinations, field_names):
+    """Return visible selections and explicitly invalidated saved names.
+
+    A Note Type refresh must not silently redefine an Advanced request.  The UI
+    can render the subset present in the new type, but must retain and block on
+    the returned invalid names until the user actively makes a new selection.
+    """
+    available = set(field_names)
+    source_list, destination_list = list(sources), list(destinations)
+    invalid = [name for name in source_list + destination_list if name not in available]
+    return ([name for name in source_list if name in available],
+            [name for name in destination_list if name in available],
+            tuple(dict.fromkeys(invalid)))
+
+
 def build_snapshot(note_id, note_type_id, field_names, raw_values, sources, destinations,
                    *, max_field_chars=50000):
     """Validate and snapshot one already-read note without any Anki dependency."""
@@ -197,17 +212,36 @@ def parse_response(response, destinations, max_size=1048576):
 
 class _TextExtractor(HTMLParser):
     blocks = {'div', 'p', 'li', 'ul', 'ol', 'section', 'article', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'tr', 'blockquote', 'pre'}
-    ignored = {'script', 'style', 'audio', 'video', 'source', 'img'}
-    void = {'img', 'source'}
+    # These nodes do not contribute visible note text.  In particular, Anki
+    # rich-text fields can contain a hidden editor fragment or a media-only
+    # fallback; neither may become a model input.
+    ignored = {
+        'script', 'style', 'audio', 'video', 'source', 'img', 'head',
+        'template', 'noscript', 'title', 'meta', 'link', 'input', 'textarea',
+        'select', 'option',
+    }
+    void = {'img', 'source', 'meta', 'link', 'input'}
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self.skip = []
+
+    @staticmethod
+    def _is_hidden(attrs):
+        attributes = {str(key).lower(): '' if value is None else str(value)
+                      for key, value in attrs}
+        if 'hidden' in attributes or attributes.get('aria-hidden', '').lower() == 'true':
+            return True
+        style = attributes.get('style', '').lower()
+        return bool(re.search(r'(?:^|;)\s*display\s*:\s*none\b|'
+                              r'(?:^|;)\s*visibility\s*:\s*(?:hidden|collapse)\b',
+                              style))
+
     def handle_starttag(self, tag, attrs):
         if self.skip:
             if tag not in self.void:
                 self.skip.append(tag)
-        elif tag in self.ignored:
+        elif tag in self.ignored or self._is_hidden(attrs):
             if tag not in self.void:
                 self.skip.append(tag)
         elif tag == 'br':
