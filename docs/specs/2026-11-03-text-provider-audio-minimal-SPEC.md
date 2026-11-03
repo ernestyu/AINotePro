@@ -72,7 +72,9 @@
 - **AUD-M01（协议明确）：** OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope、Moonshot、Zhipu、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 仅使用各自经过验证的 OpenAI-compatible Chat Completions 接口；其中 **Anthropic 使用其 OpenAI SDK 兼容层**（非原生 Messages API），**Gemini 使用 Google 官方 OpenAI-compatible 接口**（非原生 generateContent API）。Ollama 保留已有原生 `/api/chat`、`/api/tags`。对兼容层需要的额外请求参数／认证头，仅在已有适配器增加必要的局部判断，不新建多协议框架。模型列表、Reasoning、Vision 的支持须按平台单独核实，不得因为兼容文本调用就自动启用这些能力。
 - **本地 llama.cpp、vLLM：** 用户配置 `http(s)://host:port` Server Address；预设按既有 OpenAI-compatible 协议使用 `/v1/chat/completions` 和（支持时）`/v1/models`。无需自建网络客户端。
 - **本地 Ollama：** 继续使用已有原生 `/api/chat`、`/api/tags`；不可仅为统一外观而切换到其他协议。
-- **AUD-M02（同 key 的旧配置／新预设优先级）：** 读取**磁盘原始对象**判定：① 若用户曾明确保存 `chat_endpoint`，则按此完整 URL 请求，不再拼接路径；仅当用户明确保存 `models_endpoint` 才优先使用该完整 Models URL。② 若原始对象只有 `base_url` 而无 `chat_endpoint`，则**保留基线的旧路径算法和原 Key／Model**，即使它与 13 个新预设同 key（例如旧 DeepSeek 代理）；不得从 `_deep_merge_dicts()` 合并后的内存字段误判原始字段来源。③ 新安装且没有历史 URL 的预设使用官方默认完整地址。仅当用户主动修改并保存完整 Endpoint 或点击“恢复官方默认值”时才写入相应新字段。单纯升级、切换、编辑 Model／Key、保存其他字段不得悄悄将旧 `base_url` 转换为新 Endpoint，也不得删除旧 `base_url`。用户仍可修改内置 URL，保存后按用户指定地址运行。
+- **AUD-R2-01（AUD-M02 剩余问题：首次创建和历史 URL 判定）：** 基线 `ConfigManager._get_default_config()` 自带 `base_url`，且 `_load_config()` 在没有配置文件时会将默认配置写盘；因此**仅靠磁盘对象存在 `base_url`，不能区分新安装与旧用户**。必须利用现有 `_load_config()` 的两个入口区分：① **首次创建配置文件（`_read_raw()` 为 `None`）**时，创建的新默认 Provider 对象直接包含经核实的完整 `chat_endpoint`，以及确实支持模型枚举时的完整 `models_endpoint`；这两个字段是新安装的正式默认值，不依赖旧 `base_url` 拼接算法。可为兼容而保留原 `base_url`，但显式 Endpoint 优先。② **加载已有配置文件**时，旧 Provider 原始对象若只有 `base_url` 而没有 `chat_endpoint`，Chat 仍按该 Provider 的基线旧路径算法执行；与新预设同 key（例如 `deepseek`）也不能被新默认值覆盖。③ 已有文件中某 Provider 从未配置、原始对象不存在时，可按新预设的默认完整 Endpoint 初始化该 Provider；不得将现有用户对象误认为新建。
+- **Chat／Models 分别判定：** 对每个具体 Provider，从**磁盘原始字段**（不是 `_deep_merge_dicts()` 之后的内存默认字段）判断：显式 `chat_endpoint` 优先于 `base_url` 的旧 Chat 路由；显式 `models_endpoint` 优先于 `base_url` 的旧 Models 路由。**已有 `base_url` 但没有显式 `models_endpoint` 时，Refresh 继续走该 Provider 基线的旧模型列表路径，即使 Chat Endpoint 已被单独编辑**；没有模型列表能力时仍按 §2.4 提示手工输入。首次创建的新默认对象才直接使用已核实的完整 Models Endpoint。
+- **仅在用户真实改动后写入新字段：** 在 UI 显示根据旧 `base_url` 计算出的 Chat／Models 完整地址，只是展示，不代表用户已选择迁移；用户不修改 URL 而仅改 Model、Key、Temperature、切换 Provider、保存其他设置，都不得回写显示值为 `chat_endpoint`／`models_endpoint`，也不得修改或删除旧 `base_url`。用户**实际编辑并保存**某个完整 Endpoint，或明确点击对应“恢复官方默认值”时，才写入该 Endpoint 字段；Chat 和 Models 分别处理，不能因修改一个而静默写入另一个。用户修改内置 URL 后，后续请求使用保存的目标地址。**不增加**配置版本号、历史迁移表、覆盖层或独立 CAS。
 - 请求仍采用现有 `requests` 等 HTTP 客户端及其正常 TLS 证书验证；允许用户明确配置自己的本地 HTTP 服务。不新增 IP 固定、DNS 检查、风险确认流程。**不得在日志输出 API Key**。
 - Endpoint 只做必要的输入检查（例如 http/https、host、非空 Chat URL），错误清晰提示；请求超时、连接失败和协议不兼容明确报告，不重试到另一个 Provider。
 - 对 OpenAI-compatible 的 Chat 请求保持现有 `messages`、`model`、`temperature`、`stream=false` 等结构。**AUD-M01：Reasoning 控件及 `reasoning_by_model` 的请求参数映射按实际预设能力启用；不得把基线 llama.cpp/OpenAI 风格 `reasoning_effort` 无差别发送给所有平台。** 未验证支持的额外参数不发送，默认不新增额外 effort 字段；Vision 同样按已证实的接口能力决定，旧 Ollama 图像调用保持原样。
@@ -158,7 +160,7 @@
 | 领域 | 必须满足的行为 | 建议的最小验证 |
 | --- | --- | --- |
 | 内置 13 个预设 | 官方 URL 为可编辑默认值；Anthropic/Gemini 走官方兼容接口、Ollama 原生；Reasoning 按平台能力发送 | 预设路由／认证头／Body／编辑并保存 URL 的 Mock 测试 |
-| 旧 Provider | 同 key 的旧 `base_url` 仍走基线算法；显式 `chat_endpoint` 才覆盖；无关字段保存不改旧路由 | 原始磁盘 JSON／默认字段合并／旧代理地址／显式切换官方地址测试 |
+| 新安装／旧 Provider | 首次创建新配置直接写入官方完整 Chat/Models Endpoint；已有对象的旧 `base_url` 仍走 Chat/Models 各自基线路由；显式修改一个 Endpoint 不隐式改另一个；无关保存不迁移旧 URL | 无配置文件首次创建、已存在旧文件、新版新增 Provider、旧代理路由、Chat-only 修改后的 Refresh、显示但未修改的 URL 不写回测试 |
 | Custom 多实例 | New 草稿、Save 落盘、Cancel 放弃、重名拒绝、切换保存失败恢复原选择与草稿 | ConfigManager 与简单 UI Stub 测试 |
 | Custom URL | 完整 Chat 不自动拼路径；Models 为空可手动 Model；失败不清空 Model | Mock HTTP |
 | 本地预设 | llama.cpp、vLLM 用正确的兼容路径；Ollama 保持原生路径 | Factory／Mock 请求 |
@@ -184,7 +186,8 @@
 
 - [ ] 13 个内置预设和旧 Provider 分组均可选；内置 URL 可修改并保存，官方只是默认值；既有选择不被重置。
 - [ ] 多个 Custom 的 URL、Key、Model 互不混淆，保存／改名／删除行为正确。
-- [ ] 旧 `text.<key>` 不自动迁移、不删除、不出现覆盖层；同 key 的旧 `base_url` 路由不受默认值合并影响。
+- [ ] 首次创建新配置直接使用官方完整 Endpoint；旧 `text.<key>` 不自动迁移、不删除、不出现覆盖层；同 key 的旧 `base_url` 路由不受默认值合并影响，旧 Models Refresh 也保持原路径。
+- [ ] UI 仅显示历史 URL 推导出的完整地址不算用户修改；手动编辑 Chat/Models 分别保存，不把未修改的另一条 Endpoint 自动写入。
 - [ ] 不生成 `provider_v2`、`legacy_overrides`、`effective_generation`、跨进程锁或自建 HTTP 客户端。
 - [ ] 仅使用已有 HTTP 客户端请求正确地址，失败不自动换 Provider；不打印 API Key。
 - [ ] Anthropic、Gemini 走官方 OpenAI-compatible 接口，Ollama 仍走原生；Reasoning 不对不支持的平台乱发。
