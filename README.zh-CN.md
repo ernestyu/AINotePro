@@ -79,8 +79,6 @@ Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中
 
 ## Audio 使用方法
 
-Audio V2 为开发候选版本，尚未通过完整 Anki 实机验收。
-
 1. 选择 **Audio**，在 **Generate using** 选择 **Edge-TTS** 或 **Kokoro MLX (Local)**。Kokoro 需要自行启动本地 Gradio 服务，默认地址 `http://127.0.0.1:7860`；不可用时使用 Retry。
 2. 配置最多三个 Voice 区块。Kokoro 提供美式/英式口音、Female/Male、Voice 和速度（0.70–1.30 倍）；Edge 提供语言、Speed 和 Volume 调节，界面已移除原有 Pitch 控件。每条笔记从完整启用的 Voice 区块中等概率选择一个。
 3. Speed、Volume 滑杆两端用 **Qt 绘制的左/右箭头按钮**调节，每次调整 1%。Kokoro 不支持的 Volume 控件仍保持原有禁用规则。
@@ -88,7 +86,7 @@ Audio V2 为开发候选版本，尚未通过完整 Anki 实机验收。
 5. 选择现有 Audio Profile 即立即加载其设置。有未保存更改时，切换会要求 Save / Discard / Cancel；Save 保存的是此前 Profile。新名称可用 Save 创建，Delete 只删除 Profile，不删除音频文件。Generate 可以使用未保存设置，不会自动保存 Profile。
 6. 预览使用 Qt Multimedia 和临时 MP3；语音在后台合成，Anki 媒体注册与集合写入由 UI 线程处理。
 
-Kokoro HTTP 适配器采用标准库请求，等待队列 120 秒、处理与下载 300 秒、总计 420 秒的时间限制；对实际 Gradio 服务的兼容性仍需要在 Mac mini 上验证。生成后的音频一旦同步到 Anki 媒体库，移动端播放不需要连接原 TTS 服务。
+Kokoro HTTP 适配器采用标准库请求，等待队列 120 秒、处理与下载 300 秒、总计 420 秒的时间限制。生成后的音频一旦同步到 Anki 媒体库，移动端播放不需要连接原 TTS 服务。
 
 ## 隐私
 
