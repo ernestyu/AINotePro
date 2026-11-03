@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import ast
 import io
 import json
 import tempfile
@@ -10,6 +11,7 @@ import sys
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 # The add-on bundles requests at runtime; isolated unit tests do not install it.
@@ -88,6 +90,98 @@ class TextProviderMinimalTests(unittest.TestCase):
         with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
             self.assertEqual(OpenAITextProvider("deepseek").list_models(config), [])
         self.assertEqual(get.call_args.args[0], "https://models.example/list")
+
+    def test_old_cloud_base_url_keeps_refresh_enabled_and_uses_legacy_models_route(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        methods = [next(node for node in tab.body if isinstance(node, ast.FunctionDef) and node.name == name)
+                   for name in ("_apply_provider_capabilities", "_refresh_models")]
+        warnings = []
+        namespace = {"Optional": Optional, "REASONING_EFFORT_PROVIDERS": {"openai"},
+                     "create_provider": create_provider, "showWarning": lambda message: warnings.append(message)}
+        module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[], body=methods,
+                                                decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<text tab>", "exec"), namespace)
+
+        class Field:
+            def __init__(self): self.enabled = None
+            def setEnabled(self, value): self.enabled = value
+            def isEnabled(self): return bool(self.enabled)
+            def setToolTip(self, _value): pass
+            def setChecked(self, _value): pass
+        class Model:
+            def currentText(self): return "old"
+            def clear(self): pass
+            def addItems(self, _items): pass
+            def findText(self, _text): return -1
+            def setCurrentIndex(self, _index): pass
+            def setEditText(self, _text): pass
+        class Config:
+            def get_provider_config(self, *_args): return {"base_url": "https://proxy.example/api"}
+        class Tab(namespace["Tab"]):
+            def __init__(self):
+                self.cfg = Config(); self.reasoning_combo = Field(); self.refresh_button = Field(); self.image_checkbox = Field()
+                self.model_combo = Model(); self.saved = 0
+            def _service_map(self): return "deepseek"
+            def _model_selection_changed(self): return True
+            def _current_provider_config(self): return {"provider_key": "deepseek", "base_url": "https://proxy.example/api"}
+            def _save_current_provider_config(self): self.saved += 1; return True
+
+        instance = Tab()
+        instance._apply_provider_capabilities("deepseek")
+        self.assertTrue(instance.refresh_button.enabled)
+        with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
+            instance._refresh_models()
+        self.assertEqual(get.call_args.args[0], "https://proxy.example/api/v1/models")
+        self.assertNotIn("This provider has no Models Endpoint", warnings)
+
+    def test_old_cloud_base_url_refresh_does_not_write_endpoint_fields(self):
+        defaults = manager._get_default_config()
+        raw = {"text": {"provider": "deepseek", "deepseek": {
+                    "base_url": "https://proxy.example/api", "api_key": "keep", "model": "old", "temperature": 0.7}},
+               "audio": migrate_audio(defaults["audio"])}
+        Path(manager.CONFIG_FILE).write_text(json.dumps(raw), encoding="utf-8")
+        config = manager.ConfigManager().get_provider_config("text", "deepseek")
+        self.assertNotIn("models_endpoint", config)
+        with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
+            self.assertEqual(OpenAITextProvider("deepseek").list_models(config), [])
+        self.assertEqual(get.call_args.args[0], "https://proxy.example/api/v1/models")
+        saved = self.raw()["text"]["deepseek"]
+        self.assertNotIn("chat_endpoint", saved)
+        self.assertNotIn("models_endpoint", saved)
+
+    def test_provider_busy_state_also_controls_main_restore_button(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "_set_provider_controls_busy")
+        module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[], body=[method], decorator_list=[])],
+                                type_ignores=[])
+        namespace = {}
+        exec(compile(ast.fix_missing_locations(module), "<busy controls>", "exec"), namespace)
+
+        class Widget:
+            def __init__(self): self.enabled = None
+            def setEnabled(self, value): self.enabled = value
+        class Window:
+            def __init__(self): self.generate_button = Widget(); self.restore_llm_button = Widget()
+        class Tab(namespace["Tab"]):
+            def __init__(self):
+                for name in ("service_combo", "base_url_edit", "api_key_edit", "model_combo", "temperature_edit",
+                             "reasoning_combo", "refresh_button", "test_button"):
+                    setattr(self, name, Widget())
+                self.parent = Window(); self.capabilities = 0
+            def window(self): return self.parent
+            def _apply_provider_capabilities(self): self.capabilities += 1
+
+        instance = Tab()
+        instance._set_provider_controls_busy(True)
+        self.assertFalse(instance.parent.restore_llm_button.enabled)
+        instance._set_provider_controls_busy(False)
+        self.assertTrue(instance.parent.restore_llm_button.enabled)
+        self.assertEqual(instance.capabilities, 1)
 
     def test_local_llama_and_vllm_use_same_server_for_chat_and_refresh(self):
         for key in ("llama_cpp", "vllm"):

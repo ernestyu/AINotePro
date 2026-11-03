@@ -1408,8 +1408,13 @@ class TextTab(QWidget):
         """Restore per-provider UI restrictions after load or a batch finishes."""
         pv = provider_key or self._active_provider or self._service_map()
         local = pv in {"llama_cpp", "vllm", "ollama"}
-        models_url = self.cfg.get_provider_config("text", pv).get("models_endpoint", "") if pv else ""
-        models_ready = local or bool(models_url)
+        provider_cfg = self.cfg.get_provider_config("text", pv) if pv else {}
+        # An old configuration with only base_url deliberately has no
+        # models_endpoint key.  It still uses the historical /v1/models route;
+        # an explicitly stored empty endpoint instead means manual Model only.
+        has_models_endpoint = "models_endpoint" in provider_cfg
+        models_ready = (local or bool(provider_cfg.get("models_endpoint"))
+                        or (not has_models_endpoint and bool(provider_cfg.get("base_url"))))
         self.reasoning_combo.setEnabled(pv in REASONING_EFFORT_PROVIDERS)
         self.refresh_button.setEnabled(models_ready)
         self.refresh_button.setToolTip("This provider has no model list; type a model manually." if not models_ready else "")
@@ -1425,7 +1430,9 @@ class TextTab(QWidget):
         if not pv:
             showWarning("Select a provider before refreshing models."); return
         print(f"[AINotePro] Refresh models clicked. service={pv}")
-        if (pv not in {"ollama", "llama_cpp", "vllm"} and not cfg.get("models_endpoint")):
+        if (pv not in {"ollama", "llama_cpp", "vllm"}
+                and (("models_endpoint" in cfg and not cfg["models_endpoint"])
+                     or ("models_endpoint" not in cfg and not cfg.get("base_url")))):
             showWarning("This provider has no Models Endpoint. Enter the model manually or provide one.")
             return
         provider = create_provider(st, pv, cfg)
@@ -1876,6 +1883,9 @@ class TextTab(QWidget):
         generate = getattr(self.window(), "generate_button", None)
         if generate is not None:
             generate.setEnabled(not busy)
+        restore = getattr(self.window(), "restore_llm_button", None)
+        if restore is not None:
+            restore.setEnabled(not busy)
         if not busy:
             self._apply_provider_capabilities()
 
