@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import sys
 import types
+from typing import Any, Dict, Optional
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +69,98 @@ class TextProviderMinimalTests(unittest.TestCase):
         self.assertNotIn("chat_endpoint", saved)
         self.assertNotIn("models_endpoint", saved)
 
+    def test_legacy_models_refresh_uses_base_url_without_persisting_endpoint(self):
+        defaults = manager._get_default_config()
+        raw = {"text": {"provider": "deepseek", "deepseek": {
+                    "base_url": "https://proxy.example/api", "api_key": "old", "model": "old", "temperature": 0.7}},
+               "audio": migrate_audio(defaults["audio"])}
+        Path(manager.CONFIG_FILE).write_text(json.dumps(raw), encoding="utf-8")
+        config = manager.ConfigManager().get_provider_config("text", "deepseek")
+        with patch("ainotepro.services.text.openai_text.requests.get", return_value=_Response({"data": []})) as get:
+            self.assertEqual(OpenAITextProvider("deepseek").list_models(config), [])
+        self.assertEqual(get.call_args.args[0], "https://proxy.example/api/v1/models")
+        saved = json.loads(Path(manager.CONFIG_FILE).read_text())["text"]["deepseek"]
+        self.assertNotIn("models_endpoint", saved)
+
+    def test_explicit_blank_models_endpoint_does_not_fall_back_to_legacy_path(self):
+        config = manager.ConfigManager().get_provider_config("text", "anthropic")
+        self.assertIn("models_endpoint", config)
+        self.assertEqual(config["models_endpoint"], "")
+        with self.assertRaisesRegex(ValueError, "no Models Endpoint"):
+            OpenAITextProvider("anthropic").list_models(config)
+
+    def test_previous_provider_identity_controls_switch_save_shape(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        current = next(node for node in tab.body if isinstance(node, ast.FunctionDef) and node.name == "_current_provider_config")
+        namespace = {"Optional": Optional, "Dict": Dict, "Any": Any}
+        module = ast.Module(body=[ast.ClassDef(name="Current", bases=[], keywords=[], body=[current], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<current provider config>", "exec"), namespace)
+
+        class Text:
+            def __init__(self, value): self.value = value
+            def text(self): return self.value
+            def currentText(self): return self.value
+            def currentData(self): return "default"
+
+        class Tab(namespace["Current"]):
+            def _service_map(self): return "ollama"  # combo has already changed
+            def _temperature_value(self): return 0.7
+
+        tab = Tab()
+        tab.model_combo = Text("old-model")
+        tab.reasoning_combo = Text("default")
+        tab.api_key_edit = Text("old-key")
+        tab.base_url_edit = Text("https://proxy.example/api/v1/chat/completions")
+        tab.models_endpoint_edit = Text("https://proxy.example/api/v1/models")
+        tab._reasoning_by_model = {}
+        tab._legacy_base_url = "https://proxy.example/api"
+        tab._stored_chat_endpoint = tab._stored_models_endpoint = ""
+        tab._shown_chat_endpoint = "https://proxy.example/api/v1/chat/completions"
+        tab._shown_models_endpoint = "https://proxy.example/api/v1/models"
+        tab._has_explicit_models_endpoint = False
+        saved = tab._current_provider_config("deepseek")
+        self.assertEqual(saved["provider_key"], "deepseek")
+        self.assertEqual(saved["base_url"], "https://proxy.example/api")
+        self.assertNotIn("chat_endpoint", saved)
+        self.assertNotIn("models_endpoint", saved)
+
+    def test_custom_dirty_comparison_uses_previous_custom_identity(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        methods = [next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == name)
+                   for name in ("_current_provider_config", "_custom_unsaved")]
+        namespace = {"Optional": Optional, "Dict": Dict, "Any": Any}
+        module = ast.Module(body=[ast.ClassDef(name="CustomState", bases=[], keywords=[], body=methods, decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<custom state>", "exec"), namespace)
+
+        class Text:
+            def __init__(self, value): self.value = value
+            def text(self): return self.value
+            def currentText(self): return self.value
+            def currentData(self): return "default"
+        class Config:
+            def get_provider_config(self, _service, key):
+                self.last_key = key
+                return {"chat_endpoint": "http://custom.test/chat", "models_endpoint": "",
+                        "api_key": "k", "model": "m", "temperature": 0.7,
+                        "reasoning_by_model": {"m": "default"}}
+        class Tab(namespace["CustomState"]):
+            def _service_map(self): return "openai"  # combo now points at the new provider
+            def _temperature_value(self): return 0.7
+
+        tab = Tab()
+        tab.model_combo = Text("m"); tab.reasoning_combo = Text("default"); tab.api_key_edit = Text("k")
+        tab.base_url_edit = Text("http://custom.test/chat"); tab.models_endpoint_edit = Text("")
+        tab._reasoning_by_model = {}; tab._legacy_base_url = ""; tab._stored_chat_endpoint = "http://custom.test/chat"
+        tab._shown_chat_endpoint = "http://custom.test/chat"; tab._shown_models_endpoint = ""
+        tab._has_explicit_models_endpoint = True; tab._custom_is_new = False
+        tab.cfg = Config()
+        self.assertFalse(tab._custom_unsaved("custom:one"))
+        self.assertEqual(tab.cfg.last_key, "custom:one")
+
     def test_custom_providers_are_independent_and_do_not_replace_text_config(self):
         cfg = manager.ConfigManager()
         cfg.save_custom_provider("one", {"name": "Home", "chat_endpoint": "http://a/chat",
@@ -76,6 +169,8 @@ class TextProviderMinimalTests(unittest.TestCase):
                                            "models_endpoint": "http://b/models", "api_key": "b", "model": "m2", "temperature": 0.2})
         self.assertEqual(cfg.get_provider_config("text", "custom:one")["api_key"], "a")
         self.assertEqual(cfg.get_provider_config("text", "custom:two")["chat_endpoint"], "http://b/chat")
+        cfg.set_active_provider("text", "custom:two")
+        self.assertEqual(json.loads(Path(manager.CONFIG_FILE).read_text())["text"]["provider"], "custom:two")
         cfg.delete_custom_provider("one")
         self.assertNotIn("one", cfg.get_custom_providers())
         self.assertIn("two", cfg.get_custom_providers())

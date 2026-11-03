@@ -253,6 +253,12 @@ class ConfigManager:
                 text["provider"] = ""
         self._replace_raw(update)
 
+    def set_active_provider(self, service_type, provider_name):
+        """Persist a selection without rewriting that provider's settings."""
+        def update(raw):
+            raw.setdefault(service_type, {})["provider"] = provider_name
+        self._replace_raw(update)
+
     def _replace_raw(self, mutator, expected_revision=None, expected_audio_revision=None):
         with _CONFIG_LOCK:
             current = self._read_raw()

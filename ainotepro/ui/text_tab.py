@@ -325,6 +325,7 @@ class TextTab(QWidget):
         self._shown_models_endpoint = ""
         self._stored_chat_endpoint = ""
         self._stored_models_endpoint = ""
+        self._has_explicit_models_endpoint = False
         self._legacy_base_url = ""
         self._custom_draft_id: Optional[str] = None
         self._custom_draft_name = ""
@@ -1307,11 +1308,14 @@ class TextTab(QWidget):
         parsed = urlparse(value.strip())
         return parsed.scheme in ("http", "https") and bool(parsed.netloc)
 
-    def _current_provider_config(self) -> Dict[str, Any]:
+    def _current_provider_config(self, provider_key: Optional[str] = None) -> Dict[str, Any]:
         model = self.model_combo.currentText().strip()
         if model:
             self._reasoning_by_model[model] = self.reasoning_combo.currentData() or "default"
-        key = self._service_map()
+        # During a combo change the widget already exposes the new ID while
+        # its editors still hold the previous provider's values.  Callers that
+        # save or compare that previous form must pass its stable ID.
+        key = provider_key if provider_key is not None else self._service_map()
         displayed_chat = self.base_url_edit.text().strip()
         displayed_models = self.models_endpoint_edit.text().strip()
         config = {
@@ -1331,7 +1335,8 @@ class TextTab(QWidget):
             config["models_endpoint"] = displayed_models
         elif self._stored_chat_endpoint or displayed_chat != self._shown_chat_endpoint:
             config["chat_endpoint"] = displayed_chat
-        if not key.startswith("custom:") and (self._stored_models_endpoint or displayed_models != self._shown_models_endpoint):
+        if (not key.startswith("custom:") and
+                (self._has_explicit_models_endpoint or displayed_models != self._shown_models_endpoint)):
             config["models_endpoint"] = displayed_models
         return config
 
@@ -1346,7 +1351,7 @@ class TextTab(QWidget):
         pv = provider_key or self._active_provider or self._service_map()
         if not pv or pv.startswith("custom:"):
             return True
-        config = self._current_provider_config()
+        config = self._current_provider_config(provider_key=pv)
         config.pop("provider_key", None)
         try:
             if self.cfg.set_provider_config("text", pv, config):
@@ -1384,12 +1389,12 @@ class TextTab(QWidget):
         if not pv:
             showWarning("The selected provider no longer exists.")
             return
-        if previous and previous.startswith("custom:") and previous != pv and self._custom_unsaved():
+        if previous and previous.startswith("custom:") and previous != pv and self._custom_unsaved(previous):
             answer = QMessageBox.question(self, "Unsaved Custom Provider",
                 "Save changes to this Custom Provider before switching?",
                 QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel)
-            if answer == QMessageBox.StandardButton.Save and not self._save_custom_provider():
+            if answer == QMessageBox.StandardButton.Save and not self._save_custom_provider(previous):
                 self._restore_provider_selection(previous); return
             if answer == QMessageBox.StandardButton.Cancel:
                 self._restore_provider_selection(previous); return
@@ -1403,16 +1408,19 @@ class TextTab(QWidget):
             self._legacy_base_url = str(cfg.get("base_url", ""))
             self._stored_chat_endpoint = str(cfg.get("chat_endpoint", ""))
             self._stored_models_endpoint = str(cfg.get("models_endpoint", ""))
+            self._has_explicit_models_endpoint = "models_endpoint" in cfg
             if pv == "ollama":
                 shown_chat = self._legacy_base_url
             elif pv.startswith("custom:"):
                 shown_chat = self._stored_chat_endpoint
             else:
                 shown_chat = self._stored_chat_endpoint or self._legacy_chat_endpoint(self._legacy_base_url)
-            shown_models = (self._stored_models_endpoint if pv.startswith("custom:")
-                            else self._stored_models_endpoint or self._legacy_models_endpoint(self._legacy_base_url))
-            if pv in PROVIDER_PRESETS and not self._stored_models_endpoint and not self._legacy_base_url:
-                shown_models = PROVIDER_PRESETS[pv][3]
+            if pv == "ollama":
+                shown_models = ""
+            elif pv.startswith("custom:") or self._has_explicit_models_endpoint:
+                shown_models = self._stored_models_endpoint
+            else:
+                shown_models = self._legacy_models_endpoint(self._legacy_base_url)
             self._shown_chat_endpoint, self._shown_models_endpoint = shown_chat, shown_models
             self.base_url_edit.setText(shown_chat)
             self.models_endpoint_edit.setText(shown_models)
@@ -1434,6 +1442,8 @@ class TextTab(QWidget):
             self.reasoning_combo.setEnabled(pv != "ollama")
             self.endpoint_label.setText("<b>Server Address:</b>" if pv == "ollama" else "<b>Chat Endpoint:</b>")
             self.models_endpoint_edit.setEnabled(pv != "ollama")
+            self.models_endpoint_edit.setPlaceholderText(
+                "Ollama uses native /api/tags" if pv == "ollama" else "Optional full URL for Refresh")
             self.refresh_button.setEnabled(pv == "ollama" or bool(shown_models))
             self.refresh_button.setToolTip("Enter a Models Endpoint or type a model manually." if not shown_models and pv != "ollama" else "")
             self.restore_endpoints_button.setVisible(pv in PROVIDER_PRESETS)
@@ -1450,9 +1460,18 @@ class TextTab(QWidget):
         finally:
             self._loading_provider = False
         if previous is not None and previous != pv and not pv.startswith("custom:"):
-            if not self._save_current_provider_config():
+            if not self._save_current_provider_config(provider_key=pv):
                 self._restore_provider_selection(previous)
                 self._active_provider = None
+                self._populate_provider_cfg()
+                return
+        try:
+            self.cfg.set_active_provider("text", pv)
+        except Exception as exc:
+            showWarning(f"Could not select Text provider: {exc}")
+            self._restore_provider_selection(previous or "")
+            self._active_provider = None
+            if previous:
                 self._populate_provider_cfg()
 
     @staticmethod
@@ -1475,17 +1494,21 @@ class TextTab(QWidget):
         finally:
             self._provider_switching = False
 
-    def _custom_unsaved(self) -> bool:
-        if not self._active_provider or not self._active_provider.startswith("custom:"):
+    def _custom_unsaved(self, provider_key: Optional[str] = None) -> bool:
+        provider_key = provider_key or self._active_provider
+        if not provider_key or not provider_key.startswith("custom:"):
             return False
         if self._custom_is_new: return True
-        saved = self.cfg.get_provider_config("text", self._active_provider)
-        return any(self._current_provider_config().get(key, "") != saved.get(key, "")
+        saved = self.cfg.get_provider_config("text", provider_key)
+        return any(self._current_provider_config(provider_key).get(key, "") != saved.get(key, "")
                    for key in ("chat_endpoint", "models_endpoint", "api_key", "model", "temperature", "reasoning_by_model"))
 
     def _new_custom_provider(self) -> None:
         if self._custom_unsaved():
             showWarning("Save or Cancel the current Custom Provider before creating another."); return
+        if self._active_provider and not self._active_provider.startswith("custom:"):
+            if not self._save_current_provider_config(provider_key=self._active_provider):
+                return
         name, ok = QInputDialog.getText(self, "New Custom Provider", "Name:")
         if not ok: return
         name = name.strip()
@@ -1502,6 +1525,7 @@ class TextTab(QWidget):
         try:
             self._legacy_base_url = self._shown_chat_endpoint = self._shown_models_endpoint = ""
             self._stored_chat_endpoint = self._stored_models_endpoint = ""
+            self._has_explicit_models_endpoint = False
             self.base_url_edit.clear(); self.models_endpoint_edit.clear(); self.api_key_edit.clear()
             self.model_combo.setEditText(""); self.temperature_edit.setText("0.70")
         finally:
@@ -1510,10 +1534,10 @@ class TextTab(QWidget):
         self.custom_new_button.setVisible(False)
         self.endpoint_label.setText("<b>Chat Endpoint:</b>")
 
-    def _save_custom_provider(self) -> bool:
-        custom_id = self._custom_draft_id
+    def _save_custom_provider(self, provider_key: Optional[str] = None) -> bool:
+        custom_id = (provider_key or self._custom_draft_id or "").split(":", 1)[-1]
         if not custom_id: return False
-        cfg = self._current_provider_config()
+        cfg = self._current_provider_config(f"custom:{custom_id}")
         if not self._valid_endpoint(cfg.get("chat_endpoint", ""), required=True):
             showWarning("Custom Chat Endpoint must be a complete http(s) URL."); return False
         old = self.cfg.get_custom_providers().get(custom_id, {})
@@ -1587,7 +1611,8 @@ class TextTab(QWidget):
         if not pv:
             showWarning("Select a provider before refreshing models."); return
         print(f"[AINotePro] Refresh models clicked. service={pv}")
-        if pv != "ollama" and not cfg.get("models_endpoint"):
+        if (pv != "ollama" and not cfg.get("models_endpoint")
+                and (self._has_explicit_models_endpoint or not cfg.get("base_url"))):
             showWarning("This provider has no Models Endpoint. Enter the model manually or provide one.")
             return
         provider = create_provider(st, pv, cfg)
