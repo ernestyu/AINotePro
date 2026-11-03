@@ -98,8 +98,8 @@ class TextProviderMinimalTests(unittest.TestCase):
         methods = [next(node for node in tab.body if isinstance(node, ast.FunctionDef) and node.name == name)
                    for name in ("_apply_provider_capabilities", "_refresh_models")]
         warnings = []
-        namespace = {"Optional": Optional, "REASONING_EFFORT_PROVIDERS": {"openai"},
-                     "create_provider": create_provider, "showWarning": lambda message: warnings.append(message)}
+        namespace = {"Optional": Optional, "create_provider": create_provider,
+                     "showWarning": lambda message: warnings.append(message)}
         module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[], body=methods,
                                                 decorator_list=[])], type_ignores=[])
         exec(compile(ast.fix_missing_locations(module), "<text tab>", "exec"), namespace)
@@ -129,7 +129,9 @@ class TextProviderMinimalTests(unittest.TestCase):
             def _save_current_provider_config(self): self.saved += 1; return True
 
         instance = Tab()
-        instance._apply_provider_capabilities("deepseek")
+        for provider_key in PROVIDER_PRESETS:
+            instance._apply_provider_capabilities(provider_key)
+            self.assertTrue(instance.reasoning_combo.enabled)
         self.assertTrue(instance.refresh_button.enabled)
         with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
             instance._refresh_models()
@@ -205,6 +207,34 @@ class TextProviderMinimalTests(unittest.TestCase):
         self.assertEqual(get.call_args.args[0], "http://remote-ollama:11434/api/tags")
         self.assertEqual(post.call_args.args[0], "http://remote-ollama:11434/api/chat")
 
+    def test_reasoning_is_sent_for_openai_compatible_ninfer_and_default_is_omitted(self):
+        provider = OpenAITextProvider("deepseek")
+        config = {"provider_key": "deepseek", "chat_endpoint": "http://ninfer.example:8099/v1/chat/completions",
+                  "model": "qwen3.8-27b-ninfer", "reasoning_by_model": {"qwen3.8-27b-ninfer": "off"}}
+        response = Response({"choices": [{"message": {"content": "ok"}}]})
+        for mode, expected in (("off", "none"), ("low", "low"), ("medium", "medium"), ("high", "high")):
+            with patch("ainotepro.services.text.openai_text.requests.post", return_value=response) as post:
+                provider.generate("p", {**config, "reasoning_by_model": {"qwen3.8-27b-ninfer": mode}})
+            self.assertEqual(post.call_args.kwargs["json"]["reasoning_effort"], expected)
+        with patch("ainotepro.services.text.openai_text.requests.post", return_value=response) as post:
+            provider.generate("p", {**config, "reasoning_by_model": {"qwen3.8-27b-ninfer": "default"}})
+        self.assertNotIn("reasoning_effort", post.call_args.kwargs["json"])
+
+    def test_ollama_reasoning_uses_native_think_option(self):
+        provider = OllamaTextProvider()
+        response = Response({"message": {"content": "ok"}})
+        config = {"base_url": "http://ollama.example", "model": "m", "debug_logging": True,
+                  "reasoning_by_model": {"m": "off"}}
+        out = io.StringIO()
+        with redirect_stdout(out), patch("ainotepro.services.text.ollama_text.requests.post", return_value=response) as post:
+            provider.generate("p", config)
+        self.assertIs(post.call_args.kwargs["json"]["think"], False)
+        self.assertIn("temperature=0.7", out.getvalue())
+        self.assertIn("reasoning=think=False", out.getvalue())
+        with patch("ainotepro.services.text.ollama_text.requests.post", return_value=response) as post:
+            provider.generate("p", {**config, "reasoning_by_model": {"m": "default"}})
+        self.assertNotIn("think", post.call_args.kwargs["json"])
+
     def test_restore_cloud_and_local_scope(self):
         cfg = manager.ConfigManager()
         cfg.set_provider_config("text", "deepseek", {"api_key": "keep", "chat_endpoint": "https://private/chat",
@@ -249,6 +279,15 @@ class TextProviderMinimalTests(unittest.TestCase):
         self.assertNotIn("SECRET", out.getvalue())
         self.assertIn("input_tokens=2", out.getvalue())
         self.assertIn("response-processed", out.getvalue())
+        self.assertIn("temperature=0.7", out.getvalue())
+        self.assertIn("reasoning=server_default", out.getvalue())
+        self.assertIn("max_tokens='server_default'", out.getvalue())
+        self.assertIn("stream=False", out.getvalue())
+
+    def test_text_source_uses_full_temperature_label(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        self.assertIn('QLabel("<b>Temperature:</b>")', source)
+        self.assertNotIn('QLabel("<b>Temp:</b>")', source)
 
     def test_failure_logs_redact_query_for_openai_and_ollama(self):
         secret_url = "https://api.example/chat?token=SECRET"

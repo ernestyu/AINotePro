@@ -65,15 +65,17 @@ class OpenAITextProvider(TextProvider):
     def _apply_reasoning(body: Dict, config: Dict) -> None:
         choices = (config or {}).get("reasoning_by_model") or {}
         mode = choices.get(body.get("model", ""), "default") if isinstance(choices, dict) else "default"
-        from ...provider_presets import REASONING_EFFORT_PROVIDERS
-        effort = {"off": "none", "low": "low", "medium": "medium", "high": "xhigh"}.get(mode)
-        if effort is not None and (config or {}).get("provider_key", "") in REASONING_EFFORT_PROVIDERS:
+        # OpenAI-compatible endpoints (including a DeepSeek preset pointed at
+        # NInfer) receive the user's explicit override. Unsupported servers
+        # must report their own request error rather than silently dropping it.
+        effort = {"off": "none", "low": "low", "medium": "medium", "high": "high"}.get(mode)
+        if effort is not None:
             body["reasoning_effort"] = effort
 
     def _request(self, body: Dict, config: Dict, *, vision: bool = False) -> str:
         url = self._chat_endpoint(config)
         model = body["model"]
-        started, debug = request_started(self.name, model, "POST", url, config)
+        started, debug = request_started(self.name, model, "POST", url, config, body)
         response = None
         try:
             response = requests.post(url, json=body, headers=self._headers(config), timeout=90 if vision else 60)

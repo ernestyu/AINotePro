@@ -19,7 +19,7 @@ class OllamaTextProvider(TextProvider):
 
     def _request(self, url: str, body: Dict, config: Dict) -> str:
         model = body["model"]
-        started, debug = request_started("ollama", model, "POST", url, config)
+        started, debug = request_started("ollama", model, "POST", url, config, body)
         response = None
         try:
             response = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
@@ -37,7 +37,20 @@ class OllamaTextProvider(TextProvider):
         body = {"model": (config or {}).get("model") or "llama3",
                 "messages": [{"role": "user", "content": prompt}], "stream": False,
                 "options": {"temperature": (config or {}).get("temperature", 0.7)}}
+        self._apply_reasoning(body, config)
         return self._request(f"{self._base(config)}/api/chat", body, config)
+
+    @staticmethod
+    def _apply_reasoning(body: Dict, config: Dict) -> None:
+        choices = (config or {}).get("reasoning_by_model") or {}
+        mode = choices.get(body.get("model", ""), "default") if isinstance(choices, dict) else "default"
+        if mode == "off":
+            body["think"] = False
+        elif mode in {"low", "medium", "high"}:
+            # Ollama's native protocol exposes a boolean Think switch, not
+            # independently verifiable strength levels.
+            body["think"] = True
+            print("[AINotePro] Ollama native Think is enabled; exact Low/Medium/High strength is not guaranteed by this protocol.")
 
     def list_models(self, config: Dict) -> list[str]:
         url = f"{self._base(config)}/api/tags"
@@ -61,6 +74,7 @@ class OllamaTextProvider(TextProvider):
                     "messages": [{"role": "user", "content": prompt,
                                   "images": [image_url.split(";base64,", 1)[1]]}],
                     "stream": False, "options": {"temperature": (config or {}).get("temperature", 0.7)}}
+            self._apply_reasoning(body, config)
             return self._request(f"{base}/api/chat", body, config)
 
         # Keep the historical OpenAI-compatible vision fallback for servers
@@ -72,7 +86,8 @@ class OllamaTextProvider(TextProvider):
                     {"type": "image_url", "image_url": {"url": image_url}},
                 ]}], "stream": False, "temperature": (config or {}).get("temperature", 0.7)}
         model = body["model"]
-        started, debug = request_started("ollama", model, "POST", url, config)
+        self._apply_reasoning(body, config)
+        started, debug = request_started("ollama", model, "POST", url, config, body)
         response = None
         try:
             response = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))

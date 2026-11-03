@@ -119,6 +119,13 @@ class Tab(ProfileMethods):
 
 
 class AudioProfileSwitchTests(unittest.TestCase):
+    def test_speed_and_volume_controls_use_visible_direction_arrows(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/tts_tab.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count('QPushButton("◀")'), 2)
+        self.assertEqual(source.count('QPushButton("▶")'), 2)
+        self.assertIn('Decrease Speed by 1%', source)
+        self.assertIn('Increase Volume by 1%', source)
+
     def setUp(self):
         MessageBox.response = Buttons.Cancel
         MessageBox.calls = 0

@@ -32,7 +32,8 @@ def safe_failure(exc: Exception) -> str:
     return f"{type(exc).__name__}" + (f" HTTP {status}" if status is not None else "")
 
 
-def request_started(provider: str, model: str, method: str, url: str, config: dict) -> tuple[float, bool]:
+def request_started(provider: str, model: str, method: str, url: str, config: dict,
+                    body: dict) -> tuple[float, bool]:
     started = time.perf_counter()
     debug = debug_enabled(config)
     stamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -40,6 +41,11 @@ def request_started(provider: str, model: str, method: str, url: str, config: di
           f"url={safe_url(url)} started_at={stamp}")
     if debug:
         print(f"[AINotePro] LLM debug request-dispatch t={started:.6f}")
+        temperature = body.get("temperature", (body.get("options") or {}).get("temperature", "server_default"))
+        reasoning = [(name, body[name]) for name in ("reasoning_effort", "thinking", "think") if name in body]
+        reasoning_text = ", ".join(f"{name}={value!r}" for name, value in reasoning) or "server_default"
+        print(f"[AINotePro] LLM debug request-body temperature={temperature!r} reasoning={reasoning_text} "
+              f"max_tokens={body.get('max_tokens', 'server_default')!r} stream={body.get('stream', 'server_default')!r}")
     return started, debug
 
 

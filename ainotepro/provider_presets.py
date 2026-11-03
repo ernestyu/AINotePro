@@ -19,11 +19,6 @@ PROVIDER_PRESETS = {
     "ollama": ("Ollama", "local", "http://127.0.0.1:11434", "", "llama3"),
 }
 
-# Only the established OpenAI-style endpoints and explicitly opted-in local
-# servers receive the existing reasoning_effort field.
-REASONING_EFFORT_PROVIDERS = {"openai", "gemini", "llama_cpp", "vllm"}
-
-
 def default_provider_config(key: str):
     label, _group, chat, models, model = PROVIDER_PRESETS[key]
     if key == "ollama":

@@ -58,6 +58,20 @@ class _Dialog(CloseMethods):
 
 
 class MainDialogCloseTests(unittest.TestCase):
+    def test_bottom_actions_keep_required_left_and_right_groups(self):
+        source = SOURCE
+        ordered = [
+            'bottom_layout.addWidget(bottom_label)',
+            'bottom_layout.addWidget(self.restore_llm_button)',
+            'bottom_layout.addWidget(self.help_button)',
+            'bottom_layout.addStretch()',
+            'bottom_layout.addWidget(self.close_button)',
+            'bottom_layout.addWidget(self.generate_button)',
+        ]
+        positions = [source.index(item) for item in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('QPushButton("Restore Default LLM Parameters")', source)
+
     def test_rejected_prompt_draft_leaves_task_and_other_close_checks_untouched(self):
         text, audio = _Text(can_close=False), _Audio()
         self.assertFalse(_Dialog(text, audio)._prepare_dialog_close())

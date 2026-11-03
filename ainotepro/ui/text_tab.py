@@ -19,7 +19,7 @@ from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
-from ..provider_presets import PROVIDER_PRESETS, REASONING_EFFORT_PROVIDERS
+from ..provider_presets import PROVIDER_PRESETS
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
@@ -409,7 +409,7 @@ class TextTab(QWidget):
         self.base_url_edit.editingFinished.connect(self._endpoint_edited)
         grid.addWidget(self.base_url_edit, 0, 3, 1, 3)
 
-        # Row 1: API Key + Temp
+        # Row 1: API Key + Temperature
         grid.addWidget(QLabel("<b>API Key:</b>"), 1, 0)
         self.api_key_edit = QLineEdit()
         try:
@@ -424,7 +424,7 @@ class TextTab(QWidget):
         api_row.addWidget(self.toggle_password_button, 0)
         api_wrap = QWidget(); api_wrap.setLayout(api_row)
         grid.addWidget(api_wrap, 1, 1, 1, 3)
-        grid.addWidget(QLabel("<b>Temp:</b>"), 1, 4)
+        grid.addWidget(QLabel("<b>Temperature:</b>"), 1, 4)
         self.temperature_edit = QLineEdit()
         self.temperature_edit.setText("0.70")
         self.temperature_edit.setFixedWidth(48)
@@ -447,9 +447,8 @@ class TextTab(QWidget):
         ):
             self.reasoning_combo.addItem(label, mode)
         self.reasoning_combo.setToolTip(
-            "Per-model reasoning preference. For llama.cpp: Off=none, "
-            "Low=low, Medium=medium, High=xhigh; Model Default sends no override. "
-            "Other servers may not support these parameters."
+            "Per-model reasoning preference. Model Default sends no override. "
+            "Unsupported server parameters are reported as request failures."
         )
         self.reasoning_combo.setCurrentIndex(self.reasoning_combo.findData("default"))
         model_row.addWidget(self.reasoning_combo)
@@ -1415,7 +1414,7 @@ class TextTab(QWidget):
         has_models_endpoint = "models_endpoint" in provider_cfg
         models_ready = (local or bool(provider_cfg.get("models_endpoint"))
                         or (not has_models_endpoint and bool(provider_cfg.get("base_url"))))
-        self.reasoning_combo.setEnabled(pv in REASONING_EFFORT_PROVIDERS)
+        self.reasoning_combo.setEnabled(True)
         self.refresh_button.setEnabled(models_ready)
         self.refresh_button.setToolTip("This provider has no model list; type a model manually." if not models_ready else "")
         self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})

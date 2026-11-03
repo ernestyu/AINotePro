@@ -48,18 +48,18 @@ class AiNoteProConfigDialog(QDialog):
         self.generate_button = QPushButton("Generate")
         self.close_button = QPushButton("Close")
         self.help_button = QPushButton("Help")
-        self.restore_llm_button = QPushButton("Restore Default LLM")
+        self.restore_llm_button = QPushButton("Restore Default LLM Parameters")
 
         self.generate_button.clicked.connect(self.on_generate)
         self.close_button.clicked.connect(self._on_close)
         self.help_button.clicked.connect(self.on_help)
         self.restore_llm_button.clicked.connect(self._restore_default_llm)
 
+        bottom_layout.addWidget(self.restore_llm_button)
+        bottom_layout.addWidget(self.help_button)
         bottom_layout.addStretch()
-        # Keep the action order stable across platform-specific button-box
-        # layouts: Help → Restore Default LLM → Close → Generate.
-        for button in (self.help_button, self.restore_llm_button, self.close_button, self.generate_button):
-            bottom_layout.addWidget(button)
+        bottom_layout.addWidget(self.close_button)
+        bottom_layout.addWidget(self.generate_button)
         main_layout.addLayout(bottom_layout)
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
