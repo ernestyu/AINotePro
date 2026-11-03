@@ -47,6 +47,18 @@ class AdvancedTextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Note 2"):
             preflight_requests(records, ["Text"], ["Out"], "{Text} {OUT:Out} translate", ["Text", "Out"])
 
+    def test_preflight_accepts_more_than_100_valid_notes(self):
+        records = [
+            {"note_id": i, "note_type_id": 9, "field_names": ["Text", "Out"],
+             "raw_values": {"Text": f"example {i}", "Out": ""}}
+            for i in range(1, 152)
+        ]
+        parsed, snapshots = preflight_requests(
+            records, ["Text"], ["Out"], "{Text} {OUT:Out} translate", ["Text", "Out"])
+        self.assertEqual(len(snapshots), 151)
+        self.assertEqual(snapshots[0].note_id, 1)
+        self.assertEqual(snapshots[-1].note_id, 151)
+
     def test_snapshot_compares_raw_values_and_full_definition(self):
         snapshot = build_snapshot(1, 3, ["Text", "Out"], {"Text": "A<br>B", "Out": ""}, ["Text"], ["Out"])
         self.assertEqual(snapshot.input_values, {"Text": "A\nB"})
