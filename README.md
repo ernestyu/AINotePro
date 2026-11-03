@@ -1,18 +1,20 @@
 # AINotePro
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 AINotePro is an Anki add-on for adding AI-generated text and audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
 ## Features
 
-- Generate text from a source field and write the result to a destination field.
+- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields with strict JSON output).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, delete, import, and export prompt templates.
 - Use the 13 built-in chat providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
-- Refresh available models when the provider exposes a models endpoint.
-- Remember the last provider settings and the last model that generated successfully.
+- Refresh available models when the provider exposes a models endpoint. Chat Endpoint remains editable; model discovery uses its own built-in endpoint or the local server address.
+- Remember settings and model selections for each provider, including per-model Reasoning preferences. All 13 providers expose the Reasoning selector; **Model Default** sends no reasoning override.
 - Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
 - Audio V2 development candidate: Edge TTS plus optional local Kokoro MLX (English only); three independent voice blocks, uniform per-note random selection, named Audio Profiles, asynchronous synthesis, conservative Skip/Replace and Anki media references. **Not yet verified in Anki.**
-- Process one selected note or multiple selected notes from the Browser.
+- Process one selected note or multiple selected notes from the Browser; Advanced has no arbitrary 100-note batch cap (preflight validation still applies).
 
 ## Requirements
 
@@ -45,7 +47,7 @@ The AnkiWeb code will be available after the add-on is published.
 1. Open the Browse window and select one or more notes.
 2. Open `AINotePro > Add Context to selected Field...`, or click the AINotePro editor toolbar button.
 3. Choose the `Text` tab.
-4. Select a provider, enter its Base URL and API key, and choose or type a model name.
+4. Select a provider, edit **Chat Endpoint** (cloud) or **Server Address** (local) as needed, enter an API key if required, and choose or type a model name.
 5. Write a prompt. Use `{Source Field}` where the selected source field content should be inserted.
 6. Choose the source and destination fields.
 7. Click `Generate`.
@@ -63,7 +65,8 @@ field names.
 
 Advanced never runs Image Recognition or OCR. It converts existing readable
 field HTML to text, rejects empty or media-only sources for the whole batch,
-and asks before replacing non-empty targets. Easy prompts, OCR behavior, and
+and asks before replacing non-empty targets. There is no fixed 100-note limit;
+all selected notes still undergo the same batch-wide preflight before requests. Easy prompts, OCR behavior, and
 saved Easy prompts remain separate from Advanced prompts. Literal prompt braces
 must be escaped as `{{` and `}}`.
 
@@ -74,7 +77,7 @@ For Audio V2 (development candidate; no Anki integration testing has been perfor
 3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge retains its original language, volume and pitch options. A different complete enabled block is chosen uniformly for each note.
 4. Choose Source/Destination fields. The default policy is Skip if any sound tag already exists. `Replace managed audio only` requires a matching local provenance record and exact media hash.
 5. At the bottom of the Audio page, select an existing Profile to load its complete settings immediately. If the current Profile was edited, switching offers `Save` (save the **previous** Profile), `Discard` or `Cancel`. Type a new name and click `Save` to create a Profile; `Save` with an existing name updates that Profile. `Delete` removes a saved Profile, not Anki media. There is no `Load`, New or Save As button. Generation does not save Profile edits.
-6. Click `Generate` with either saved or unsaved Audio settings. Generating never saves a Profile. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file; Qt Multimedia availability in the user's Anki build remains unverified.
+6. Use the visible left/right arrow buttons beside each Speed/Volume slider to adjust by 1% (the buttons use Qt-drawn icons rather than font symbols). Click `Generate` with either saved or unsaved Audio settings. Generating never saves a Profile. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file; Qt Multimedia availability in the user's Anki build remains unverified.
 
 The Kokoro adapter currently uses Python standard-library HTTP with queue (120 s), processing + download (300 s), and overall (420 s) deadlines, not `gradio_client`. **This alternate transport has not been validated against the user's actual Gradio or Anki Python runtime.** The user explicitly requested no tests and no CI in this development pass; it must be verified on the Mac mini before release. The static-audit remediation candidate includes conservative undo-failure stop and commit-state reconciliation; Anki's actual undo API semantics remain unverified. No remote service is started or required for mobile Anki playback once media sync completes.
 
@@ -88,9 +91,13 @@ The built-in **Default** is protected from Save, Delete and Import overwrites. Y
 
 ## Provider Notes
 
-AINotePro uses OpenAI-compatible HTTP requests for most text providers. A provider entry is a convenience preset for Base URL and default model; it does not guarantee that every account, region, or server exposes the same model list.
+AINotePro uses OpenAI-compatible HTTP requests for most text providers. A provider entry is a convenience preset for **Chat Endpoint**, model discovery and default model; it does not guarantee that every account, region or server exposes the same model list. In Text, the **Temperature** field is next to API Key, and the footer places the GitHub link, **Restore Default LLM Parameters**, and Help on the left; Close and Generate remain on the right. Restore affects only the selected Text provider and preserves its API key (and the current local server address).
 
-Common Base URL examples:
+**Reasoning:** Off, Low, Medium, High, and Model Default are selectable for every built-in provider, with preferences saved per model. **Model Default** sends no reasoning control field and uses the server default. Explicit selections send `reasoning_effort` on OpenAI-compatible Chat endpoints (Off = `none`, Low/Medium/High = `low`/`medium`/`high`); whether the backend honors it depends on its API and model. For native Ollama, Off sends `think: false` and Low/Medium/High send `think: true` without a guaranteed strength difference. Unsupported values can fail on some services; use Model Default when you do not need a manual override. A custom OpenAI-compatible NInfer server can be used through an editable Chat Endpoint even when a cloud preset is selected.
+
+**Diagnostics:** Set `AINOTEPRO_DEBUG=1` or enable the existing debug setting to print the actual outgoing Temperature, reasoning override (or `server_default`), output-token limit (or `server_default`) and streaming flag. Request timing and token usage are logged when available. The logger does not print prompts, response bodies or API keys; server execution of a setting cannot be inferred from the request log alone.
+
+Provider URL examples (the UI edits **Chat Endpoint**, not these base URLs, for cloud providers):
 
 | Provider | Default Base URL | Default Model |
 | --- | --- | --- |
@@ -108,7 +115,7 @@ Common Base URL examples:
 | vLLM | `http://127.0.0.1:8000` | user-defined |
 | Ollama | `http://localhost:11434` | `llama3` |
 
-If `Refresh` returns no models, type the model name manually. Many OpenAI-compatible servers do not provide a complete `/models` response.
+If `Refresh` returns no models, type the model name manually. The Models Endpoint field is not user-editable in this UI; model refresh uses the provider's saved/built-in Models Endpoint, while llama.cpp and vLLM derive it from the current Server Address. Many OpenAI-compatible servers do not provide a complete `/models` response.
 
 ## Privacy
 
@@ -126,6 +133,8 @@ API keys and provider settings are stored locally in the add-on's `user_files/us
 - If model refresh fails, type the model name manually and use `Check`.
 - If audio is not appended, confirm that a voice is enabled and the destination field exists on the selected note type.
 - For local providers, confirm that the local server is running and reachable from Anki.
+- If Reasoning Off/Low/Medium/High fails or seems ineffective, check whether the exact server/model supports the transmitted control field, or select Model Default to omit the override. For a local NInfer OpenAI-compatible endpoint, Off sends `reasoning_effort: "none"`.
+- If Audio speed/volume buttons show blank glyphs in an older version, update the add-on to the revision with Qt-drawn left/right arrows and restart Anki.
 
 ## Support
 
