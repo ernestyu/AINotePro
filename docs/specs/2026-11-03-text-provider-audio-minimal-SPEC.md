@@ -1,6 +1,6 @@
 # AINotePro — Text Provider 与 Audio UI 最小改动 SPEC
 
-- **状态：DRAFT，供合同审计；尚未授权开发代码**
+- **状态：R1 定向修订，待独立复核；尚未授权开发代码**
 - **日期：2026-11-03**
 - **仓库：** `ernestyu/AINotePro`
 - **新开发分支：** `feat/text-provider-audio-minimal-20261103`
@@ -59,30 +59,31 @@
 
 ### 2.2 Custom 基本操作
 
-- 支持 New、Save/Edit、Rename、Delete、Cancel。每个 Custom 有不可变内部 ID（UUID 或等价随机唯一 ID）；名称可修改，修改名字不影响配置信息。
+- **AUD-m01：** 支持 New、Save/Edit、Rename、Delete、Cancel。每个 Custom 有稳定内部 ID；New 仅建立内存草稿，不持久化；Save 校验并写入该 Custom；Cancel 放弃未保存的新建或修改草稿。重命名不改变内部 ID。现有 Provider 的自动保存行为保持不变。
 - 不允许空名称或忽略大小写后的重复名称。删除前确认；删除当前 Custom 后要求重新选择 Provider，不悄悄发起请求或改用其他 Key。
-- 切换选项时，沿用现有 Text 配置保存习惯：成功保存当前配置再加载下一项；保存失败必须保留当前输入并显示错误。
+- **AUD-M03（切换）：** 现有 Provider 切换前保存操作须返回明确成功／失败；成功后才加载新选项，失败恢复原下拉选择并保留未保存输入。新建 Custom 草稿按 Save／Cancel 处理，不允许切换时静默写入半成品配置。
 - Custom 字段：`name`、`chat_endpoint`（完整 URL，必填）、`models_endpoint`（完整 URL，可空）、`api_key`（可空）、`model`（可手工输入）、`temperature`、`reasoning_by_model`（仅适用时）。
-- 内置官方 Endpoint 可以查看，但不得随意编辑；本地预设的 Server Address 可以编辑。Custom 的两个 Endpoint 可以直接编辑。
+- **用户决定：内置 Provider URL 允许修改，官方地址只是默认值。** 云端内置的完整 Chat Endpoint 与实际可用的 Models Endpoint 均可编辑、保存，支持用户主动恢复官方默认值；本地预设可编辑 Server Address；Custom 的 Chat／Models 完整 Endpoint 可编辑。用户修改后的完整 Endpoint 不得被程序悄悄恢复为官方地址。
 
 ### 2.3 Endpoint 与基本调用规则
 
 - **Custom：** 所填 Chat Endpoint 必须原样成为 POST 目标；不自动追加 `/v1` 或 `/chat/completions`。Models Endpoint 为空则禁用 Refresh，但允许手工输入模型并生成；填写后，Refresh 仅请求该完整地址。
-- **云端常用预设：** 代码中定义经核实的完整 Chat Endpoint 和（若确有兼容列表接口）Models Endpoint。没有可信 Models 接口的预设禁用 Refresh；不能凭猜测拼 URL。每个预设的 URL／认证格式需在开发时对照服务官方文档验证。
+- **云端常用预设：** 在代码中给出经核实的**默认**完整 Chat Endpoint 和可用的 Models Endpoint，均允许用户直接修改和保存。没有可信 Models 接口的预设默认禁用 Refresh，但用户可主动填入兼容的完整 Models URL；不得猜测或拼接未知路径。改动 Chat URL 时不能自动替换其他 URL。每个预设的默认接口／认证格式在开发时对照官方文档核实。
+- **AUD-M01（协议明确）：** OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope、Moonshot、Zhipu、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 仅使用各自经过验证的 OpenAI-compatible Chat Completions 接口；其中 **Anthropic 使用其 OpenAI SDK 兼容层**（非原生 Messages API），**Gemini 使用 Google 官方 OpenAI-compatible 接口**（非原生 generateContent API）。Ollama 保留已有原生 `/api/chat`、`/api/tags`。对兼容层需要的额外请求参数／认证头，仅在已有适配器增加必要的局部判断，不新建多协议框架。模型列表、Reasoning、Vision 的支持须按平台单独核实，不得因为兼容文本调用就自动启用这些能力。
 - **本地 llama.cpp、vLLM：** 用户配置 `http(s)://host:port` Server Address；预设按既有 OpenAI-compatible 协议使用 `/v1/chat/completions` 和（支持时）`/v1/models`。无需自建网络客户端。
 - **本地 Ollama：** 继续使用已有原生 `/api/chat`、`/api/tags`；不可仅为统一外观而切换到其他协议。
-- **旧 Provider：** 如果旧对象只有 `base_url`，**继续采用基线版本的旧 URL 计算行为**，不在升级时重写其 URL 或 Key。要使用新官方预设地址，应由用户明确选择／重置该预设的地址配置；不能因默认表变更静默替换用户原有路由。新安装默认配置可直接使用官方完整 Endpoint。实现需区分“旧文件中显式存在的 base_url”和“程序补齐的默认值”，不能让默认配置合并无意改变旧行为。
+- **AUD-M02（同 key 的旧配置／新预设优先级）：** 读取**磁盘原始对象**判定：① 若用户曾明确保存 `chat_endpoint`，则按此完整 URL 请求，不再拼接路径；仅当用户明确保存 `models_endpoint` 才优先使用该完整 Models URL。② 若原始对象只有 `base_url` 而无 `chat_endpoint`，则**保留基线的旧路径算法和原 Key／Model**，即使它与 13 个新预设同 key（例如旧 DeepSeek 代理）；不得从 `_deep_merge_dicts()` 合并后的内存字段误判原始字段来源。③ 新安装且没有历史 URL 的预设使用官方默认完整地址。仅当用户主动修改并保存完整 Endpoint 或点击“恢复官方默认值”时才写入相应新字段。单纯升级、切换、编辑 Model／Key、保存其他字段不得悄悄将旧 `base_url` 转换为新 Endpoint，也不得删除旧 `base_url`。用户仍可修改内置 URL，保存后按用户指定地址运行。
 - 请求仍采用现有 `requests` 等 HTTP 客户端及其正常 TLS 证书验证；允许用户明确配置自己的本地 HTTP 服务。不新增 IP 固定、DNS 检查、风险确认流程。**不得在日志输出 API Key**。
 - Endpoint 只做必要的输入检查（例如 http/https、host、非空 Chat URL），错误清晰提示；请求超时、连接失败和协议不兼容明确报告，不重试到另一个 Provider。
-- 对 OpenAI-compatible 的 Chat 请求保持现有 `messages`、`model`、`temperature`、`stream=false` 等结构。Reasoning 仅在后端已知支持时发送相应参数；没有选择时保留原有默认行为。
+- 对 OpenAI-compatible 的 Chat 请求保持现有 `messages`、`model`、`temperature`、`stream=false` 等结构。**AUD-M01：Reasoning 控件及 `reasoning_by_model` 的请求参数映射按实际预设能力启用；不得把基线 llama.cpp/OpenAI 风格 `reasoning_effort` 无差别发送给所有平台。** 未验证支持的额外参数不发送，默认不新增额外 effort 字段；Vision 同样按已证实的接口能力决定，旧 Ollama 图像调用保持原样。
 - 只有已经确认支持兼容图像消息的预设才能提供 Image Recognition；Custom 默认不承诺 Vision。保留旧 Ollama 的已有图像路径，不重写 OCR 功能。
 
 ### 2.4 Model、Check 与 Generate
 
-- Refresh 成功后更新模型候选，但保留用户原先手工输入的 Model；刷新失败不擦掉 Model。接口未提供时提示手动输入。
+- **AUD-m02：** Refresh 成功后更新候选但保留已输入的 Model；无 Models Endpoint 时提示手工输入。基线 `list_models()` 会吞掉异常并返回 `[]`，本次只在直接关联的模型刷新路径改为区分真实空列表、认证失败、超时、网络失败与非兼容响应；失败不得擦除 Model，也不得引入新的统一异常框架。
 - Check 使用当前选择的 Provider 和当前表单内容，不因先前选择缓存而使用错误的 URL／Key。
-- Easy 和 Advanced 在每次开始生成时获取**一次普通配置副本**，供当前批次使用；不需要持久代际或指纹。
-- 生成期间遵循原有 UI 取消流程。取消后即使已发送的网络调用稍后返回，**已有取消标记仍阻止其结果再写入笔记**。如果在任务运行时不允许改 Provider/Model，可暂时禁用相关控件直到任务结束或取消，这比增加跨窗口配置状态系统更简单。
+- **AUD-M03（快照）：** Easy 和 Advanced 启动时只保存一次当前 Provider 身份及普通配置副本，用于该批次。批次完成回调不得用后来界面的 Provider/Model/Key 配置覆盖原批次对应配置；若本来就不必保存参数，完成回调可不再保存。无须新增持久代际或指纹。
+- **AUD-M03（运行期）：** Easy 和 Advanced 生成过程中禁用 Provider 下拉、Custom 管理、Chat/Models URL、API Key、Model、Temperature、Reasoning 和重复 Generate，直到网络任务结束／取消回调安全收尾后才恢复。沿用基线已有的取消标记；取消后网络请求即使稍后返回，也不得再写入笔记。Check／Refresh 若局部异步，结果只应用于发起时的 Provider，不得覆盖后来选中的 Model；禁止新增跨窗口或持久任务框架。
 - 保留原有 Advanced 的整批预检、JSON 严格输出、`preserve_output=True`、按笔记写入及 Undo；不得让新 Provider 路由改变这些规则。
 - 不要求为 Check/Refresh/Generate 新建统一异步框架。现有后台任务继续复用；若旧 Check/Refresh 同步网络调用阻塞 UI，只在相关按钮调用处做必要的局部异步处理，禁止扩展成全局任务系统。
 
@@ -93,7 +94,7 @@
 **原始数据仍然是唯一真实配置。**
 
 - 保留用户原有的 `text.provider` 和 `text.<old_key>`，包括 API Key、Base URL、Model、Temperature、Reasoning 和未知字段。
-- **升级安装不得自动重写、删除或转换**任何旧 Provider 对象，也不创建 `legacy_overrides`。旧 Provider 继续从 `text.<old_key>` 读取；用户主动编辑旧 Provider 时仍直接写回同一个对象。
+- **升级安装不得自动重写、删除或转换**任何旧 Provider 对象，也不创建 `legacy_overrides`。旧 Provider 继续从 `text.<old_key>` 读取；用户主动编辑旧 Provider 时仍直接写回同一个对象。对于与新预设同 key 的旧对象，原始 `base_url` 也继续有效，除非用户主动保存显式完整 Endpoint；参见 §2.3 AUD-M02。
 - 现有 Text Prompt、Advanced Prompt、Audio Profile、媒体及 Undo 数据完全不参与本轮 Provider 迁移。
 - 首次启动不需要为旧数据另建迁移备份层；现有保存机制按原样工作。发布前可建议用户自行备份 Anki Profile，但插件不增加专门的数据迁移引擎。
 
@@ -131,7 +132,7 @@
 ### 4.1 Pitch
 
 - 三个 Voice 区块移除 Pitch 滑块及标题；不显示 Pitch 控件。
-- 历史 Audio Profile 的 Pitch 字段原样保留；用户改 Speed/Volume 或保存 Profile 时不得顺带删除、归零或更改存储的 Pitch。
+- **AUD-m04：** 历史 Audio Profile 的 Pitch 字段原样保留；用户改 Speed/Volume 或保存 Profile 时不得顺带删除、归零或更改存储的 Pitch。删除 UI 后，`_capture()` 不再读取 `block["pitch"]`，`_apply_draft()` 不再设置已不存在的 Pitch 控件；仅在 Preview／Generate 的临时执行配置副本中设 Pitch=0。
 - 运行时 Edge-TTS 的 Preview 和 Generate 传给现有适配器的 Pitch 均为 **0**。对缺少 Pitch 的旧 Profile 也按运行时 0 处理。仅在执行时生成临时参数副本，**不改写保存的 Profile**。
 - 不改 Audio Profile `schema_version=2`。验证逻辑仅放宽“Pitch 可以缺失”，有历史 Pitch 时仍按原范围验证。Edge 生成方法只需小范围兼容处理，不改 TTS 服务实现。
 
@@ -146,7 +147,7 @@
 ### 4.3 Kokoro 历史浮点值不变
 
 - 旧 Profile 中例如 `speed=1.005`，进入界面后只做百分比显示，**只要用户未操作该 Voice 的 Speed，保存其他参数不能将原值改成 1.00 或 1.01**。
-- 只有用户真实操作了该 Voice 的 Speed，才按显示百分点更新速度；对每个 Voice 独立记录是否改动，不需要新的 Profile Schema。
+- **AUD-m03：** 只有用户真实操作该 Voice 的 Speed，才按显示百分点更新速度；每个 Voice 分别保存是否真实修改的内存标记。Profile 加载、重建、刷新与程序设置滑块不得设置修改标记；加载另一 Profile 时重置标记，未修改 Voice 保持旧浮点原值，不需要新的 Profile Schema。
 - 对 `0.995`、`1.005`、`0.705`、`1.295` 和临近上下限的值，保证显示不越界、没有操作时保存完全不变、按钮操作后合法。
 - 保留 Preview、后台合成、媒体写入、Audio 随机 Voice 选择、Undo 及现有 Kokoro Gradio 接口和 loopback 限制；不扩大修改范围。
 
@@ -156,16 +157,16 @@
 
 | 领域 | 必须满足的行为 | 建议的最小验证 |
 | --- | --- | --- |
-| 内置 13 个预设 | 能从 UI 选取；各自正确指向已验证协议／完整 Endpoint | 预设映射与请求构造单测 |
-| 旧 Provider | Together 等能继续使用旧配置；升级不改变旧原始键值及 URL 路由 | 旧 JSON 加载、保存前后比较 |
-| Custom 多实例 | 创建两套不同配置，切换不串 Key/Model，改名不丢配置，删除需确认 | ConfigManager 纯 Python 单测 |
+| 内置 13 个预设 | 官方 URL 为可编辑默认值；Anthropic/Gemini 走官方兼容接口、Ollama 原生；Reasoning 按平台能力发送 | 预设路由／认证头／Body／编辑并保存 URL 的 Mock 测试 |
+| 旧 Provider | 同 key 的旧 `base_url` 仍走基线算法；显式 `chat_endpoint` 才覆盖；无关字段保存不改旧路由 | 原始磁盘 JSON／默认字段合并／旧代理地址／显式切换官方地址测试 |
+| Custom 多实例 | New 草稿、Save 落盘、Cancel 放弃、重名拒绝、切换保存失败恢复原选择与草稿 | ConfigManager 与简单 UI Stub 测试 |
 | Custom URL | 完整 Chat 不自动拼路径；Models 为空可手动 Model；失败不清空 Model | Mock HTTP |
 | 本地预设 | llama.cpp、vLLM 用正确的兼容路径；Ollama 保持原生路径 | Factory／Mock 请求 |
-| Check 与 Refresh | 使用当前表单；错误提示可理解；必要时不阻塞 UI | Stub／Mock |
-| Easy／Advanced | 取消后不再写入新结果；Advanced JSON、`preserve_output`、Undo 不回归 | 现有离线测试及少量针对性测试 |
-| Audio Pitch | UI 不显示；历史字段不变；生成时为 0 | Profile、适配器单测 |
+| Check 与 Refresh | 使用当前表单；区分空模型列表和错误，异步结果不覆盖后来选择的 Provider/Model | Stub／Mock |
+| Easy／Advanced | 启动快照不串 Key/URL；运行中禁用参数；取消后不写；完成回调不保存后来 UI 配置；Advanced JSON／Undo 不变 | 现有离线回归和必要 UI Stub 测试 |
+| Audio Pitch | `_capture`／`_apply_draft` 不再引用 Pitch 控件；历史数据不变；Preview/Generate 临时 Pitch=0 | Profile、适配器单测 |
 | Audio Speed／Volume | 范围、±1%、边界、标签同步 | 数值逻辑单测 |
-| Kokoro 精度 | 浮点历史值未操作保存不变，实际调整后数值合法 | 参数化数值测试 |
+| Kokoro 精度 | 三 Voice 用户操作标记独立；程序加载不置 dirty；未操作历史浮点数不变 | 0.995／1.005／0.705／1.295 参数化测试 |
 
 **测试职责：** Codex 仅执行必要的 Python 语法／单元／Mock 测试和已有可运行回归测试；**不得启动 Anki、安装插件、改用户 Profile 或宣称已通过 Anki 实机测试**。Anki 的 UI、TTS Preview、制卡生成、媒体与 Undo 由用户最后验证。
 
@@ -181,14 +182,15 @@
 
 ## 7. 最小实现检查清单（供 Codex 自检）
 
-- [ ] 13 个内置预设和旧 Provider 分组均可选，既有选择不被重置。
+- [ ] 13 个内置预设和旧 Provider 分组均可选；内置 URL 可修改并保存，官方只是默认值；既有选择不被重置。
 - [ ] 多个 Custom 的 URL、Key、Model 互不混淆，保存／改名／删除行为正确。
-- [ ] 旧 `text.<key>` 不自动迁移、不删除、不出现覆盖层，旧请求路由保持兼容。
+- [ ] 旧 `text.<key>` 不自动迁移、不删除、不出现覆盖层；同 key 的旧 `base_url` 路由不受默认值合并影响。
 - [ ] 不生成 `provider_v2`、`legacy_overrides`、`effective_generation`、跨进程锁或自建 HTTP 客户端。
 - [ ] 仅使用已有 HTTP 客户端请求正确地址，失败不自动换 Provider；不打印 API Key。
-- [ ] Check、Refresh、Easy、Advanced 和原有 OCR 路径一致使用正确 Provider。
+- [ ] Anthropic、Gemini 走官方 OpenAI-compatible 接口，Ollama 仍走原生；Reasoning 不对不支持的平台乱发。
+- [ ] Check、Refresh、Easy、Advanced 和原有 OCR 路径一致使用正确 Provider；切换失败保留草稿、运行中禁用关键编辑。
 - [ ] 生成取消后不继续写笔记，保留已有 Advanced 严格 JSON 和 Undo。
 - [ ] Audio 三 Voice 不显示 Pitch，保存原 Pitch，执行 Pitch=0。
 - [ ] Edge Speed/Volume 和 Kokoro Speed 的百分比、±1%、边界正确。
-- [ ] Kokoro 未操作 Speed 时，历史浮点值不变；Audio 其他既有功能不变。
+- [ ] Kokoro 三 Voice 未操作 Speed 时历史浮点值不变；Audio 已删除的 Pitch 控件不再被访问；其他既有功能不变。
 - [ ] 只做离线必要测试，不做 Anki 实机测试，完成后 Push 并提交实际证据。
