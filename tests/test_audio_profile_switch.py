@@ -119,10 +119,16 @@ class Tab(ProfileMethods):
 
 
 class AudioProfileSwitchTests(unittest.TestCase):
-    def test_speed_and_volume_controls_use_visible_direction_arrows(self):
+    def test_speed_and_volume_controls_use_qt_drawn_direction_arrows(self):
         source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/tts_tab.py").read_text(encoding="utf-8")
-        self.assertEqual(source.count('QPushButton("◀")'), 2)
-        self.assertEqual(source.count('QPushButton("▶")'), 2)
+        for name, direction in (("speed_minus", "SP_ArrowLeft"),
+                                ("speed_plus", "SP_ArrowRight"),
+                                ("volume_minus", "SP_ArrowLeft"),
+                                ("volume_plus", "SP_ArrowRight")):
+            self.assertIn(f"{name}.setIcon(self.style().standardIcon(QStyle.StandardPixmap.{direction}))", source)
+            self.assertIn(f"{name}.clicked.connect(", source)
+        self.assertNotIn('QPushButton("◀")', source)
+        self.assertNotIn('QPushButton("▶")', source)
         self.assertIn('Decrease Speed by 1%', source)
         self.assertIn('Increase Volume by 1%', source)
 
