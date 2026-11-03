@@ -1,32 +1,31 @@
-# AINotePro - AnkiWeb Description Draft
+# AINotePro — AnkiWeb Description Draft
 
-AINotePro adds AI-assisted text and audio generation tools to Anki's Browse window and editor.
+[English](ANKIWEB_DESCRIPTION.md) | [简体中文](ANKIWEB_DESCRIPTION.zh-CN.md)
 
-## What it does
+AINotePro adds AI-assisted text and audio generation to Anki's Browse window and editor.
 
-- Generate new text from a selected source field and write it into a destination field.
-- Save and reuse prompt templates with `{Source Field}` placeholders.
-- Use 13 built-in providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
-- Remember the last successful model so you do not need to refresh the model list every time.
-- Send source-field Anki media images as Base64 image inputs to a vision-capable model for OCR-style workflows.
-- Generate MP3 audio with Edge TTS and append `[sound:...]` references to the selected field.
-- Process one note or multiple selected notes.
+## Features
+
+- **Text Easy:** Generate text from one source field into one destination field, with reusable prompts and optional vision/OCR input.
+- **Text Advanced:** Use multiple source and destination fields, explicit `{OUT:Field Name}` declarations and strict JSON results. All selected notes undergo batch-wide preflight; there is no arbitrary 100-note limit.
+- Save, reuse, import and export prompt templates. The built-in Default prompt is protected.
+- Use 13 built-in text providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM and Ollama. Cloud Chat Endpoints and local Server Addresses remain editable.
+- Set **Temperature** and per-model **Reasoning** (Off / Low / Medium / High / Model Default) for all 13 presets. Model Default sends no reasoning override; explicit choices depend on the model server's API support. Native Ollama has a Think on/off control without guaranteed intensity levels.
+- Refresh available models where supported, or enter a model manually. The Models Endpoint remains an internal setting; the UI does not expose a separate endpoint editor.
+- Generate MP3 audio with Edge TTS or optional local Kokoro MLX. Audio V2 provides up to three independent Voice blocks, named Profiles, background synthesis, and Speed/Volume sliders with Qt-drawn left/right adjustment arrows.
+- Generate for one or multiple selected notes; apply conservative note/media write rules.
 
 ## Requirements
 
-- Tested with Anki 26.05.
-- Remote providers require network access and, where applicable, your own API key.
-- Local providers such as Ollama, llama.cpp, or vLLM must be running separately.
-- Image OCR requires an endpoint that truly supports image input. For privacy and security, AINotePro supports Anki media images and `data:image/...;base64,...` images only; remote image URLs are not fetched or forwarded.
+- Anki 26.05 or newer is the development target; current Audio V2 has not completed Anki/macOS runtime acceptance.
+- Hosted providers require network access and, where applicable, your own API key.
+- Local servers such as Ollama, llama.cpp, vLLM, NInfer or Kokoro must run separately.
+- OCR requires an endpoint that actually supports image input. For privacy, supported sources are Anki media images and `data:image/...;base64,...`; remote image URLs are not fetched.
 
-## Privacy note
+## Privacy
 
-AINotePro sends selected note text to the provider you configure. If image source mode is enabled, images from the selected field may be encoded as Base64 and sent to that provider. The add-on refuses to read `file://` images outside Anki's media folder by default. Audio generation sends selected text to Edge TTS. Please review your provider's privacy policy before using the add-on with sensitive notes.
+AINotePro sends the selected source text and prompts to the chosen LLM service. If image input is enabled, eligible Anki media images may be encoded as Base64 and sent to that endpoint. Audio text is sent to Edge TTS or your configured local Kokoro service. Provider settings and API keys are stored locally. Review the applicable provider policy before processing sensitive notes.
 
 ## Support
 
-Report issues here:
-
-https://github.com/ernestyu/AINotePro/issues
-
-Please include your Anki version, operating system, provider, Base URL, model name, and the exact error message. Do not include API keys.
+Report issues at https://github.com/ernestyu/AINotePro/issues . Include your Anki version, operating system, provider, Chat Endpoint/Server Address, model and error message. **Do not include API keys or private note contents.**
