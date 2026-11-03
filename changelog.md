@@ -2,88 +2,21 @@
 
 [English](changelog.md) | [简体中文](changelog.zh-CN.md)
 
-## Text/Audio — Reasoning, diagnostics, UI, and batch-size corrections (2026-11-03; development branch)
+## v1.1.0 — Text and Audio upgrades (2026-11-03)
 
-- Text now offers Reasoning (Off / Low / Medium / High / Model Default) for **all 13 providers**. Per-model choices persist. Model Default omits the reasoning override; explicit OpenAI-compatible choices send `reasoning_effort` values `none/low/medium/high`, subject to server/model support. Native Ollama sends `think: false` for Off and `think: true` for Low/Medium/High, without claiming separate strength levels.
-- Added DEBUG request-body metadata: actual outgoing Temperature, reasoning control (or server default), output-token cap (or server default), and stream flag. HTTP timing and available usage counts remain; prompts, responses and credentials are not logged.
-- Renamed the Text label from Temp to **Temperature**. The footer now shows GitHub link → **Restore Default LLM Parameters** → Help on the left, with Close → Generate on the right. Restore remains scoped to the current Text provider and retains its API key and local server address.
-- Removed obsolete Legacy/Custom Text provider UI and its legacy configuration entries; retained 13 built-in providers and independent internal Chat/Models request routes. Existing Cloud `base_url`-only configurations keep their legacy refresh routing, and local llama.cpp/vLLM derive routes from the current server.
-- Advanced preflight no longer rejects batches merely because they exceed **100 notes**. All selected notes are still validated before sending requests; existing cancellation and write safeguards remain.
-- Replaced Audio Speed/Volume plus/minus text glyphs (including the attempted triangle symbols) with **Qt standard left/right arrow icons**; the original 1% adjustments and Profile handling remain.
-- Updated offline/mock regression tests. **Anki/macOS runtime behavior, including arrow visibility and live model behavior, has not been verified by these source changes.**
+### Text
 
+- **Updated LLM providers:** Refreshed the built-in provider presets and endpoint configuration, with 13 supported providers covering hosted and local models.
+- **Reasoning controls:** Added per-model reasoning settings (Off, Low, Medium, High, and Model Default). Model Default leaves reasoning behavior to the selected model service.
+- **Multiple inputs and outputs:** Added Advanced text generation with multiple source and destination fields, explicit output declarations, and validated JSON results.
 
-## Text - Explicit prompt actions and protected Default (2026-10-30)
+### Audio
 
-- Replaced the Text prompt controls with right-aligned New, Save, Save As and Delete. New starts an empty draft with a name; Save updates only the active saved prompt or creates the named draft; Save As always requires a new name.
-- Protected the existing Default prompt against UI saves, deletion and imports without resetting any legacy customization. Prompt selection checks for unsaved changes and offers Save / Discard / Cancel, except protected Default (Discard / Cancel).
-- Removed the unused Online prompt button and its obsolete documentation. Import and Export remain available.
+- **Updated Edge TTS:** Upgraded the bundled `edge-tts` library from **7.0.0 to 7.3.1**.
+- **Improved speed and volume controls:** Removed the Pitch slider from the Audio interface and improved Speed and Volume adjustments with sliders and step buttons.
+- **Local Kokoro TTS:** Added support for a separately deployed **Kokoro TTS** service, including a Kokoro MLX server running on **Mac mini M4**. AINotePro connects to the service; it does not install or run the TTS model itself.
 
-
-## Audio - Select Profile to load immediately (2026-10-30)
-
-- Selecting a saved Audio Profile now loads all settings immediately, matching Text prompt selection. Removed the redundant Load button; typing a name alone never loads a Profile.
-- Switching away from an edited Profile offers Save / Discard / Cancel. Save writes to the previous Profile by ID, never to the newly selected Profile; Cancel restores the previous selection and unchanged draft.
-- Persist last_profile_id before applying the target UI settings. If a concurrent Audio write prevents switching, retain the original draft and restore its selector. Manual Save and unsaved Generate remain unchanged.
-
-
-## Text - Per-model reasoning and persistent model selection (2026-10-29)
-
-- Added a compact Reasoning selector beside Model: Off, Low, Medium, High, Model Default. It stores the selection per model inside the chosen Text provider's config; existing models default to Model Default to preserve previous request behavior.
-- For OpenAI-compatible Chat Completions (including locally hosted llama.cpp), send `reasoning_effort` only for an explicit non-default choice: Off -> none, Low -> low, Medium -> medium, High -> xhigh. This applies to text and vision requests; backend/template support must be checked with Check. Native Ollama control is disabled until separately implemented.
-- Fixed the DeepSeek (and other Text providers) model reverting after reopen: a successful Refresh had saved the old model before the user chose a different entry. User model selection, manual entry, provider switching, Prompt Save, Check, Generate, and dialog Close/Esc/title-bar close now persist provider/model preferences.
-- Existing Prompt Save still saves the prompt itself; it also commits visible provider/model settings. No changes to Audio Profile persistence or existing Text prompts.
-- This commit was inspected statically; runtime Anki and live inference-endpoint tests have not been executed.
-
-## Audio V2 - Preserve active Profile during tab switching and reopen (2026-10-29)
-
-- Fixed a startup ordering defect: populating Source/Destination fields emitted change signals before the saved Audio Profile was applied. Those signals captured blank URL/Voice controls and uninitialized speed sliders into the in-memory draft, producing false unsaved-change prompts, failed Kokoro validation and apparent 0.70x speed resets.
-- Suppress UI-to-draft capture for the entire initial widget/field setup, then hydrate the last saved/loaded Profile before accepting user edits.
-- If a saved Audio configuration has no selected last_profile_id, display an existing saved Profile instead of an unrelated unsaved default.
-- Preserve the exact saved local Gradio URL (apart from surrounding whitespace), including a valid trailing slash, without marking a Profile dirty merely because it was loaded.
-- Kokoro's three new-Profile speed defaults remain 1.00x; previously saved speed values (including 0.70x) are deliberately not overwritten.
-- No runtime Anki test or CI executed in this change; verify tab switching, close/reopen, Save/Load and all three Voice speed values on Mac.
-
-## Audio V2 - Profile Save/Load field fix (2026-10-29)
-
-- Scope Audio Profile optimistic concurrency to the Audio JSON domain, not the whole shared config file: Text prompt/UI changes no longer invalidate Audio Save/Load.
-- Read the Audio snapshot and revision token together, preserving conflict protection when another Audio window really changed Profiles.
-- Preserve saved Voice IDs and Source/Destination field names when voice discovery is offline or note fields are unavailable, avoiding false unsaved-change prompts and silent config loss.
-- Kokoro Retry now probes the current URL input; trim a trailing root slash without allowing non-loopback endpoints.
-- **No tests or CI were run at the user's request. Save/Load and Gradio connectivity still require Anki field verification.**
-
-## Audio V2 - Compact Profile UI candidate (2026-10-29)
-
-- Removed the Audio tab's nested scroll area and tightened margins, row spacing, three Voice blocks and main dialog header/footer.
-- Moved Profile management below Source/Destination, directly above the dialog's Help/Close/Generate footer.
-- Replaced the Profile selector with an editable saved-name list; Save creates or updates by name, Load applies an existing name explicitly, Delete removes a saved name. Removed Save As and New controls.
-- Generate accepts valid unsaved settings without requiring a Profile save or load.
-- Preserve Audio V2's versioned Profile storage, three Voice behavior, and Anki media safety rules.
-- **Per user instruction, no tests or CI were run; layout and behavior require inspection in the user's Anki runtime.**
-
-
-## Audio V2 - Static audit remediation candidate (2026-10-29)
-
-- Addressed static audit P0-01: separated note persistence verification, undo merge and provenance outcomes; stop the batch on undo failure without misreporting a persisted note as uncommitted; mark indeterminate commits explicitly.
-- Addressed P1-01: staged queue (120s), synthesis + download (300s) and total (420s) Gradio deadlines, categorized download and validation errors. Raw HTTP protocol remains unverified on the user's Gradio.
-- Addressed P1-02: changed-leaf Text settings saves with conflict detection; Text prompt metadata writes use atomic shared config manager.
-- Addressed P1-03: defer dialog close until the active worker returns, then finalize statistics and cleanup.
-- Addressed P1-04: use Qt Multimedia completion/error events and close to manage Preview MP3 lifetime, not a fixed 120-second timer. Runtime availability unverified.
-- Addressed P1-05 and P1-06: reject enabled empty Edge Voice and reject the entire batch if any enabled Kokoro Voice is unavailable; never silently change random selection weights.
-- Addressed P2-01/P2-02/P2-03: explicit no-loaded-Profile selector state, transport error classification and Edge voice-list health gating.
-- **Per user instruction, no tests or CI were run; independent read-only static re-audit and Mac mini Anki field testing are still required.**
-
-## Audio V2 - Development candidate (2026-10-29, not release-tested)
-
-- Added English-only local Kokoro Gradio Provider and user-visible American/British, Female/Male voice labels with official quality metadata.
-- Added versioned Audio Profiles with migration, independent Provider settings and atomic file replacement.
-- Kept the three original Voice blocks, with complete per-note random Voice selection and per-block Preview.
-- Moved audio synthesis off the Qt UI thread; added cancellation gate, Anki media provenance and conservative Skip/Replace.
-- Disabled legacy direct audio-writing entry to prevent bypassing the V2 safety policy.
-- **Per user instruction, no tests or CI were run. Anki/Gradio runtime compatibility and release acceptance remain unverified.**
-
-
-## 1.0.0 - Initial AnkiWeb Release Candidate
+## v1.0.0 — Initial release
 
 - Added text generation for selected Anki notes.
 - Added OpenAI-compatible provider presets for OpenAI, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Together, Perplexity, Gemini-compatible endpoint, LM Studio, LocalAI, and Ollama.
