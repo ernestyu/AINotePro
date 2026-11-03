@@ -161,6 +161,94 @@ class TextProviderMinimalTests(unittest.TestCase):
         self.assertFalse(tab._custom_unsaved("custom:one"))
         self.assertEqual(tab.cfg.last_key, "custom:one")
 
+    def test_switch_save_does_not_rebuild_combo_back_to_old_custom(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == "_save_custom_provider")
+        namespace = {"Optional": Optional}
+        module = ast.Module(body=[ast.ClassDef(name="CustomSave", bases=[], keywords=[], body=[method], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<custom save>", "exec"), namespace)
+
+        class Config:
+            def get_custom_providers(self): return {"one": {"name": "Home"}}
+            def save_custom_provider(self, custom_id, config): self.saved = (custom_id, config)
+        class Tab(namespace["CustomSave"]):
+            def _current_provider_config(self, _key):
+                return {"chat_endpoint": "http://custom.test/chat", "models_endpoint": "", "api_key": "k",
+                        "model": "m", "temperature": 0.7, "reasoning_by_model": {}, "provider_key": _key}
+            def _valid_endpoint(self, *_args, **_kwargs): return True
+            def _rebuild_provider_combo(self, _selected): self.rebuilds += 1
+
+        tab = Tab()
+        tab.cfg = Config(); tab._custom_is_new = False; tab._custom_draft_name = ""
+        tab._stored_chat_endpoint = tab._stored_models_endpoint = ""; tab._shown_chat_endpoint = tab._shown_models_endpoint = ""
+        tab.rebuilds = 0
+        self.assertTrue(tab._save_custom_provider("custom:one", rebuild_combo=False))
+        self.assertEqual(tab.rebuilds, 0)
+        self.assertEqual(tab.cfg.saved[0], "one")
+
+    def test_custom_close_save_discard_cancel_have_explicit_results(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == "_confirm_leave_custom")
+
+        class Buttons:
+            Save, Discard, Cancel = 1, 2, 4
+        class Box:
+            StandardButton = Buttons
+            answer = Buttons.Cancel
+            @classmethod
+            def question(cls, *_args, **_kwargs): return cls.answer
+        namespace = {"QMessageBox": Box}
+        module = ast.Module(body=[ast.ClassDef(name="Close", bases=[], keywords=[], body=[method], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<custom close>", "exec"), namespace)
+
+        class Tab(namespace["Close"]):
+            def __init__(self, save=True):
+                self._active_provider = "custom:one"; self._custom_is_new = False; self.save = save; self.reloads = 0
+            def _custom_unsaved(self, _provider): return True
+            def _save_custom_provider(self, _provider): return self.save
+            def _populate_provider_cfg(self): self.reloads += 1
+
+        Box.answer = Buttons.Save
+        self.assertFalse(Tab(save=False)._confirm_leave_custom())
+        self.assertTrue(Tab(save=True)._confirm_leave_custom())
+        Box.answer = Buttons.Discard
+        tab = Tab(); self.assertTrue(tab._confirm_leave_custom()); self.assertEqual(tab.reloads, 1)
+        Box.answer = Buttons.Cancel
+        self.assertFalse(Tab()._confirm_leave_custom())
+
+    def test_provider_controls_reapply_capabilities_after_busy_finishes(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == "_set_provider_controls_busy")
+        namespace = {}
+        module = ast.Module(body=[ast.ClassDef(name="Busy", bases=[], keywords=[], body=[method], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<busy>", "exec"), namespace)
+
+        class Widget:
+            def __init__(self): self.enabled = None
+            def setEnabled(self, value): self.enabled = value
+        class Tab(namespace["Busy"]):
+            def __init__(self):
+                for name in ("service_combo", "base_url_edit", "models_endpoint_edit", "api_key_edit", "model_combo",
+                             "temperature_edit", "reasoning_combo", "refresh_button", "test_button", "custom_new_button",
+                             "custom_save_button", "custom_rename_button", "custom_delete_button", "custom_cancel_button",
+                             "restore_endpoints_button"):
+                    setattr(self, name, Widget())
+                self.capability_calls = 0
+            def window(self): return object()
+            def _apply_provider_capabilities(self): self.capability_calls += 1
+
+        tab = Tab()
+        tab._set_provider_controls_busy(True)
+        self.assertEqual(tab.capability_calls, 0)
+        tab._set_provider_controls_busy(False)
+        self.assertEqual(tab.capability_calls, 1)
+
     def test_custom_providers_are_independent_and_do_not_replace_text_config(self):
         cfg = manager.ConfigManager()
         cfg.save_custom_provider("one", {"name": "Home", "chat_endpoint": "http://a/chat",

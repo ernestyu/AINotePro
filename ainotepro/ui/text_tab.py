@@ -1394,7 +1394,7 @@ class TextTab(QWidget):
                 "Save changes to this Custom Provider before switching?",
                 QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
                 QMessageBox.StandardButton.Cancel)
-            if answer == QMessageBox.StandardButton.Save and not self._save_custom_provider(previous):
+            if answer == QMessageBox.StandardButton.Save and not self._save_custom_provider(previous, rebuild_combo=False):
                 self._restore_provider_selection(previous); return
             if answer == QMessageBox.StandardButton.Cancel:
                 self._restore_provider_selection(previous); return
@@ -1438,17 +1438,7 @@ class TextTab(QWidget):
             mode = self._reasoning_by_model.get(self._active_model, "default")
             index = self.reasoning_combo.findData(mode)
             self.reasoning_combo.setCurrentIndex(index if index >= 0 else self.reasoning_combo.findData("default"))
-            # Native Ollama reasoning parameters are a separate protocol.
-            self.reasoning_combo.setEnabled(pv != "ollama")
-            self.endpoint_label.setText("<b>Server Address:</b>" if pv == "ollama" else "<b>Chat Endpoint:</b>")
-            self.models_endpoint_edit.setEnabled(pv != "ollama")
-            self.models_endpoint_edit.setPlaceholderText(
-                "Ollama uses native /api/tags" if pv == "ollama" else "Optional full URL for Refresh")
-            self.refresh_button.setEnabled(pv == "ollama" or bool(shown_models))
-            self.refresh_button.setToolTip("Enter a Models Endpoint or type a model manually." if not shown_models and pv != "ollama" else "")
-            self.restore_endpoints_button.setVisible(pv in PROVIDER_PRESETS)
-            self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
-            if not self.image_checkbox.isEnabled(): self.image_checkbox.setChecked(False)
+            self._apply_provider_capabilities(pv)
             custom = pv.startswith("custom:")
             for button in (self.custom_save_button, self.custom_rename_button,
                            self.custom_delete_button, self.custom_cancel_button):
@@ -1534,7 +1524,7 @@ class TextTab(QWidget):
         self.custom_new_button.setVisible(False)
         self.endpoint_label.setText("<b>Chat Endpoint:</b>")
 
-    def _save_custom_provider(self, provider_key: Optional[str] = None) -> bool:
+    def _save_custom_provider(self, provider_key: Optional[str] = None, *, rebuild_combo: bool = True) -> bool:
         custom_id = (provider_key or self._custom_draft_id or "").split(":", 1)[-1]
         if not custom_id: return False
         cfg = self._current_provider_config(f"custom:{custom_id}")
@@ -1557,7 +1547,8 @@ class TextTab(QWidget):
             showWarning(f"Could not save Custom Provider: {exc}"); return False
         self._custom_is_new = False; self._stored_chat_endpoint = cfg["chat_endpoint"]; self._stored_models_endpoint = cfg.get("models_endpoint", "")
         self._shown_chat_endpoint, self._shown_models_endpoint = self._stored_chat_endpoint, self._stored_models_endpoint
-        self._rebuild_provider_combo(f"custom:{custom_id}")
+        if rebuild_combo:
+            self._rebuild_provider_combo(f"custom:{custom_id}")
         return True
 
     def _rename_custom_provider(self) -> None:
@@ -1602,6 +1593,23 @@ class TextTab(QWidget):
     def _endpoint_edited(self) -> None:
         if not self._loading_provider and not self._service_map().startswith("custom:"):
             self._save_current_provider_config()
+
+    def _apply_provider_capabilities(self, provider_key: Optional[str] = None) -> None:
+        """Restore per-provider UI restrictions after load or a batch finishes."""
+        pv = provider_key or self._active_provider or self._service_map()
+        ollama = pv == "ollama"
+        self.reasoning_combo.setEnabled(not ollama)
+        self.models_endpoint_edit.setEnabled(not ollama)
+        self.models_endpoint_edit.setPlaceholderText(
+            "Ollama uses native /api/tags" if ollama else "Optional full URL for Refresh")
+        self.refresh_button.setEnabled(ollama or bool(self._shown_models_endpoint))
+        self.refresh_button.setToolTip(
+            "Enter a Models Endpoint or type a model manually."
+            if not self._shown_models_endpoint and not ollama else "")
+        self.restore_endpoints_button.setVisible(pv in PROVIDER_PRESETS)
+        self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
+        if not self.image_checkbox.isEnabled():
+            self.image_checkbox.setChecked(False)
 
     def _refresh_models(self) -> None:
         # Commit a manually entered model before replacing the combo's items.
@@ -2046,6 +2054,8 @@ class TextTab(QWidget):
         generate = getattr(self.window(), "generate_button", None)
         if generate is not None:
             generate.setEnabled(not busy)
+        if not busy:
+            self._apply_provider_capabilities()
 
     def closeEvent(self, event) -> None:
         if not self._advanced_closing and not self.prepare_close():
@@ -2054,8 +2064,34 @@ class TextTab(QWidget):
         super().closeEvent(event)
 
     def can_close(self) -> bool:
-        """Ask about an unsaved prompt without changing task state."""
-        return self._confirm_leave_prompt()
+        """Resolve unsaved Prompt and Custom Provider drafts before closing."""
+        return self._confirm_leave_prompt() and self._confirm_leave_custom()
+
+    def _confirm_leave_custom(self) -> bool:
+        provider = self._active_provider
+        if not provider or not provider.startswith("custom:") or not self._custom_unsaved(provider):
+            return True
+        answer = QMessageBox.question(
+            self, "Unsaved Custom Provider",
+            "Save changes to this Custom Provider before closing?",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Save:
+            return self._save_custom_provider(provider)
+        if answer == QMessageBox.StandardButton.Discard:
+            if self._custom_is_new:
+                previous = self.cfg.get_all().get("text", {}).get("provider", "openai")
+                self._custom_is_new = False
+                self._custom_draft_id = None
+                self._custom_draft_name = ""
+                self._rebuild_provider_combo(str(previous))
+                self._active_provider = None
+                self._populate_provider_cfg()
+            else:
+                self._populate_provider_cfg()
+            return True
+        return False
 
     def prepare_close(self, *, confirmed: bool = False) -> bool:
         """Cancel Advanced callbacks immediately before this tab is destroyed."""
@@ -2201,6 +2237,8 @@ class TextTab(QWidget):
     def save_settings(self) -> bool:
         """Persist Text settings on dialog close, including model and reasoning."""
         try:
+            if not self._confirm_leave_custom():
+                return False
             return bool(self._model_selection_changed())
         except Exception as exc:
             showWarning(f"Could not save Text provider settings: {exc}")
