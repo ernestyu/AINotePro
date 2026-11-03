@@ -142,7 +142,7 @@ def build_snapshot(note_id, note_type_id, field_names, raw_values, sources, dest
 
 
 def preflight_requests(records, sources, destinations, prompt, fields,
-                       *, max_notes=100, max_field_chars=50000):
+                       *, max_field_chars=50000):
     """Validate all selected notes before a provider request can be made.
 
     ``records`` contains only immutable primitive data obtained on Anki's safe
@@ -152,8 +152,6 @@ def preflight_requests(records, sources, destinations, prompt, fields,
     records = list(records)
     if not records:
         raise ValueError('No notes selected')
-    if len(records) > max_notes:
-        raise ValueError(f'Advanced generation is limited to {max_notes} notes per batch')
     parsed = validate_prompt(prompt, sources, destinations, fields)
     expected_names = tuple(fields)
     expected_type = records[0]['note_type_id']
