@@ -45,16 +45,27 @@ def migrate_legacy_user_data() -> None:
         print(f"[AINotePro] Failed to migrate user_data to user_files: {e}")
 
 
-def _prune_removed_config_keys(data: Dict[str, Any]) -> Dict[str, Any]:
+def _prune_removed_config_keys(data: Dict[str, Any]) -> bool:
     """Remove pre-1.0 config keys that are no longer public or supported."""
     if not isinstance(data, dict):
-        return data
-    data.pop("concurrency", None)
-    data.pop("image", None)
+        return False
+    changed = False
+    for key in ("concurrency", "image"):
+        if key in data:
+            data.pop(key)
+            changed = True
     text_cfg = data.get("text")
     if isinstance(text_cfg, dict):
-        text_cfg.pop("allow_remote_image_urls", None)
-    return data
+        for key in ("allow_remote_image_urls", "together", "perplexity", "lmstudio",
+                    "localai", "custom_providers"):
+            if key in text_cfg:
+                text_cfg.pop(key)
+                changed = True
+        provider = str(text_cfg.get("provider", ""))
+        if provider in {"together", "perplexity", "lmstudio", "localai"} or provider.startswith("custom:"):
+            text_cfg["provider"] = "openai"
+            changed = True
+    return changed
 
 
 def _get_default_config() -> Dict[str, Any]:
@@ -63,10 +74,6 @@ def _get_default_config() -> Dict[str, Any]:
         "text": {
             "provider": "openai",
             "debug_logging": False,
-            "together": {"base_url": "https://api.together.xyz", "api_key": "", "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "temperature": 0.7},
-            "perplexity": {"base_url": "https://api.perplexity.ai", "api_key": "", "model": "sonar", "temperature": 0.7},
-            "lmstudio": {"base_url": "http://localhost:1234", "api_key": "lm-studio", "model": "", "temperature": 0.7},
-            "localai": {"base_url": "http://localhost:8080", "api_key": "", "model": "", "temperature": 0.7},
             "prompts": {
                 "Default": "Translate the following text to English: {Source Field}",
             },
@@ -184,7 +191,7 @@ class ConfigManager:
                 raw["audio"] = migrate_audio(raw["audio"])
                 self._atomic_write(raw)
             else:
-                _prune_removed_config_keys(raw)
+                needs_write = _prune_removed_config_keys(raw)
                 audio = raw.get("audio", {})
                 if not isinstance(audio, dict):
                     raise ValueError("Invalid Audio configuration; original file retained")
@@ -193,9 +200,13 @@ class ConfigManager:
                     if not os.path.exists(backup):
                         shutil.copy2(CONFIG_FILE, backup)
                     raw["audio"] = migrate_audio(audio)
-                    self._atomic_write(raw)
+                    needs_write = True
                 else:
                     validate_audio(audio)
+                if needs_write:
+                    # This is a one-time, targeted cleanup.  Keep the in-memory
+                    # snapshot identical to the just-written disk snapshot.
+                    self._atomic_write(raw)
             merged = _deep_merge_dicts(_get_default_config(), copy.deepcopy(raw))
             merged["audio"] = copy.deepcopy(raw["audio"])
             self._raw_config = copy.deepcopy(raw)
@@ -205,11 +216,6 @@ class ConfigManager:
         return copy.deepcopy(self.config)
 
     def get_provider_config(self, service_type, provider_name):
-        if service_type == "text" and str(provider_name).startswith("custom:"):
-            custom_id = str(provider_name).split(":", 1)[1]
-            result = copy.deepcopy(self._raw_config.get("text", {}).get("custom_providers", {}).get(custom_id, {}))
-            result["provider_key"] = str(provider_name)
-            return result
         # An existing provider object is legacy when it has no explicit
         # endpoint.  Do not let the in-memory defaults turn displayed URLs into
         # an accidental migration on the next save.
@@ -225,33 +231,8 @@ class ConfigManager:
             result = copy.deepcopy(self.config.get(service_type, {}).get(provider_name, {}))
         if service_type == "text":
             result["provider_key"] = str(provider_name)
+            result["debug_logging"] = bool(self._raw_config.get("text", {}).get("debug_logging", False))
         return result
-
-    def get_custom_providers(self):
-        values = self._raw_config.get("text", {}).get("custom_providers", {})
-        return copy.deepcopy(values) if isinstance(values, dict) else {}
-
-    def save_custom_provider(self, custom_id, provider_cfg, *, select=True):
-        if not custom_id:
-            raise ValueError("Custom Provider ID is required")
-        cfg = copy.deepcopy(provider_cfg)
-        def update(raw):
-            text = raw.setdefault("text", {})
-            text.setdefault("custom_providers", {})[custom_id] = cfg
-            if select:
-                text["provider"] = f"custom:{custom_id}"
-        self._replace_raw(update)
-
-    def delete_custom_provider(self, custom_id):
-        def update(raw):
-            text = raw.setdefault("text", {})
-            custom = text.setdefault("custom_providers", {})
-            if custom_id not in custom:
-                raise ValueError("Custom Provider no longer exists")
-            del custom[custom_id]
-            if text.get("provider") == f"custom:{custom_id}":
-                text["provider"] = ""
-        self._replace_raw(update)
 
     def set_active_provider(self, service_type, provider_name):
         """Persist a selection without rewriting that provider's settings."""
@@ -325,13 +306,42 @@ class ConfigManager:
             nonlocal changed
             service = raw.setdefault(service_type, {})
             existing = service.setdefault(provider_name, {})
+            saved_cfg = copy.deepcopy(provider_cfg)
+            # debug_logging belongs to Text as a whole, never to one provider.
+            saved_cfg.pop("debug_logging", None)
             proposed = copy.deepcopy(existing)
-            proposed.update(copy.deepcopy(provider_cfg))
+            proposed.update(saved_cfg)
             changed = proposed != existing or service.get("provider") != provider_name
-            existing.update(copy.deepcopy(provider_cfg))
+            existing.update(saved_cfg)
             service["provider"] = provider_name
         self._replace_raw(update)
         return changed
+
+    def restore_provider_defaults(self, provider_name: str) -> None:
+        """Restore only one built-in Text provider, keeping its API key."""
+        if provider_name not in PROVIDER_PRESETS:
+            raise ValueError("Unknown Text provider")
+
+        def update(raw):
+            text = raw.setdefault("text", {})
+            current = text.setdefault(provider_name, {})
+            api_key = current.get("api_key", "")
+            defaults = default_provider_config(provider_name)
+            if PROVIDER_PRESETS[provider_name][1] == "cloud":
+                current.update(defaults)
+            elif provider_name in {"llama_cpp", "vllm"}:
+                # Keep the server chosen by the user; the request adapter derives
+                # both /v1 routes from it and ignores any stale models URL.
+                current["model"] = defaults["model"]
+                current["temperature"] = 0.7
+            else:  # Ollama
+                current["model"] = defaults["model"]
+                current["temperature"] = 0.7
+            current["api_key"] = api_key
+            current.pop("reasoning_by_model", None)
+            text["provider"] = provider_name
+
+        self._replace_raw(update)
 
     def prompt_snapshot(self, mode):
         """Migrate the legacy mirror once, then return the authoritative mapping and CAS token."""

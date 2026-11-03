@@ -19,13 +19,9 @@ PROVIDER_PRESETS = {
     "ollama": ("Ollama", "local", "http://127.0.0.1:11434", "", "llama3"),
 }
 
-LEGACY_PROVIDERS = {
-    "together": "Together", "perplexity": "Perplexity", "lmstudio": "LM Studio", "localai": "LocalAI",
-}
-
 # Only the established OpenAI-style endpoints and explicitly opted-in local
 # servers receive the existing reasoning_effort field.
-REASONING_EFFORT_PROVIDERS = {"openai", "gemini", "llama_cpp", "vllm", "lmstudio", "localai"}
+REASONING_EFFORT_PROVIDERS = {"openai", "gemini", "llama_cpp", "vllm"}
 
 
 def default_provider_config(key: str):

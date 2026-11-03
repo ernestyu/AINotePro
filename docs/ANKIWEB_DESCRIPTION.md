@@ -6,7 +6,7 @@ AINotePro adds AI-assisted text and audio generation tools to Anki's Browse wind
 
 - Generate new text from a selected source field and write it into a destination field.
 - Save and reuse prompt templates with `{Source Field}` placeholders.
-- Use common OpenAI-compatible providers such as OpenAI, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Together, Perplexity, Gemini-compatible endpoints, LM Studio, LocalAI, and Ollama.
+- Use 13 built-in providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
 - Remember the last successful model so you do not need to refresh the model list every time.
 - Send source-field Anki media images as Base64 image inputs to a vision-capable model for OCR-style workflows.
 - Generate MP3 audio with Edge TTS and append `[sound:...]` references to the selected field.
@@ -16,7 +16,7 @@ AINotePro adds AI-assisted text and audio generation tools to Anki's Browse wind
 
 - Tested with Anki 26.05.
 - Remote providers require network access and, where applicable, your own API key.
-- Local providers such as Ollama, LM Studio, or LocalAI must be running separately.
+- Local providers such as Ollama, llama.cpp, or vLLM must be running separately.
 - Image OCR requires an endpoint that truly supports image input. For privacy and security, AINotePro supports Anki media images and `data:image/...;base64,...` images only; remote image URLs are not fetched or forwarded.
 
 ## Privacy note

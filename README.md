@@ -7,7 +7,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 - Generate text from a source field and write the result to a destination field.
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, delete, import, and export prompt templates.
-- Use OpenAI-compatible chat completion providers, including OpenAI, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Together, Perplexity, Gemini-compatible endpoint, LM Studio, LocalAI, and Ollama.
+- Use the 13 built-in chat providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
 - Refresh available models when the provider exposes a models endpoint.
 - Remember the last provider settings and the last model that generated successfully.
 - Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
@@ -19,7 +19,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 - Anki 26.05 or newer is the tested target for the current release.
 - Internet access is required for remote AI providers and Edge TTS.
 - A compatible API key is required for paid or hosted LLM providers.
-- Ollama, LM Studio, and LocalAI require a local server to be running before generation.
+- Ollama, llama.cpp, and vLLM require a local server to be running before generation.
 - Image OCR requires a vision-capable model and an endpoint that accepts OpenAI-style `image_url` message parts. Some servers expose the same model name in a text-only endpoint; in that case OCR will fail even if another UI can use a vision variant.
 - Image OCR supports images stored in Anki's media folder and `data:image/...;base64,...` images. Remote image URLs are not fetched or forwarded for privacy and security. If your note contains a remote image, download it and add it to Anki media first.
 
@@ -95,6 +95,7 @@ Common Base URL examples:
 | Provider | Default Base URL | Default Model |
 | --- | --- | --- |
 | OpenAI | `https://api.openai.com` | `gpt-4o-mini` |
+| Anthropic (Claude) | `https://api.anthropic.com` | `claude-sonnet-4-5` |
 | DeepSeek | `https://api.deepseek.com` | `deepseek-chat` |
 | OpenRouter | `https://openrouter.ai/api` | `openai/gpt-4o-mini` |
 | DashScope/Qwen | `https://dashscope.aliyuncs.com/compatible-mode` | `qwen-plus` |
@@ -102,11 +103,9 @@ Common Base URL examples:
 | Zhipu GLM | `https://open.bigmodel.cn/api/paas` | `glm-4-flash` |
 | SiliconFlow | `https://api.siliconflow.cn` | `Qwen/Qwen2.5-7B-Instruct` |
 | Groq | `https://api.groq.com/openai` | `llama-3.1-8b-instant` |
-| Together | `https://api.together.xyz` | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` |
-| Perplexity | `https://api.perplexity.ai` | `sonar` |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-1.5-flash` |
-| LM Studio | `http://localhost:1234` | user-defined |
-| LocalAI | `http://localhost:8080` | user-defined |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.0-flash` |
+| llama.cpp | `http://127.0.0.1:8080` | user-defined |
+| vLLM | `http://127.0.0.1:8000` | user-defined |
 | Ollama | `http://localhost:11434` | `llama3` |
 
 If `Refresh` returns no models, type the model name manually. Many OpenAI-compatible servers do not provide a complete `/models` response.

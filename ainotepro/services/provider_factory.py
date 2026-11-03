@@ -12,14 +12,10 @@ OPENAI_COMPATIBLE_TEXT_PROVIDERS = {
     "zhipu",
     "siliconflow",
     "groq",
-    "together",
-    "perplexity",
     "gemini",
     "anthropic",
     "llama_cpp",
     "vllm",
-    "lmstudio",
-    "localai",
 }
 
 
@@ -28,9 +24,6 @@ def create_provider(service_type: str, provider_name: str, config: Dict[str, Any
     provider_name = provider_name.lower()
 
     if service_type == "text":
-        if provider_name.startswith("custom:"):
-            from .text.openai_text import OpenAITextProvider
-            return OpenAITextProvider(provider_name)
         if provider_name in OPENAI_COMPATIBLE_TEXT_PROVIDERS:
             from .text.openai_text import OpenAITextProvider
             return OpenAITextProvider(provider_name)

@@ -1,9 +1,6 @@
 """Main tabbed dialog (Text / Audio)."""
 
-from aqt.qt import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
-    QPushButton, QDialogButtonBox
-)
+from aqt.qt import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTabWidget, QPushButton
 from aqt.utils import openLink
 
 from .ui.text_tab import TextTab
@@ -48,28 +45,35 @@ class AiNoteProConfigDialog(QDialog):
         bottom_label.linkActivated.connect(openLink)
         bottom_layout.addWidget(bottom_label)
 
-        button_box = QDialogButtonBox()
         self.generate_button = QPushButton("Generate")
         self.close_button = QPushButton("Close")
         self.help_button = QPushButton("Help")
-        button_box.addButton(self.generate_button, QDialogButtonBox.ButtonRole.AcceptRole)
-        button_box.addButton(self.close_button, QDialogButtonBox.ButtonRole.RejectRole)
-        button_box.addButton(self.help_button, QDialogButtonBox.ButtonRole.HelpRole)
+        self.restore_llm_button = QPushButton("Restore Default LLM")
 
         self.generate_button.clicked.connect(self.on_generate)
         self.close_button.clicked.connect(self._on_close)
         self.help_button.clicked.connect(self.on_help)
+        self.restore_llm_button.clicked.connect(self._restore_default_llm)
 
         bottom_layout.addStretch()
-        bottom_layout.addWidget(button_box)
+        # Keep the action order stable across platform-specific button-box
+        # layouts: Help → Restore Default LLM → Close → Generate.
+        for button in (self.help_button, self.restore_llm_button, self.close_button, self.generate_button):
+            bottom_layout.addWidget(button)
         main_layout.addLayout(bottom_layout)
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
 
     def _on_tab_changed(self, *_):
         if self.tab_widget.currentWidget() is self.tabs["Audio"]:
             self.tabs["Audio"]._refresh_availability()
+            self.restore_llm_button.setVisible(False)
         else:
             self.generate_button.setEnabled(True)
+            self.restore_llm_button.setVisible(True)
+
+    def _restore_default_llm(self):
+        if self.tab_widget.currentWidget() is self.tabs["Text"]:
+            self.tabs["Text"].restore_current_provider_defaults()
 
     def on_generate(self):
         current_tab = self.tab_widget.currentWidget()

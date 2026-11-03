@@ -1,135 +1,86 @@
 from __future__ import annotations
 
-import json
-import os
-import requests
 from typing import Dict
-from ..base import TextProvider, remove_think_tags, clean_html_output
+
+import requests
+
+from ..base import TextProvider, clean_html_output, remove_think_tags
+from ._diagnostics import (request_failed, request_finished, request_http_returned,
+                           request_started, safe_failure, safe_url)
 
 
 class OllamaTextProvider(TextProvider):
     def _base(self, config: Dict) -> str:
-        return (config or {}).get("base_url", "http://localhost:11434").rstrip("/")
+        raw = (config or {}).get("base_url", "http://localhost:11434").rstrip("/")
+        for suffix in ("/api/chat", "/api/tags"):
+            if raw.endswith(suffix):
+                return raw[:-len(suffix)].rstrip("/")
+        return raw
 
-    def _debug_enabled(self, config: Dict) -> bool:
-        return bool((config or {}).get("debug_logging")) or os.environ.get("AINOTEPRO_DEBUG") == "1"
+    def _request(self, url: str, body: Dict, config: Dict) -> str:
+        model = body["model"]
+        started, debug = request_started("ollama", model, "POST", url, config)
+        response = None
+        try:
+            response = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
+            http_elapsed = request_http_returned(started, response, debug)
+            response.raise_for_status()
+            data = response.json() or {}
+            content = ((data.get("message") or {}).get("content") or "").strip()
+            request_finished("ollama", model, url, response, started, http_elapsed, content, data, debug)
+            cleaned = remove_think_tags(content)
+            return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
+        except Exception as exc:
+            raise request_failed("ollama", model, url, started, exc, debug, response) from None
 
     def generate(self, prompt: str, config: Dict) -> str:
-        # Use Ollama's native /api/chat endpoint (non-stream) and parse message.content
-        url = f"{self._base(config)}/api/chat"
-        body = {
-            "model": (config or {}).get("model") or "llama3",
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": False,
-            "options": {"temperature": (config or {}).get("temperature", 0.7)},
-        }
-        print(f"[AINotePro] POST {url} model={body.get('model')}")
-        try:
-            import json as _json
-            metadata = {
-                "model": body.get("model"),
-                "messages": len(body.get("messages", [])),
-                "stream": body.get("stream"),
-            }
-            if self._debug_enabled(config):
-                metadata["prompt_length"] = len(prompt or "")
-            print("[AINotePro] body:", _json.dumps(metadata, ensure_ascii=False))
-        except Exception:
-            pass
-
-        timeout = int((config or {}).get("timeout", 300))
-        r = requests.post(url, json=body, timeout=timeout)
-        r.raise_for_status()
-        data = r.json() or {}
-        msg = (data.get("message") or {}).get("content", "")
-        content = (msg or "").strip()
-        print(f"[AINotePro] Response received: chars={len(content)}")
-        cleaned = remove_think_tags(content)
-        return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
+        body = {"model": (config or {}).get("model") or "llama3",
+                "messages": [{"role": "user", "content": prompt}], "stream": False,
+                "options": {"temperature": (config or {}).get("temperature", 0.7)}}
+        return self._request(f"{self._base(config)}/api/chat", body, config)
 
     def list_models(self, config: Dict) -> list[str]:
-        # Ollama tags endpoint
         url = f"{self._base(config)}/api/tags"
-        print(f"[AINotePro] GET {url}")
-        r = requests.get(url, timeout=int((config or {}).get("timeout", 30)))
-        r.raise_for_status()
-        data = r.json() or {}
+        try:
+            response = requests.get(url, timeout=int((config or {}).get("timeout", 30)))
+            response.raise_for_status()
+            data = response.json() or {}
+        except Exception as exc:
+            print(f"[AINotePro] Models refresh failed url={safe_url(url)} error={safe_failure(exc)}")
+            raise RuntimeError("Models refresh failed; see terminal diagnostics.") from None
         models = data.get("models") if isinstance(data, dict) else None
         if not isinstance(models, list):
             raise ValueError("Ollama models endpoint returned an incompatible response")
-        names = []
-        for m in models:
-            if not isinstance(m, dict):
-                continue
-            # Support either 'name' or 'model' key variations
-            n = m.get("name") or m.get("model") or ""
-            if n:
-                names.append(n)
-        return sorted(set(names))
+        return sorted({m.get("name") or m.get("model") for m in models
+                       if isinstance(m, dict) and (m.get("name") or m.get("model"))})
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         base = self._base(config)
         if image_url.startswith("data:image/") and ";base64," in image_url:
-            image_b64 = image_url.split(";base64,", 1)[1]
-            url = f"{base}/api/chat"
-            body = {
-                "model": (config or {}).get("model") or "llava",
-                "messages": [{"role": "user", "content": prompt, "images": [image_b64]}],
-                "stream": False,
-                "options": {"temperature": (config or {}).get("temperature", 0.7)},
-            }
-            print(f"[AINotePro] POST {url} (ollama vision)")
-            r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
-            try:
-                r.raise_for_status()
-            except Exception:
-                print(f"[AINotePro] Ollama vision request failed with HTTP {r.status_code}")
-                raise RuntimeError(f"HTTP {r.status_code}") from None
-            data = r.json() or {}
-            content = ((data.get("message") or {}).get("content") or "").strip()
-            print(f"[AINotePro] Vision response received: chars={len(content)}")
+            body = {"model": (config or {}).get("model") or "llava",
+                    "messages": [{"role": "user", "content": prompt,
+                                  "images": [image_url.split(";base64,", 1)[1]]}],
+                    "stream": False, "options": {"temperature": (config or {}).get("temperature", 0.7)}}
+            return self._request(f"{base}/api/chat", body, config)
+
+        # Keep the historical OpenAI-compatible vision fallback for servers
+        # that advertise Ollama but only accept that payload format.
+        url = base + "/v1/chat/completions"
+        body = {"model": (config or {}).get("model") or "llava",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ]}], "stream": False, "temperature": (config or {}).get("temperature", 0.7)}
+        model = body["model"]
+        started, debug = request_started("ollama", model, "POST", url, config)
+        response = None
+        try:
+            response = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
+            http_elapsed = request_http_returned(started, response, debug)
+            response.raise_for_status()
+            data = response.json() or {}
+            content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
+            request_finished("ollama", model, url, response, started, http_elapsed, content, data, debug)
             return clean_html_output(remove_think_tags(content))
-
-        if "/api" in base:
-            url = base.replace("/api", "") + "/v1/chat/completions"
-        elif not base.endswith("/v1"):
-            url = base + "/v1/chat/completions"
-        else:
-            url = base + "/chat/completions"
-
-        body = {
-            "model": (config or {}).get("model") or "llava",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": image_url # Pass the full data URI
-                            }
-                        }
-                    ]
-                }
-            ],
-            "stream": False,
-            "temperature": (config or {}).get("temperature", 0.7),
-        }
-        print(f"[AINotePro] POST {url} (vision)")
-        try:
-            import json as _json
-            print("[AINotePro] body:", _json.dumps({"model": body.get("model"), "stream": body.get("stream"), "content_parts": len(body.get("messages", [{}])[0].get("content", []))}, ensure_ascii=False))
-        except Exception:
-            pass
-        
-        r = requests.post(url, json=body, timeout=int((config or {}).get("timeout", 300)))
-        try:
-            r.raise_for_status()
-        except Exception:
-            print(f"[AINotePro] OpenAI-compatible Ollama vision request failed with HTTP {r.status_code}")
-            raise RuntimeError(f"HTTP {r.status_code}") from None
-        data = r.json() or {}
-        content = (data.get("choices", [{}])[0].get("message", {}).get("content") or "").strip()
-        print(f"[AINotePro] Vision response received: chars={len(content)}")
-        return clean_html_output(remove_think_tags(content))
+        except Exception as exc:
+            raise request_failed("ollama", model, url, started, exc, debug, response) from None

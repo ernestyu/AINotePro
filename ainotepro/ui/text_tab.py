@@ -3,10 +3,10 @@
 import json
 import os
 import re
+import time
 from html import unescape
 from typing import Any, Dict, Optional
 import threading
-import uuid
 from urllib.parse import unquote, urlparse
 
 from aqt import mw
@@ -19,7 +19,7 @@ from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
-from ..provider_presets import PROVIDER_PRESETS, LEGACY_PROVIDERS
+from ..provider_presets import PROVIDER_PRESETS, REASONING_EFFORT_PROVIDERS
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
@@ -38,7 +38,6 @@ DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
 }
 TEXT_PROVIDER_OPTIONS = [(label, key) for key, (label, _group, *_rest) in PROVIDER_PRESETS.items()]
-TEXT_PROVIDER_OPTIONS.extend((label, key) for key, label in LEGACY_PROVIDERS.items())
 TEXT_PROVIDER_LABEL_TO_KEY = dict(TEXT_PROVIDER_OPTIONS)
 TEXT_PROVIDER_KEY_TO_LABEL = {key: label for label, key in TEXT_PROVIDER_OPTIONS}
 TEXT_PROVIDER_LABEL_ALIASES = {
@@ -322,15 +321,8 @@ class TextTab(QWidget):
         self._loading_provider = False
         self._provider_switching = False
         self._shown_chat_endpoint = ""
-        self._shown_models_endpoint = ""
         self._stored_chat_endpoint = ""
-        self._stored_models_endpoint = ""
-        self._has_explicit_models_endpoint = False
         self._legacy_base_url = ""
-        self._custom_draft_id: Optional[str] = None
-        self._custom_draft_name = ""
-        self._custom_draft_previous_provider: Optional[str] = None
-        self._custom_is_new = False
         self.all_prompts: Dict[str, str] = {}
         self._active_prompt_name: Optional[str] = None
         self._new_prompt_name: Optional[str] = None
@@ -403,19 +395,10 @@ class TextTab(QWidget):
             for key, (label, preset_group, *_rest) in PROVIDER_PRESETS.items():
                 if preset_group == group:
                     self.service_combo.addItem(label, key)
-        self.service_combo.insertSeparator(self.service_combo.count())
-        header_index = self.service_combo.count()
-        self.service_combo.addItem("Legacy / Other", "")
-        header = self.service_combo.model().item(header_index)
-        if header is not None: header.setEnabled(False)
-        for key, label in LEGACY_PROVIDERS.items():
-            self.service_combo.addItem(label, key)
-        self._add_custom_provider_items()
         saved_provider = self.cfg.get_all().get("text", {}).get("provider", "openai")
         saved_idx = self.service_combo.findData(str(saved_provider))
         if saved_idx < 0:
-            self.service_combo.addItem(f"Missing provider: {saved_provider}", str(saved_provider))
-            saved_idx = self.service_combo.count() - 1
+            saved_idx = self.service_combo.findData("openai")
         if saved_idx >= 0:
             self.service_combo.setCurrentIndex(saved_idx)
         self.service_combo.currentIndexChanged.connect(self._populate_provider_cfg)
@@ -447,14 +430,6 @@ class TextTab(QWidget):
         self.temperature_edit.setFixedWidth(48)
         self.temperature_edit.setToolTip("Sampling temperature. Default: 0.70")
         grid.addWidget(self.temperature_edit, 1, 5)
-
-        # Models endpoint is independent of Chat Endpoint.  It may be blank:
-        # manual Model entry remains valid in that case.
-        grid.addWidget(QLabel("<b>Models Endpoint:</b>"), 3, 0)
-        self.models_endpoint_edit = QLineEdit()
-        self.models_endpoint_edit.setPlaceholderText("Optional full URL for Refresh")
-        self.models_endpoint_edit.editingFinished.connect(self._endpoint_edited)
-        grid.addWidget(self.models_endpoint_edit, 3, 1, 1, 5)
 
         # Row 2: Model + actions
         grid.addWidget(QLabel("<b>Model:</b>"), 2, 0)
@@ -490,23 +465,6 @@ class TextTab(QWidget):
         self.test_button.clicked.connect(self._test_model)
         grid.addWidget(self.refresh_button, 2, 4)
         grid.addWidget(self.test_button, 2, 5)
-
-        custom_row = QHBoxLayout(); custom_row.setContentsMargins(0, 0, 0, 0); custom_row.setSpacing(4)
-        self.custom_new_button = QPushButton("New Custom")
-        self.custom_save_button = QPushButton("Save Custom")
-        self.custom_rename_button = QPushButton("Rename")
-        self.custom_delete_button = QPushButton("Delete")
-        self.custom_cancel_button = QPushButton("Cancel")
-        self.restore_endpoints_button = QPushButton("Restore official URLs")
-        for button, handler in ((self.custom_new_button, self._new_custom_provider),
-                                (self.custom_save_button, self._save_custom_provider),
-                                (self.custom_rename_button, self._rename_custom_provider),
-                                (self.custom_delete_button, self._delete_custom_provider),
-                                (self.custom_cancel_button, self._cancel_custom_provider)):
-            button.clicked.connect(handler); custom_row.addWidget(button)
-        self.restore_endpoints_button.clicked.connect(self._restore_default_endpoints)
-        custom_row.addWidget(self.restore_endpoints_button)
-        grid.addLayout(custom_row, 4, 0, 1, 6)
 
         layout.addLayout(grid)
 
@@ -1266,43 +1224,6 @@ class TextTab(QWidget):
         value = self.service_combo.currentData()
         return str(value) if value else ""
 
-    def _add_custom_provider_items(self) -> None:
-        customs = self.cfg.get_custom_providers()
-        if customs:
-            self.service_combo.insertSeparator(self.service_combo.count())
-            header_index = self.service_combo.count()
-            self.service_combo.addItem("Custom", "")
-            header = self.service_combo.model().item(header_index)
-            if header is not None: header.setEnabled(False)
-        for custom_id, item in customs.items():
-            name = str(item.get("name", "")).strip() or f"Custom {custom_id[:8]}"
-            self.service_combo.addItem(name, f"custom:{custom_id}")
-
-    def _rebuild_provider_combo(self, selected: str) -> None:
-        self.service_combo.blockSignals(True)
-        self.service_combo.clear()
-        for group, group_label in (("cloud", "Cloud"), ("local", "Local")):
-            if self.service_combo.count(): self.service_combo.insertSeparator(self.service_combo.count())
-            header_index = self.service_combo.count()
-            self.service_combo.addItem(group_label, "")
-            header = self.service_combo.model().item(header_index)
-            if header is not None: header.setEnabled(False)
-            for key, (label, preset_group, *_rest) in PROVIDER_PRESETS.items():
-                if preset_group == group: self.service_combo.addItem(label, key)
-        self.service_combo.insertSeparator(self.service_combo.count())
-        header_index = self.service_combo.count()
-        self.service_combo.addItem("Legacy / Other", "")
-        header = self.service_combo.model().item(header_index)
-        if header is not None: header.setEnabled(False)
-        for key, label in LEGACY_PROVIDERS.items(): self.service_combo.addItem(label, key)
-        self._add_custom_provider_items()
-        index = self.service_combo.findData(selected)
-        if index < 0 and selected:
-            self.service_combo.addItem(f"Missing provider: {selected}", selected)
-            index = self.service_combo.count() - 1
-        self.service_combo.setCurrentIndex(index if index >= 0 else -1)
-        self.service_combo.blockSignals(False)
-
     @staticmethod
     def _valid_endpoint(value: str, *, required: bool) -> bool:
         if not value.strip(): return not required
@@ -1318,7 +1239,6 @@ class TextTab(QWidget):
         # save or compare that previous form must pass its stable ID.
         key = provider_key if provider_key is not None else self._service_map()
         displayed_chat = self.base_url_edit.text().strip()
-        displayed_models = self.models_endpoint_edit.text().strip()
         config = {
             # Keep historical routing unless the user actually changed the
             # displayed complete endpoint.
@@ -1328,17 +1248,20 @@ class TextTab(QWidget):
             "temperature": self._temperature_value(),
             "reasoning_by_model": dict(self._reasoning_by_model),
             "provider_key": key,
+            "debug_logging": bool(self.cfg.get_all().get("text", {}).get("debug_logging", False)),
         }
-        if key == "ollama":
-            config["base_url"] = displayed_chat
-        if key.startswith("custom:"):
-            config["chat_endpoint"] = displayed_chat
-            config["models_endpoint"] = displayed_models
+        if key in {"llama_cpp", "vllm"}:
+            server = self._local_server_address(displayed_chat)
+            config.update({"base_url": server, "chat_endpoint": server + "/v1/chat/completions",
+                           "models_endpoint": server + "/v1/models"})
+        elif key == "ollama":
+            config["base_url"] = self._local_server_address(displayed_chat)
         elif self._stored_chat_endpoint or displayed_chat != self._shown_chat_endpoint:
             config["chat_endpoint"] = displayed_chat
-        if (not key.startswith("custom:") and
-                (self._has_explicit_models_endpoint or displayed_models != self._shown_models_endpoint)):
-            config["models_endpoint"] = displayed_models
+        if key not in {"llama_cpp", "vllm", "ollama"}:
+            stored = self.cfg.get_provider_config("text", key)
+            if "models_endpoint" in stored:
+                config["models_endpoint"] = stored["models_endpoint"]
         return config
 
     def _temperature_value(self) -> float:
@@ -1350,7 +1273,7 @@ class TextTab(QWidget):
 
     def _save_current_provider_config(self, provider_key: Optional[str] = None) -> bool:
         pv = provider_key or self._active_provider or self._service_map()
-        if not pv or pv.startswith("custom:"):
+        if not pv:
             return True
         config = self._current_provider_config(provider_key=pv)
         config.pop("provider_key", None)
@@ -1390,15 +1313,6 @@ class TextTab(QWidget):
         if not pv:
             showWarning("The selected provider no longer exists.")
             return
-        if previous and previous.startswith("custom:") and previous != pv and self._custom_unsaved(previous):
-            answer = QMessageBox.question(self, "Unsaved Custom Provider",
-                "Save changes to this Custom Provider before switching?",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Cancel)
-            if answer == QMessageBox.StandardButton.Save and not self._save_custom_provider(previous, rebuild_combo=False):
-                self._restore_provider_selection(previous); return
-            if answer == QMessageBox.StandardButton.Cancel:
-                self._restore_provider_selection(previous); return
         if previous is not None and previous != pv:
             if not self._save_current_provider_config(provider_key=previous):
                 self._restore_provider_selection(previous)
@@ -1408,23 +1322,15 @@ class TextTab(QWidget):
             cfg = self.cfg.get_provider_config("text", pv)
             self._legacy_base_url = str(cfg.get("base_url", ""))
             self._stored_chat_endpoint = str(cfg.get("chat_endpoint", ""))
-            self._stored_models_endpoint = str(cfg.get("models_endpoint", ""))
-            self._has_explicit_models_endpoint = "models_endpoint" in cfg
-            if pv == "ollama":
-                shown_chat = self._legacy_base_url
-            elif pv.startswith("custom:"):
-                shown_chat = self._stored_chat_endpoint
+            if pv in {"llama_cpp", "vllm", "ollama"}:
+                shown_chat = self._local_server_address(self._stored_chat_endpoint or self._legacy_base_url)
             else:
                 shown_chat = self._stored_chat_endpoint or self._legacy_chat_endpoint(self._legacy_base_url)
-            if pv == "ollama":
-                shown_models = ""
-            elif pv.startswith("custom:") or self._has_explicit_models_endpoint:
-                shown_models = self._stored_models_endpoint
-            else:
-                shown_models = self._legacy_models_endpoint(self._legacy_base_url)
-            self._shown_chat_endpoint, self._shown_models_endpoint = shown_chat, shown_models
+            self._shown_chat_endpoint = shown_chat
             self.base_url_edit.setText(shown_chat)
-            self.models_endpoint_edit.setText(shown_models)
+            local = pv in {"llama_cpp", "vllm", "ollama"}
+            self.endpoint_label.setText("<b>Server Address:</b>" if local else "<b>Chat Endpoint:</b>")
+            self.base_url_edit.setPlaceholderText("http://server:port" if local else "https://api.example.com/v1/chat/completions")
             self.api_key_edit.setText(cfg.get("api_key", ""))
             self.model_combo.setEditText(cfg.get("model", ""))
             temp = cfg.get("temperature", 0.7)
@@ -1440,17 +1346,10 @@ class TextTab(QWidget):
             index = self.reasoning_combo.findData(mode)
             self.reasoning_combo.setCurrentIndex(index if index >= 0 else self.reasoning_combo.findData("default"))
             self._apply_provider_capabilities(pv)
-            custom = pv.startswith("custom:")
-            for button in (self.custom_save_button, self.custom_rename_button,
-                           self.custom_delete_button, self.custom_cancel_button):
-                button.setVisible(custom)
-            self.custom_new_button.setVisible(not custom)
-            self._custom_draft_id = pv.split(":", 1)[1] if custom else None
-            self._custom_is_new = False
             self._active_provider = pv
         finally:
             self._loading_provider = False
-        if previous is not None and previous != pv and not pv.startswith("custom:"):
+        if previous is not None and previous != pv:
             if not self._save_current_provider_config(provider_key=pv):
                 self._restore_provider_selection(previous)
                 self._active_provider = None
@@ -1471,150 +1370,49 @@ class TextTab(QWidget):
         if not base: return ""
         return base + ("/chat/completions" if base.endswith("/v1") or base.endswith("/v1beta/openai") else "/v1/chat/completions")
 
-    @staticmethod
-    def _legacy_models_endpoint(base: str) -> str:
-        base = (base or "").rstrip("/")
-        if not base: return ""
-        return base + ("/models" if base.endswith("/v1") or base.endswith("/v1beta/openai") else "/v1/models")
-
     def _restore_provider_selection(self, provider: str) -> None:
         self._provider_switching = True
         try:
             index = self.service_combo.findData(provider)
-            if index >= 0: self.service_combo.setCurrentIndex(index)
+            if index >= 0:
+                self.service_combo.setCurrentIndex(index)
         finally:
             self._provider_switching = False
 
-    def _custom_unsaved(self, provider_key: Optional[str] = None) -> bool:
-        provider_key = provider_key or self._active_provider
-        if not provider_key or not provider_key.startswith("custom:"):
+    @staticmethod
+    def _local_server_address(value: str) -> str:
+        value = (value or "").strip().rstrip("/")
+        for suffix in ("/v1/chat/completions", "/chat/completions", "/v1/models", "/models", "/api/chat", "/api/tags"):
+            if value.endswith(suffix):
+                return value[:-len(suffix)].rstrip("/")
+        return value
+
+    def restore_current_provider_defaults(self) -> bool:
+        pv = self._service_map()
+        if pv not in PROVIDER_PRESETS:
             return False
-        if self._custom_is_new: return True
-        saved = self.cfg.get_provider_config("text", provider_key)
-        return any(self._current_provider_config(provider_key).get(key, "") != saved.get(key, "")
-                   for key in ("chat_endpoint", "models_endpoint", "api_key", "model", "temperature", "reasoning_by_model"))
-
-    def _new_custom_provider(self) -> None:
-        if self._custom_unsaved():
-            showWarning("Save or Cancel the current Custom Provider before creating another."); return
-        if self._active_provider and not self._active_provider.startswith("custom:"):
-            if not self._save_current_provider_config(provider_key=self._active_provider):
-                return
-        name, ok = QInputDialog.getText(self, "New Custom Provider", "Name:")
-        if not ok: return
-        name = name.strip()
-        if not name or any(name.casefold() == str(item.get("name", "")).casefold()
-                           for item in self.cfg.get_custom_providers().values()):
-            showWarning("Custom Provider names must be non-empty and unique."); return
-        self._custom_draft_previous_provider = self._active_provider or self._service_map()
-        custom_id = str(uuid.uuid4())
-        self._rebuild_provider_combo(f"custom:{custom_id}")
-        index = self.service_combo.findData(f"custom:{custom_id}")
-        if index >= 0: self.service_combo.setItemText(index, name)
-        self._active_provider = f"custom:{custom_id}"
-        self._custom_draft_id, self._custom_draft_name, self._custom_is_new = custom_id, name, True
-        self._loading_provider = True
         try:
-            self._legacy_base_url = self._shown_chat_endpoint = self._shown_models_endpoint = ""
-            self._stored_chat_endpoint = self._stored_models_endpoint = ""
-            self._has_explicit_models_endpoint = False
-            self.base_url_edit.clear(); self.models_endpoint_edit.clear(); self.api_key_edit.clear()
-            self.model_combo.setEditText(""); self.temperature_edit.setText("0.70")
-        finally:
-            self._loading_provider = False
-        for button in (self.custom_save_button, self.custom_rename_button, self.custom_delete_button, self.custom_cancel_button): button.setVisible(True)
-        self.custom_new_button.setVisible(False)
-        self.endpoint_label.setText("<b>Chat Endpoint:</b>")
-
-    def _save_custom_provider(self, provider_key: Optional[str] = None, *, rebuild_combo: bool = True) -> bool:
-        custom_id = (provider_key or self._custom_draft_id or "").split(":", 1)[-1]
-        if not custom_id: return False
-        cfg = self._current_provider_config(f"custom:{custom_id}")
-        if not self._valid_endpoint(cfg.get("chat_endpoint", ""), required=True):
-            showWarning("Custom Chat Endpoint must be a complete http(s) URL."); return False
-        old = self.cfg.get_custom_providers().get(custom_id, {})
-        name = str(old.get("name", "")).strip()
-        if self._custom_is_new:
-            name = self._custom_draft_name.strip()
-        if not name: return False
-        if any(cid != custom_id and name.casefold() == str(item.get("name", "")).casefold()
-               for cid, item in self.cfg.get_custom_providers().items()):
-            showWarning("Custom Provider names must be non-empty and unique."); return False
-        if not self._valid_endpoint(cfg.get("models_endpoint", ""), required=False):
-            showWarning("Models Endpoint must be empty or a complete http(s) URL."); return False
-        cfg.pop("provider_key", None); cfg.pop("base_url", None); cfg["name"] = name
-        try:
-            self.cfg.save_custom_provider(custom_id, cfg)
-        except Exception as exc:
-            showWarning(f"Could not save Custom Provider: {exc}"); return False
-        self._custom_is_new = False; self._stored_chat_endpoint = cfg["chat_endpoint"]; self._stored_models_endpoint = cfg.get("models_endpoint", "")
-        self._custom_draft_previous_provider = None
-        self._shown_chat_endpoint, self._shown_models_endpoint = self._stored_chat_endpoint, self._stored_models_endpoint
-        if rebuild_combo:
-            self._rebuild_provider_combo(f"custom:{custom_id}")
+            self.cfg.restore_provider_defaults(pv)
+        except Exception:
+            showWarning("Could not restore Default LLM settings. Existing values remain available.")
+            return False
+        self._populate_provider_cfg()
         return True
 
-    def _rename_custom_provider(self) -> None:
-        if not self._custom_draft_id or self._custom_is_new: return
-        old = self.cfg.get_custom_providers().get(self._custom_draft_id, {})
-        name, ok = QInputDialog.getText(self, "Rename Custom Provider", "Name:", text=str(old.get("name", "")))
-        if not ok: return
-        name = name.strip()
-        if not name or any(cid != self._custom_draft_id and name.casefold() == str(item.get("name", "")).casefold()
-                           for cid, item in self.cfg.get_custom_providers().items()):
-            showWarning("Custom Provider names must be non-empty and unique."); return
-        old["name"] = name
-        self.cfg.save_custom_provider(self._custom_draft_id, old)
-        self._custom_draft_name = name
-        self._rebuild_provider_combo(f"custom:{self._custom_draft_id}")
-
-    def _delete_custom_provider(self) -> None:
-        if not self._custom_draft_id or self._custom_is_new: return
-        if QMessageBox.question(self, "Delete Custom Provider", "Delete this Custom Provider?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes: return
-        try: self.cfg.delete_custom_provider(self._custom_draft_id)
-        except Exception as exc: showWarning(f"Could not delete Custom Provider: {exc}"); return
-        self._custom_draft_id = None; self._rebuild_provider_combo("")
-        self._active_provider = ""
-        showWarning("Custom Provider deleted. Select a provider before generating.")
-
-    def _cancel_custom_provider(self) -> None:
-        if self._custom_is_new:
-            previous = self._custom_draft_previous_provider or self.cfg.get_all().get("text", {}).get("provider", "openai")
-            self._custom_is_new = False; self._custom_draft_id = None; self._custom_draft_name = ""
-            self._custom_draft_previous_provider = None; self._rebuild_provider_combo(str(previous))
-            self._active_provider = None; self._populate_provider_cfg()
-        elif self._active_provider:
-            self._populate_provider_cfg()
-
-    def _restore_default_endpoints(self) -> None:
-        pv = self._service_map()
-        if pv not in PROVIDER_PRESETS: return
-        _label, _group, chat, models, _model = PROVIDER_PRESETS[pv]
-        self.base_url_edit.setText(chat)
-        self.models_endpoint_edit.setText(models)
-        self._endpoint_edited()
-
     def _endpoint_edited(self) -> None:
-        if not self._loading_provider and not self._service_map().startswith("custom:"):
+        if not self._loading_provider:
             self._save_current_provider_config()
         self._apply_provider_capabilities()
 
     def _apply_provider_capabilities(self, provider_key: Optional[str] = None) -> None:
         """Restore per-provider UI restrictions after load or a batch finishes."""
         pv = provider_key or self._active_provider or self._service_map()
-        ollama = pv == "ollama"
-        models_url = self.models_endpoint_edit.text().strip()
-        models_ready = bool(models_url) and self._valid_endpoint(models_url, required=False)
-        self.reasoning_combo.setEnabled(not ollama)
-        self.models_endpoint_edit.setEnabled(not ollama)
-        self.models_endpoint_edit.setPlaceholderText(
-            "Ollama uses native /api/tags" if ollama else "Optional full URL for Refresh")
-        self.refresh_button.setEnabled(ollama or models_ready)
-        self.refresh_button.setToolTip(
-            "Enter a Models Endpoint or type a model manually."
-            if not models_ready and not ollama else "")
-        self.restore_endpoints_button.setVisible(pv in PROVIDER_PRESETS)
+        local = pv in {"llama_cpp", "vllm", "ollama"}
+        models_url = self.cfg.get_provider_config("text", pv).get("models_endpoint", "") if pv else ""
+        models_ready = local or bool(models_url)
+        self.reasoning_combo.setEnabled(pv in REASONING_EFFORT_PROVIDERS)
+        self.refresh_button.setEnabled(models_ready)
+        self.refresh_button.setToolTip("This provider has no model list; type a model manually." if not models_ready else "")
         self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
         if not self.image_checkbox.isEnabled():
             self.image_checkbox.setChecked(False)
@@ -1627,8 +1425,7 @@ class TextTab(QWidget):
         if not pv:
             showWarning("Select a provider before refreshing models."); return
         print(f"[AINotePro] Refresh models clicked. service={pv}")
-        if (pv != "ollama" and not cfg.get("models_endpoint")
-                and (self._has_explicit_models_endpoint or not cfg.get("base_url"))):
+        if (pv not in {"ollama", "llama_cpp", "vllm"} and not cfg.get("models_endpoint")):
             showWarning("This provider has no Models Endpoint. Enter the model manually or provide one.")
             return
         provider = create_provider(st, pv, cfg)
@@ -1645,9 +1442,9 @@ class TextTab(QWidget):
             if not models:
                 showWarning("The Models Endpoint returned no models. Your manual Model was kept.")
             self._save_current_provider_config()
-        except Exception as e:
-            print(f"[AINotePro] Refresh models failed: {e}")
-            showWarning(f"Failed to fetch models: {e}")
+        except Exception:
+            print("[AINotePro] Refresh models failed; see terminal diagnostics.")
+            showWarning("Failed to fetch models; see terminal diagnostics.")
 
     def _test_model(self) -> None:
         # Test the exact request settings, including the reasoning override.
@@ -1655,18 +1452,18 @@ class TextTab(QWidget):
         cfg = self._current_provider_config()
         if not self._service_map():
             showWarning("Select a provider before checking."); return
-        base_url, model, temp = cfg.get("chat_endpoint") or cfg["base_url"], cfg["model"], cfg["temperature"]
+        _base_url, model, _temp = cfg.get("chat_endpoint") or cfg["base_url"], cfg["model"], cfg["temperature"]
         st = "text"; pv = self._service_map()
-        print(f"[AINotePro] Check clicked. service={pv}, model={model}, base_url={base_url}, temp={temp}")
+        print(f"[AINotePro] Check clicked. service={pv}, model={model}")
         provider = create_provider(st, pv, cfg)
         try:
             content = provider.generate("hello", cfg)
             print("[AINotePro] Check OK. Got response length:", len(content or ""))
             self._save_current_provider_config()
             showInfo(f"Test result:\n{content[:200]}")
-        except Exception as e:
-            print(f"[AINotePro] Check failed: {e}")
-            showWarning(f"Test failed: {e}")
+        except Exception:
+            print("[AINotePro] Check failed; see terminal diagnostics.")
+            showWarning("Test failed; see terminal diagnostics.")
 
     # Public slot called by parent dialog
     def on_generate_text(self) -> None:
@@ -1697,6 +1494,7 @@ class TextTab(QWidget):
         if not pv or not self._valid_endpoint(request_cfg.get("chat_endpoint") or request_cfg.get("base_url", ""), required=True) or not model:
             showWarning("Provider Chat Endpoint and Model are required."); return
         st = "text"; provider = create_provider(st, pv, {})
+        batch_started = time.perf_counter()
         # If image-assisted is enabled, fall back to per-note flow for correctness
         if self.image_checkbox and self.image_checkbox.isChecked():
             updated = 0
@@ -1750,6 +1548,9 @@ class TextTab(QWidget):
             else:
                 detail = "\n".join(failures[:8]) if failures else "No image source was found."
                 showWarning(f"Image OCR generation produced no content.\n\n{detail}")
+            print(f"[AINotePro] Text batch complete provider={pv} successful_writes={updated} "
+                  f"failed={len(failures)} cancelled=0 unexecuted={max(0, len(note_ids) - updated - len(failures))} "
+                  f"total_ms={(time.perf_counter() - batch_started) * 1000:.1f}")
             return
 
         # Batch mode for plain text generation: collect inputs
@@ -1807,6 +1608,11 @@ class TextTab(QWidget):
                 summary += f"\n\nSkipped/failed: {self._generation_failure_count}"
                 if self._generation_failures:
                     summary += "\n" + "\n".join(self._generation_failures[:5])
+            cancelled = max(0, len(items) - self._generation_update_count - self._generation_failure_count)
+            print(f"[AINotePro] Text batch complete provider={pv} successful_writes={self._generation_update_count} "
+                  f"failed={self._generation_failure_count} cancelled={cancelled if 'cancelled' in message.lower() else 0} "
+                  f"unexecuted={0 if 'cancelled' in message.lower() else cancelled} "
+                  f"total_ms={(time.perf_counter() - batch_started) * 1000:.1f}")
             showInfo(summary)
 
         self.worker.finished.connect(on_finish)
@@ -1903,6 +1709,7 @@ class TextTab(QWidget):
         self._advanced_destinations = tuple(destinations)
         self._advanced_results = []
         self._advanced_ledger = AdvancedBatchLedger.for_notes(snapshot.note_id for snapshot in snapshots)
+        self._advanced_started_at = time.perf_counter()
         self._set_advanced_ui_busy(True)
         self._advanced_progress = QProgressDialog("Generating structured responses…", "Cancel", 0,
                                                   len(snapshots), self)
@@ -2029,6 +1836,16 @@ class TextTab(QWidget):
             return
         self._advanced_ui_finished = True
         self._advanced_active = False
+        ledger = getattr(self, "_advanced_ledger", None)
+        if ledger is not None:
+            cancelled = ledger.count("cancelled")
+            unexecuted = ledger.count("not-run") + ledger.count("not-submitted")
+            failed = sum(count for status, count in
+                         ((status, ledger.count(status)) for status in set(ledger.states.values()))
+                         if status not in {"updated", "cancelled", "not-run", "not-submitted"})
+            print(f"[AINotePro] Advanced batch complete provider={getattr(self, '_advanced_provider_key', '')} "
+                  f"successful_writes={ledger.count('updated')} failed={failed} cancelled={cancelled} "
+                  f"unexecuted={unexecuted} total_ms={(time.perf_counter() - getattr(self, '_advanced_started_at', time.perf_counter())) * 1000:.1f}")
         if self._advanced_closing:
             return
         try:
@@ -2052,12 +1869,9 @@ class TextTab(QWidget):
         self._set_provider_controls_busy(busy)
 
     def _set_provider_controls_busy(self, busy: bool) -> None:
-        for widget in (self.service_combo, self.base_url_edit, self.models_endpoint_edit,
-                       self.api_key_edit, self.model_combo, self.temperature_edit,
-                       self.reasoning_combo, self.refresh_button, self.test_button,
-                       self.custom_new_button, self.custom_save_button,
-                       self.custom_rename_button, self.custom_delete_button,
-                       self.custom_cancel_button, self.restore_endpoints_button):
+        for widget in (self.service_combo, self.base_url_edit, self.api_key_edit,
+                       self.model_combo, self.temperature_edit, self.reasoning_combo,
+                       self.refresh_button, self.test_button):
             widget.setEnabled(not busy)
         generate = getattr(self.window(), "generate_button", None)
         if generate is not None:
@@ -2072,36 +1886,8 @@ class TextTab(QWidget):
         super().closeEvent(event)
 
     def can_close(self) -> bool:
-        """Resolve unsaved Prompt and Custom Provider drafts before closing."""
-        return self._confirm_leave_prompt() and self._confirm_leave_custom()
-
-    def _confirm_leave_custom(self) -> bool:
-        provider = self._active_provider
-        if not provider or not provider.startswith("custom:") or not self._custom_unsaved(provider):
-            return True
-        answer = QMessageBox.question(
-            self, "Unsaved Custom Provider",
-            "Save changes to this Custom Provider before closing?",
-            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if answer == QMessageBox.StandardButton.Save:
-            return self._save_custom_provider(provider)
-        if answer == QMessageBox.StandardButton.Discard:
-            if self._custom_is_new:
-                previous = (self._custom_draft_previous_provider
-                            or self.cfg.get_all().get("text", {}).get("provider", "openai"))
-                self._custom_is_new = False
-                self._custom_draft_id = None
-                self._custom_draft_name = ""
-                self._custom_draft_previous_provider = None
-                self._rebuild_provider_combo(str(previous))
-                self._active_provider = None
-                self._populate_provider_cfg()
-            else:
-                self._populate_provider_cfg()
-            return True
-        return False
+        """Resolve an unsaved Prompt draft before closing."""
+        return self._confirm_leave_prompt()
 
     def prepare_close(self, *, confirmed: bool = False) -> bool:
         """Cancel Advanced callbacks immediately before this tab is destroyed."""
@@ -2149,6 +1935,8 @@ class TextTab(QWidget):
             print(f"[AINotePro] Updated note {nid} field '{dst}' on main thread.")
             self._refresh_editor_note(nid)
         except Exception as e:
+            self._generation_failure_count += 1
+            self._generation_failures.append(f"Note {nid}: write failed")
             print(f"[AINotePro] Failed to update note {nid} field '{dst}': {e}")
 
     def _editor_note_for_id(self, nid: int):
@@ -2247,8 +2035,6 @@ class TextTab(QWidget):
     def save_settings(self) -> bool:
         """Persist Text settings on dialog close, including model and reasoning."""
         try:
-            if not self._confirm_leave_custom():
-                return False
             return bool(self._model_selection_changed())
         except Exception as exc:
             showWarning(f"Could not save Text provider settings: {exc}")
