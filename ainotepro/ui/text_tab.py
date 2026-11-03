@@ -329,6 +329,7 @@ class TextTab(QWidget):
         self._legacy_base_url = ""
         self._custom_draft_id: Optional[str] = None
         self._custom_draft_name = ""
+        self._custom_draft_previous_provider: Optional[str] = None
         self._custom_is_new = False
         self.all_prompts: Dict[str, str] = {}
         self._active_prompt_name: Optional[str] = None
@@ -1505,6 +1506,7 @@ class TextTab(QWidget):
         if not name or any(name.casefold() == str(item.get("name", "")).casefold()
                            for item in self.cfg.get_custom_providers().values()):
             showWarning("Custom Provider names must be non-empty and unique."); return
+        self._custom_draft_previous_provider = self._active_provider or self._service_map()
         custom_id = str(uuid.uuid4())
         self._rebuild_provider_combo(f"custom:{custom_id}")
         index = self.service_combo.findData(f"custom:{custom_id}")
@@ -1546,6 +1548,7 @@ class TextTab(QWidget):
         except Exception as exc:
             showWarning(f"Could not save Custom Provider: {exc}"); return False
         self._custom_is_new = False; self._stored_chat_endpoint = cfg["chat_endpoint"]; self._stored_models_endpoint = cfg.get("models_endpoint", "")
+        self._custom_draft_previous_provider = None
         self._shown_chat_endpoint, self._shown_models_endpoint = self._stored_chat_endpoint, self._stored_models_endpoint
         if rebuild_combo:
             self._rebuild_provider_combo(f"custom:{custom_id}")
@@ -1577,7 +1580,9 @@ class TextTab(QWidget):
 
     def _cancel_custom_provider(self) -> None:
         if self._custom_is_new:
-            self._custom_is_new = False; self._custom_draft_id = None; self._custom_draft_name = ""; self._rebuild_provider_combo("openai")
+            previous = self._custom_draft_previous_provider or self.cfg.get_all().get("text", {}).get("provider", "openai")
+            self._custom_is_new = False; self._custom_draft_id = None; self._custom_draft_name = ""
+            self._custom_draft_previous_provider = None; self._rebuild_provider_combo(str(previous))
             self._active_provider = None; self._populate_provider_cfg()
         elif self._active_provider:
             self._populate_provider_cfg()
@@ -1593,19 +1598,22 @@ class TextTab(QWidget):
     def _endpoint_edited(self) -> None:
         if not self._loading_provider and not self._service_map().startswith("custom:"):
             self._save_current_provider_config()
+        self._apply_provider_capabilities()
 
     def _apply_provider_capabilities(self, provider_key: Optional[str] = None) -> None:
         """Restore per-provider UI restrictions after load or a batch finishes."""
         pv = provider_key or self._active_provider or self._service_map()
         ollama = pv == "ollama"
+        models_url = self.models_endpoint_edit.text().strip()
+        models_ready = bool(models_url) and self._valid_endpoint(models_url, required=False)
         self.reasoning_combo.setEnabled(not ollama)
         self.models_endpoint_edit.setEnabled(not ollama)
         self.models_endpoint_edit.setPlaceholderText(
             "Ollama uses native /api/tags" if ollama else "Optional full URL for Refresh")
-        self.refresh_button.setEnabled(ollama or bool(self._shown_models_endpoint))
+        self.refresh_button.setEnabled(ollama or models_ready)
         self.refresh_button.setToolTip(
             "Enter a Models Endpoint or type a model manually."
-            if not self._shown_models_endpoint and not ollama else "")
+            if not models_ready and not ollama else "")
         self.restore_endpoints_button.setVisible(pv in PROVIDER_PRESETS)
         self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
         if not self.image_checkbox.isEnabled():
@@ -2081,10 +2089,12 @@ class TextTab(QWidget):
             return self._save_custom_provider(provider)
         if answer == QMessageBox.StandardButton.Discard:
             if self._custom_is_new:
-                previous = self.cfg.get_all().get("text", {}).get("provider", "openai")
+                previous = (self._custom_draft_previous_provider
+                            or self.cfg.get_all().get("text", {}).get("provider", "openai"))
                 self._custom_is_new = False
                 self._custom_draft_id = None
                 self._custom_draft_name = ""
+                self._custom_draft_previous_provider = None
                 self._rebuild_provider_combo(str(previous))
                 self._active_provider = None
                 self._populate_provider_cfg()

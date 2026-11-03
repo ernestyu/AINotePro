@@ -232,6 +232,8 @@ class TextProviderMinimalTests(unittest.TestCase):
         class Widget:
             def __init__(self): self.enabled = None
             def setEnabled(self, value): self.enabled = value
+            def isEnabled(self): return bool(self.enabled)
+            def text(self): return ""
         class Tab(namespace["Busy"]):
             def __init__(self):
                 for name in ("service_combo", "base_url_edit", "models_endpoint_edit", "api_key_edit", "model_combo",
@@ -248,6 +250,71 @@ class TextProviderMinimalTests(unittest.TestCase):
         self.assertEqual(tab.capability_calls, 0)
         tab._set_provider_controls_busy(False)
         self.assertEqual(tab.capability_calls, 1)
+
+    def test_new_custom_cancel_restores_the_provider_that_started_the_draft(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == "_cancel_custom_provider")
+        namespace = {}
+        module = ast.Module(body=[ast.ClassDef(name="Cancel", bases=[], keywords=[], body=[method], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<cancel custom>", "exec"), namespace)
+
+        class Config:
+            def get_all(self): return {"text": {"provider": "openai"}}
+        class Tab(namespace["Cancel"]):
+            def __init__(self, previous):
+                self._custom_is_new = True; self._custom_draft_id = "draft"; self._custom_draft_name = "Draft"
+                self._custom_draft_previous_provider = previous; self._active_provider = "custom:draft"; self.cfg = Config()
+                self.rebuilt = []; self.loads = 0
+            def _rebuild_provider_combo(self, selected): self.rebuilt.append(selected)
+            def _populate_provider_cfg(self): self.loads += 1
+
+        for previous in ("deepseek", "together", "custom:two"):
+            tab = Tab(previous)
+            tab._cancel_custom_provider()
+            self.assertEqual(tab.rebuilt, [previous])
+            self.assertEqual(tab.loads, 1)
+            self.assertIsNone(tab._active_provider)
+
+    def test_models_endpoint_edit_immediately_controls_refresh(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tree = ast.parse(source)
+        tab_node = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
+        method = next(node for node in tab_node.body if isinstance(node, ast.FunctionDef) and node.name == "_apply_provider_capabilities")
+
+        class Field:
+            def __init__(self, text=""):
+                self.value = text; self.enabled = None; self.visible = None
+            def text(self): return self.value
+            def setEnabled(self, value): self.enabled = value
+            def isEnabled(self): return bool(self.enabled)
+            def setPlaceholderText(self, _value): pass
+            def setToolTip(self, _value): pass
+            def setVisible(self, value): self.visible = value
+            def setChecked(self, _value): pass
+        namespace = {"Optional": Optional, "PROVIDER_PRESETS": {"anthropic": (), "ollama": ()}}
+        module = ast.Module(body=[ast.ClassDef(name="Capabilities", bases=[], keywords=[], body=[method], decorator_list=[])], type_ignores=[])
+        exec(compile(ast.fix_missing_locations(module), "<provider capabilities>", "exec"), namespace)
+
+        class Tab(namespace["Capabilities"]):
+            def __init__(self, models_url):
+                self.models_endpoint_edit = Field(models_url); self.reasoning_combo = Field(); self.refresh_button = Field()
+                self.restore_endpoints_button = Field(); self.image_checkbox = Field()
+            def _service_map(self): return "anthropic"
+            def _valid_endpoint(self, value, *, required): return bool(value) and value.startswith("https://")
+
+        tab = Tab("")
+        tab._apply_provider_capabilities("anthropic")
+        self.assertFalse(tab.refresh_button.enabled)
+        tab.models_endpoint_edit.value = "https://models.example.test/v1/models"
+        tab._apply_provider_capabilities("anthropic")
+        self.assertTrue(tab.refresh_button.enabled)
+        tab.models_endpoint_edit.value = ""
+        tab._apply_provider_capabilities("anthropic")
+        self.assertFalse(tab.refresh_button.enabled)
+        tab._apply_provider_capabilities("ollama")
+        self.assertTrue(tab.refresh_button.enabled)
 
     def test_custom_providers_are_independent_and_do_not_replace_text_config(self):
         cfg = manager.ConfigManager()
