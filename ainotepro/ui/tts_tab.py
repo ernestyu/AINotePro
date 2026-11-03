@@ -548,7 +548,7 @@ class TTSTab(QWidget):
         else:
             lang = self.language_combo.currentData() or "en"
             choices = self._edge_cache.get((lang, block["gender"].currentText()), [])
-            for v in choices: block["voice"].addItem(v.split("-")[-1], v)
+            for v in choices: block["voice"].addItem("-".join(v.split("-")[-2:]), v)
         i = block["voice"].findData(wanted)
         if wanted and i < 0:
             block["voice"].addItem(f"Unavailable / saved: {wanted}", wanted)
