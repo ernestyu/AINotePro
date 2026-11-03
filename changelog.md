@@ -1,5 +1,18 @@
 # Changelog
 
+[English](changelog.md) | [简体中文](changelog.zh-CN.md)
+
+## Text/Audio — Reasoning, diagnostics, UI, and batch-size corrections (2026-11-03; development branch)
+
+- Text now offers Reasoning (Off / Low / Medium / High / Model Default) for **all 13 providers**. Per-model choices persist. Model Default omits the reasoning override; explicit OpenAI-compatible choices send `reasoning_effort` values `none/low/medium/high`, subject to server/model support. Native Ollama sends `think: false` for Off and `think: true` for Low/Medium/High, without claiming separate strength levels.
+- Added DEBUG request-body metadata: actual outgoing Temperature, reasoning control (or server default), output-token cap (or server default), and stream flag. HTTP timing and available usage counts remain; prompts, responses and credentials are not logged.
+- Renamed the Text label from Temp to **Temperature**. The footer now shows GitHub link → **Restore Default LLM Parameters** → Help on the left, with Close → Generate on the right. Restore remains scoped to the current Text provider and retains its API key and local server address.
+- Removed obsolete Legacy/Custom Text provider UI and its legacy configuration entries; retained 13 built-in providers and independent internal Chat/Models request routes. Existing Cloud `base_url`-only configurations keep their legacy refresh routing, and local llama.cpp/vLLM derive routes from the current server.
+- Advanced preflight no longer rejects batches merely because they exceed **100 notes**. All selected notes are still validated before sending requests; existing cancellation and write safeguards remain.
+- Replaced Audio Speed/Volume plus/minus text glyphs (including the attempted triangle symbols) with **Qt standard left/right arrow icons**; the original 1% adjustments and Profile handling remain.
+- Updated offline/mock regression tests. **Anki/macOS runtime behavior, including arrow visibility and live model behavior, has not been verified by these source changes.**
+
+
 ## Text - Explicit prompt actions and protected Default (2026-10-30)
 
 - Replaced the Text prompt controls with right-aligned New, Save, Save As and Delete. New starts an empty draft with a name; Save updates only the active saved prompt or creates the named draft; Save As always requires a new name.
