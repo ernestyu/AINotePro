@@ -1,5 +1,7 @@
 # AINotePro Release Checklist
 
+[English](RELEASE_CHECKLIST.md) | [简体中文](RELEASE_CHECKLIST.zh-CN.md)
+
 Use this checklist before publishing a new AINotePro build to AnkiWeb.
 
 ## 1. Pre-release checks
@@ -10,11 +12,16 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Open the dialog from the editor toolbar button.
 - Generate text into a destination field for one note.
 - Generate text into destination fields for two or more selected notes.
+- Test Advanced source/destination declarations and strict JSON output, including more than 100 selected valid notes without an arbitrary batch-size rejection. Confirm invalid notes still reject the entire batch before requests.
 - Save, load, delete, import, and export a prompt.
-- Confirm the `Online` prompt button is disabled.
+- Confirm the obsolete `Online` prompt button is absent, and New/Save/Save As/Delete plus Import/Export remain functional.
 - Use `Check` for at least one remote provider.
+- Confirm Reasoning is selectable for all 13 provider presets; Model Default omits reasoning control fields. For a custom OpenAI-compatible NInfer endpoint, verify Off sends `reasoning_effort: "none"` and check its actual server behavior. Unsupported official endpoints must not be reported as proven to honor a strength setting.
+- Verify the Text label reads `Temperature`, and DEBUG logs reflect the final outgoing Temperature, Reasoning, token-limit and stream fields without API keys, prompts or full responses.
+- Verify the footer's left group (GitHub link → Restore Default LLM Parameters → Help) and right group (Close → Generate). Confirm Restore affects only the selected provider, preserves its API key and local server address, and is hidden on Audio.
 - Confirm the last successful model is still selected after closing and reopening the dialog.
-- Generate audio and confirm `[sound:...]` is appended to the configured field.
+- On macOS, visually confirm that each Audio Speed/Volume slider has a visible Qt-drawn left/right arrow button; check both directions adjust 1% and disabled states remain correct.
+- Generate audio and confirm `[sound:...]` is appended to the configured field. Verify Edge/Kokoro selection and Audio Profile switching without unrequested saves.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.
@@ -23,9 +30,10 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 
 ## 2. Documentation checks
 
-- Update `README.md`.
-- Update `docs/ANKIWEB_DESCRIPTION.md`.
-- Update `changelog.md`.
+- Update `README.md` and `README.zh-CN.md` together.
+- Update `docs/ANKIWEB_DESCRIPTION.md` and `docs/ANKIWEB_DESCRIPTION.zh-CN.md` together.
+- Update `changelog.md` and `changelog.zh-CN.md` together.
+- Update both language versions of this checklist and the privacy policy when behaviors change.
 - Confirm the support URL works.
 - Confirm privacy wording still matches the actual network behavior.
 - Confirm `LICENSE` and `THIRD_PARTY_NOTICES.md` are still accurate.
