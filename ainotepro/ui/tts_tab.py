@@ -15,7 +15,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
     QLineEdit, QSlider, QGroupBox, QSizePolicy, QFrame, Qt, QProgressDialog,
-    QMessageBox, QTimer
+    QMessageBox, QTimer, QStyle
 )
 from aqt.utils import showInfo, showWarning
 
@@ -183,7 +183,8 @@ class TTSTab(QWidget):
             gender.addItems(["Female", "Male"])
             params.addWidget(gender)
             params.addWidget(QLabel("Speed:"))
-            speed_minus = QPushButton("◀")
+            speed_minus = QPushButton()
+            speed_minus.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowLeft))
             speed_minus.setFixedWidth(24)
             speed_minus.setToolTip("Decrease Speed by 1%")
             params.addWidget(speed_minus)
@@ -191,13 +192,15 @@ class TTSTab(QWidget):
             params.addWidget(speed, 2)
             speed_label = QLabel("")
             params.addWidget(speed_label)
-            speed_plus = QPushButton("▶")
+            speed_plus = QPushButton()
+            speed_plus.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight))
             speed_plus.setFixedWidth(24)
             speed_plus.setToolTip("Increase Speed by 1%")
             params.addWidget(speed_plus)
             volume_label = QLabel("Volume:")
             params.addWidget(volume_label)
-            volume_minus = QPushButton("◀")
+            volume_minus = QPushButton()
+            volume_minus.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowLeft))
             volume_minus.setFixedWidth(24)
             volume_minus.setToolTip("Decrease Volume by 1%")
             params.addWidget(volume_minus)
@@ -206,7 +209,8 @@ class TTSTab(QWidget):
             params.addWidget(volume, 2)
             volume_value_label = QLabel("")
             params.addWidget(volume_value_label)
-            volume_plus = QPushButton("▶")
+            volume_plus = QPushButton()
+            volume_plus.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowRight))
             volume_plus.setFixedWidth(24)
             volume_plus.setToolTip("Increase Volume by 1%")
             params.addWidget(volume_plus)
