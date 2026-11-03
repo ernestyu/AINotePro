@@ -26,22 +26,36 @@ class OpenAITextProvider(TextProvider):
             return base
         return base + "/v1"
 
+    def _chat_endpoint(self, config: Dict) -> str:
+        """Use an explicit complete endpoint when the user selected one.
+
+        Falling back to _base is intentional: it is the historical route for
+        provider objects that only contain base_url.
+        """
+        if "chat_endpoint" in (config or {}):
+            return (config or {}).get("chat_endpoint", "").strip()
+        return f"{self._base(config)}/chat/completions"
+
+    def _models_endpoint(self, config: Dict) -> str:
+        if "models_endpoint" in (config or {}):
+            return (config or {}).get("models_endpoint", "").strip()
+        return f"{self._base(config)}/models"
+
     def _debug_enabled(self, config: Dict) -> bool:
         return bool((config or {}).get("debug_logging")) or os.environ.get("AINOTEPRO_DEBUG") == "1"
 
     def list_models(self, config: Dict) -> List[str]:
-        try:
-            url = f"{self._base(config)}/models"
-            headers = self._headers(config)
-            print(f"[AINotePro] GET {url}")
-            r = requests.get(url, headers=headers, timeout=12)
-            r.raise_for_status()
-            data = r.json()
-            models = data.get("data", [])
-            names = sorted([m.get("id", "") for m in models if m.get("id")])
-            return names
-        except Exception:
-            return []
+        url = self._models_endpoint(config)
+        if not url:
+            raise ValueError("This provider has no Models Endpoint; enter the model manually.")
+        headers = self._headers(config)
+        print(f"[AINotePro] GET {url}")
+        r = requests.get(url, headers=headers, timeout=12)
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            raise ValueError("Models endpoint returned an incompatible response")
+        return sorted([m.get("id", "") for m in data["data"] if isinstance(m, dict) and m.get("id")])
 
     @staticmethod
     def _apply_reasoning(body: Dict, config: Dict) -> None:
@@ -53,8 +67,9 @@ class OpenAITextProvider(TextProvider):
         model = body.get("model", "")
         choices = (config or {}).get("reasoning_by_model") or {}
         mode = choices.get(model, "default") if isinstance(choices, dict) else "default"
+        from ...provider_presets import REASONING_EFFORT_PROVIDERS
         effort = {"off": "none", "low": "low", "medium": "medium", "high": "xhigh"}.get(mode)
-        if effort is not None:
+        if effort is not None and (config or {}).get("provider_key", "") in REASONING_EFFORT_PROVIDERS:
             body["reasoning_effort"] = effort
 
     def generate(self, prompt: str, config: Dict) -> str:
@@ -68,7 +83,7 @@ class OpenAITextProvider(TextProvider):
         }
 
         self._apply_reasoning(body, config)
-        url = f"{self._base(config)}/chat/completions"
+        url = self._chat_endpoint(config)
         headers = self._headers(config)
         print(f"[AINotePro] POST {url} model={body.get('model')}")
         try:
@@ -115,7 +130,7 @@ class OpenAITextProvider(TextProvider):
         }
 
         self._apply_reasoning(body, config)
-        url = f"{self._base(config)}/chat/completions"
+        url = self._chat_endpoint(config)
         headers = self._headers(config)
         print(f"[AINotePro] POST {url} (vision) model={body.get('model')}")
         try:

@@ -115,9 +115,14 @@ def validate_audio(audio):
                 if v["enabled"] and not v["voice"].strip():
                     raise ValueError(f"Enabled {provider} Voice has no ID")
                 if provider == "edge_tts":
-                    for field in ("speed", "volume", "pitch"):
+                    for field in ("speed", "volume"):
                         if type(v.get(field)) is not int or not -50 <= v[field] <= 50:
                             raise ValueError("Invalid Edge slider value")
+                    # Pitch is historical profile data.  It may be absent now
+                    # that the UI no longer exposes it, but old values remain
+                    # valid and are preserved verbatim.
+                    if "pitch" in v and (type(v["pitch"]) is not int or not -50 <= v["pitch"] <= 50):
+                        raise ValueError("Invalid Edge slider value")
                 else:
                     if v.get("accent") not in ("American", "British"):
                         raise ValueError("Invalid Kokoro accent")

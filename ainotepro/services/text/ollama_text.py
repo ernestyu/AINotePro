@@ -51,21 +51,21 @@ class OllamaTextProvider(TextProvider):
         # Ollama tags endpoint
         url = f"{self._base(config)}/api/tags"
         print(f"[AINotePro] GET {url}")
-        try:
-            r = requests.get(url, timeout=int((config or {}).get("timeout", 30)))
-            r.raise_for_status()
-            data = r.json() or {}
-            models = data.get("models", [])
-            names = []
-            for m in models:
-                # Support either 'name' or 'model' key variations
-                n = m.get("name") or m.get("model") or ""
-                if n:
-                    names.append(n)
-            names = sorted(set(names))
-            return names
-        except Exception:
-            return []
+        r = requests.get(url, timeout=int((config or {}).get("timeout", 30)))
+        r.raise_for_status()
+        data = r.json() or {}
+        models = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(models, list):
+            raise ValueError("Ollama models endpoint returned an incompatible response")
+        names = []
+        for m in models:
+            if not isinstance(m, dict):
+                continue
+            # Support either 'name' or 'model' key variations
+            n = m.get("name") or m.get("model") or ""
+            if n:
+                names.append(n)
+        return sorted(set(names))
 
     def generate_with_image(self, image_url: str, prompt: str, config: Dict) -> str:
         base = self._base(config)

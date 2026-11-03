@@ -9,6 +9,7 @@ import hashlib
 import copy
 
 from .audio_profiles import migrate_audio, validate_audio
+from ..provider_presets import PROVIDER_PRESETS, default_provider_config
 
 _CONFIG_LOCK = threading.RLock()
 from typing import Any, Dict
@@ -58,24 +59,14 @@ def _prune_removed_config_keys(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _get_default_config() -> Dict[str, Any]:
     """Returns a dictionary with the default configuration."""
-    return {
+    defaults = {
         "text": {
             "provider": "openai",
             "debug_logging": False,
-            "openai": {"base_url": "https://api.openai.com", "api_key": "", "model": "gpt-4o-mini", "temperature": 0.7},
-            "deepseek": {"base_url": "https://api.deepseek.com", "api_key": "", "model": "deepseek-chat", "temperature": 0.7},
-            "openrouter": {"base_url": "https://openrouter.ai/api", "api_key": "", "model": "openai/gpt-4o-mini", "temperature": 0.7},
-            "dashscope": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode", "api_key": "", "model": "qwen-plus", "temperature": 0.7},
-            "moonshot": {"base_url": "https://api.moonshot.cn", "api_key": "", "model": "moonshot-v1-8k", "temperature": 0.7},
-            "zhipu": {"base_url": "https://open.bigmodel.cn/api/paas", "api_key": "", "model": "glm-4-flash", "temperature": 0.7},
-            "siliconflow": {"base_url": "https://api.siliconflow.cn", "api_key": "", "model": "Qwen/Qwen2.5-7B-Instruct", "temperature": 0.7},
-            "groq": {"base_url": "https://api.groq.com/openai", "api_key": "", "model": "llama-3.1-8b-instant", "temperature": 0.7},
             "together": {"base_url": "https://api.together.xyz", "api_key": "", "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo", "temperature": 0.7},
             "perplexity": {"base_url": "https://api.perplexity.ai", "api_key": "", "model": "sonar", "temperature": 0.7},
-            "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key": "", "model": "gemini-1.5-flash", "temperature": 0.7},
             "lmstudio": {"base_url": "http://localhost:1234", "api_key": "lm-studio", "model": "", "temperature": 0.7},
             "localai": {"base_url": "http://localhost:8080", "api_key": "", "model": "", "temperature": 0.7},
-            "ollama": {"base_url": "http://localhost:11434", "api_key": "ollama", "model": "llama3", "temperature": 0.7},
             "prompts": {
                 "Default": "Translate the following text to English: {Source Field}",
             },
@@ -92,6 +83,8 @@ def _get_default_config() -> Dict[str, Any]:
             "last_service_tab": "text",
         },
     }
+    defaults["text"].update({key: default_provider_config(key) for key in PROVIDER_PRESETS})
+    return defaults
 
 def _deep_merge_dicts(source: Dict, destination: Dict) -> Dict:
     """
@@ -205,13 +198,60 @@ class ConfigManager:
                     validate_audio(audio)
             merged = _deep_merge_dicts(_get_default_config(), copy.deepcopy(raw))
             merged["audio"] = copy.deepcopy(raw["audio"])
+            self._raw_config = copy.deepcopy(raw)
             return merged
 
     def get_all(self):
         return copy.deepcopy(self.config)
 
     def get_provider_config(self, service_type, provider_name):
-        return copy.deepcopy(self.config.get(service_type, {}).get(provider_name, {}))
+        if service_type == "text" and str(provider_name).startswith("custom:"):
+            custom_id = str(provider_name).split(":", 1)[1]
+            result = copy.deepcopy(self._raw_config.get("text", {}).get("custom_providers", {}).get(custom_id, {}))
+            result["provider_key"] = str(provider_name)
+            return result
+        # An existing provider object is legacy when it has no explicit
+        # endpoint.  Do not let the in-memory defaults turn displayed URLs into
+        # an accidental migration on the next save.
+        raw_service = self._raw_config.get(service_type, {})
+        raw_value = raw_service.get(provider_name) if isinstance(raw_service, dict) else None
+        if isinstance(raw_value, dict):
+            defaults = copy.deepcopy(_get_default_config().get(service_type, {}).get(provider_name, {}))
+            for endpoint in ("chat_endpoint", "models_endpoint"):
+                if endpoint not in raw_value:
+                    defaults.pop(endpoint, None)
+            result = _deep_merge_dicts(defaults, copy.deepcopy(raw_value))
+        else:
+            result = copy.deepcopy(self.config.get(service_type, {}).get(provider_name, {}))
+        if service_type == "text":
+            result["provider_key"] = str(provider_name)
+        return result
+
+    def get_custom_providers(self):
+        values = self._raw_config.get("text", {}).get("custom_providers", {})
+        return copy.deepcopy(values) if isinstance(values, dict) else {}
+
+    def save_custom_provider(self, custom_id, provider_cfg, *, select=True):
+        if not custom_id:
+            raise ValueError("Custom Provider ID is required")
+        cfg = copy.deepcopy(provider_cfg)
+        def update(raw):
+            text = raw.setdefault("text", {})
+            text.setdefault("custom_providers", {})[custom_id] = cfg
+            if select:
+                text["provider"] = f"custom:{custom_id}"
+        self._replace_raw(update)
+
+    def delete_custom_provider(self, custom_id):
+        def update(raw):
+            text = raw.setdefault("text", {})
+            custom = text.setdefault("custom_providers", {})
+            if custom_id not in custom:
+                raise ValueError("Custom Provider no longer exists")
+            del custom[custom_id]
+            if text.get("provider") == f"custom:{custom_id}":
+                text["provider"] = ""
+        self._replace_raw(update)
 
     def _replace_raw(self, mutator, expected_revision=None, expected_audio_revision=None):
         with _CONFIG_LOCK:
@@ -229,6 +269,7 @@ class ConfigManager:
                 # Avoid replacing user_config.json for unchanged UI events.
                 self.config = _deep_merge_dicts(_get_default_config(), copy.deepcopy(current))
                 self._baseline = copy.deepcopy(self.config)
+                self._raw_config = copy.deepcopy(current)
                 return self._revision()
             if "audio" in updated and "profiles" in updated["audio"]:
                 validate_audio(updated["audio"])
@@ -236,6 +277,7 @@ class ConfigManager:
             self.config = _deep_merge_dicts(_get_default_config(), copy.deepcopy(updated))
             self.config["audio"] = copy.deepcopy(updated["audio"])
             self._baseline = copy.deepcopy(self.config)
+            self._raw_config = copy.deepcopy(updated)
             return self._revision()
 
     def audio_revision(self):

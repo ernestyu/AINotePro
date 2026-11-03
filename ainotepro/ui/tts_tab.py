@@ -183,37 +183,53 @@ class TTSTab(QWidget):
             gender.addItems(["Female", "Male"])
             params.addWidget(gender)
             params.addWidget(QLabel("Speed:"))
+            speed_minus = QPushButton("−")
+            speed_minus.setFixedWidth(24)
+            params.addWidget(speed_minus)
             speed = QSlider(Qt.Orientation.Horizontal)
             params.addWidget(speed, 2)
             speed_label = QLabel("")
             params.addWidget(speed_label)
+            speed_plus = QPushButton("+")
+            speed_plus.setFixedWidth(24)
+            params.addWidget(speed_plus)
             volume_label = QLabel("Volume:")
             params.addWidget(volume_label)
+            volume_minus = QPushButton("−")
+            volume_minus.setFixedWidth(24)
+            params.addWidget(volume_minus)
             volume = QSlider(Qt.Orientation.Horizontal)
             volume.setRange(-50, 50)
             params.addWidget(volume, 2)
-            pitch_label = QLabel("Pitch:")
-            params.addWidget(pitch_label)
-            pitch = QSlider(Qt.Orientation.Horizontal)
-            pitch.setRange(-50, 50)
-            params.addWidget(pitch, 2)
+            volume_value_label = QLabel("")
+            params.addWidget(volume_value_label)
+            volume_plus = QPushButton("+")
+            volume_plus.setFixedWidth(24)
+            params.addWidget(volume_plus)
             vb.addLayout(params)
             root.addWidget(box)
 
             block = dict(enable=enable, voice=voice, preview=preview, button=button,
                          accent=accent, accent_label=accent_label, gender=gender,
-                         speed=speed, speed_label=speed_label, volume=volume,
-                         volume_label=volume_label, pitch=pitch, pitch_label=pitch_label)
+                         speed=speed, speed_label=speed_label, speed_minus=speed_minus, speed_plus=speed_plus,
+                         volume=volume, volume_label=volume_label, volume_minus=volume_minus,
+                         volume_plus=volume_plus, volume_value_label=volume_value_label,
+                         speed_dirty=False)
             self.voice_blocks.append(block)
             accent.currentIndexChanged.connect(lambda _, b=block: self._voice_filter_changed(b))
             gender.currentIndexChanged.connect(lambda _, b=block: self._voice_filter_changed(b))
-            for widget in (enable, voice, preview, speed, volume, pitch):
+            speed_minus.clicked.connect(lambda _, b=block: self._adjust_slider(b, "speed", -1))
+            speed_plus.clicked.connect(lambda _, b=block: self._adjust_slider(b, "speed", 1))
+            volume_minus.clicked.connect(lambda _, b=block: self._adjust_slider(b, "volume", -1))
+            volume_plus.clicked.connect(lambda _, b=block: self._adjust_slider(b, "volume", 1))
+            for widget in (enable, voice, preview, speed, volume):
                 if isinstance(widget, QCheckBox):
                     widget.toggled.connect(self._mark_dirty)
                 elif isinstance(widget, QLineEdit):
                     widget.textChanged.connect(self._mark_dirty)
                 elif isinstance(widget, QSlider):
-                    widget.valueChanged.connect(lambda _, b=block: self._slider_changed(b))
+                    kind = "speed" if widget is speed else "volume"
+                    widget.valueChanged.connect(lambda _, b=block, k=kind: self._slider_changed(b, k))
                 else:
                     widget.currentIndexChanged.connect(self._mark_dirty)
 
@@ -403,11 +419,11 @@ class TTSTab(QWidget):
             if provider == "kokoro_gradio":
                 voice["accent"] = block["accent"].currentText()
                 voice["locale"] = "en-GB" if voice["accent"] == "British" else "en-US"
-                voice["speed"] = round(block["speed"].value() / 100, 2)
+                if block["speed_dirty"]:
+                    voice["speed"] = 1 + block["speed"].value() / 100
             else:
                 voice["speed"] = block["speed"].value()
                 voice["volume"] = block["volume"].value()
-                voice["pitch"] = block["pitch"].value()
         # No selected note, or a different note type, may leave field combos
         # empty. That is not a request to erase saved Profile field names.
         if self.src_combo.currentIndex() >= 0:
@@ -433,17 +449,19 @@ class TTSTab(QWidget):
                 block["gender"].setCurrentText(voice["gender"])
                 block["accent"].setCurrentText(voice.get("accent", "American"))
                 block["preview"].setText(voice.get("preview_text", ""))
-                block["speed"].setRange(70, 130) if provider == "kokoro_gradio" else block["speed"].setRange(-50, 50)
-                block["speed"].setValue(round(voice["speed"] * 100) if provider == "kokoro_gradio" else voice["speed"])
+                block["speed"].setRange(-30, 30) if provider == "kokoro_gradio" else block["speed"].setRange(-50, 50)
+                block["speed"].setValue(round((voice["speed"] - 1) * 100) if provider == "kokoro_gradio" else voice["speed"])
+                block["speed_dirty"] = False
                 block["volume"].setValue(voice.get("volume", 0))
-                block["pitch"].setValue(voice.get("pitch", 0))
-                for key in ("volume", "pitch"):
+                for key in ("volume", "volume_minus", "volume_plus"):
                     block[key].setEnabled(provider == "edge_tts")
                     block[key].setToolTip("" if provider == "edge_tts" else "Not supported by Kokoro")
+                block["volume_label"].setText("Volume:" if provider == "edge_tts" else "Volume: Not supported")
                 for key in ("accent", "accent_label"):
                     block[key].setVisible(provider == "kokoro_gradio")
                 self._populate_voice(block, voice.get("voice", ""))
-                self._slider_changed(block)
+                self._slider_changed(block, "speed")
+                self._slider_changed(block, "volume")
             for combo, field in ((self.src_combo, self._draft["source_field"]),
                                  (self.dst_combo, self._draft["destination_field"])):
                 i = combo.findText(field)
@@ -472,10 +490,23 @@ class TTSTab(QWidget):
             self._draft_revision += 1
             self._probe()
 
-    def _slider_changed(self, block):
+    def _adjust_slider(self, block, key, delta):
+        slider = block[key]
+        slider.setValue(max(slider.minimum(), min(slider.maximum(), slider.value() + delta)))
+
+    def _slider_changed(self, block, key="speed"):
+        if key == "speed" and not self._loading and self._draft["provider"] == "kokoro_gradio":
+            block["speed_dirty"] = True
         if not self._loading: self._capture()
-        block["speed_label"].setText(
-            f'{block["speed"].value()/100:.2f}×' if self._draft["provider"] == "kokoro_gradio" else f'{block["speed"].value():+d}%')
+        if key == "speed":
+            block["speed_label"].setText(f'{block["speed"].value():+d}%')
+            block["speed_minus"].setEnabled(block["speed"].value() > block["speed"].minimum())
+            block["speed_plus"].setEnabled(block["speed"].value() < block["speed"].maximum())
+        else:
+            block["volume_value_label"].setText(f'{block["volume"].value():+d}%' if self._draft["provider"] == "edge_tts" else "")
+            if self._draft["provider"] == "edge_tts":
+                block["volume_minus"].setEnabled(block["volume"].value() > block["volume"].minimum())
+                block["volume_plus"].setEnabled(block["volume"].value() < block["volume"].maximum())
 
     def _provider_changed(self, *_):
         if self._loading: return
@@ -720,6 +751,10 @@ class TTSTab(QWidget):
             showWarning("This Kokoro voice is unavailable."); return
         if provider == "kokoro_gradio":
             config["base_url"] = self._draft["provider_configs"][provider]["base_url"]
+        else:
+            # Pitch remains stored for compatibility but is never used now the
+            # control has been removed.
+            config["pitch"] = 0
         text = self.voice_blocks[index]["preview"].text().strip() or "Hello from AINotePro!"
         self.voice_blocks[index]["button"].setEnabled(False)
         def work(): return create_provider("audio", provider, {}).generate(text, config)
@@ -766,6 +801,9 @@ class TTSTab(QWidget):
         if provider == "kokoro_gradio" and self._probe_state != "ready":
             showWarning("Kokoro is offline; retry before generating."); return
         config = copy.deepcopy(self._draft["provider_configs"][provider])
+        if provider == "edge_tts":
+            for voice in config["voices"]:
+                voice["pitch"] = 0
         voices = config["voices"]
         try:
             validate_audio({"schema_version":2,"profiles":{"legacy-edge-default":self._draft},
