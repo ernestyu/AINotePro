@@ -12,12 +12,12 @@ AINotePro adds AI-assisted text and audio generation to Anki's Browse window and
 - Use 13 built-in text providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM and Ollama. Cloud Chat Endpoints and local Server Addresses remain editable.
 - Set **Temperature** and per-model **Reasoning** (Off / Low / Medium / High / Model Default) for all 13 presets. Model Default sends no reasoning override; explicit choices depend on the model server's API support. Native Ollama has a Think on/off control without guaranteed intensity levels.
 - Refresh available models where supported, or enter a model manually. The Models Endpoint remains an internal setting; the UI does not expose a separate endpoint editor.
-- Generate MP3 audio with Edge TTS or optional local Kokoro MLX. Audio V2 provides up to three independent Voice blocks, named Profiles, background synthesis, and Speed/Volume sliders with Qt-drawn left/right adjustment arrows.
+- Generate MP3 audio with Edge TTS or optional local Kokoro MLX. Edge TTS voice choices show region codes before names (for example, `US-AriaNeural` and `GB-SoniaNeural`), making accents easier to identify. Audio provides up to three independent Voice blocks, named Profiles, background synthesis, and Speed/Volume sliders with Qt-drawn left/right adjustment arrows.
 - Generate for one or multiple selected notes; apply conservative note/media write rules.
 
 ## Requirements
 
-- Anki 26.05 or newer is the development target; current Audio V2 has not completed Anki/macOS runtime acceptance.
+- Anki 26.05 or newer is the target version; available TTS voices depend on the selected service.
 - Hosted providers require network access and, where applicable, your own API key.
 - Local servers such as Ollama, llama.cpp, vLLM, NInfer or Kokoro must run separately.
 - OCR requires an endpoint that actually supports image input. For privacy, supported sources are Anki media images and `data:image/...;base64,...`; remote image URLs are not fetched.

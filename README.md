@@ -13,7 +13,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 - Refresh available models when the provider exposes a models endpoint. Chat Endpoint remains editable; model discovery uses its own built-in endpoint or the local server address.
 - Remember settings and model selections for each provider, including per-model Reasoning preferences. All 13 providers expose the Reasoning selector; **Model Default** sends no reasoning override.
 - Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
-- Audio: Edge TTS plus optional local Kokoro MLX (English only); three independent voice blocks, uniform per-note random selection, named Audio Profiles, asynchronous synthesis, conservative Skip/Replace and Anki media references.
+- Audio: Edge TTS plus optional local Kokoro MLX (English only); Edge voice names include region codes (for example, `US-AriaNeural`, `GB-SoniaNeural`); three independent voice blocks, uniform per-note random selection, named Audio Profiles, asynchronous synthesis, conservative Skip/Replace and Anki media references.
 - Process one selected note or multiple selected notes from the Browser; Advanced has no arbitrary 100-note batch cap (preflight validation still applies).
 
 ## Requirements
@@ -74,7 +74,7 @@ For Audio (the compact Audio page has no internal scrollbar):
 
 1. Open `Audio`, select `Edge-TTS` or `Kokoro MLX (Local)` under `Generate using`.
 2. For Kokoro, run your separate local Gradio service at `http://127.0.0.1:7860`; use `Retry` if the status is unavailable. The plugin does not start Kokoro or install models.
-3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge provides language, Speed, and Volume controls. The former Pitch control is no longer shown. A different complete enabled block is chosen uniformly for each note.
+3. Configure one to three enabled Voice blocks. Kokoro has per-block American/British accent, Female/Male, voice and speed (0.70–1.30×); Edge provides language, gender filtering, Speed, and Volume controls. Edge voice names show their region codes (for example, `US-AriaNeural` and `GB-SoniaNeural`) in the existing voice list, without adding an Accent selector. The former Pitch control is no longer shown. A different complete enabled block is chosen uniformly for each note.
 4. Choose Source/Destination fields. The default policy is Skip if any sound tag already exists. `Replace managed audio only` requires a matching local provenance record and exact media hash.
 5. At the bottom of the Audio page, select an existing Profile to load its complete settings immediately. If the current Profile was edited, switching offers `Save` (save the **previous** Profile), `Discard` or `Cancel`. Type a new name and click `Save` to create a Profile; `Save` with an existing name updates that Profile. `Delete` removes a saved Profile, not Anki media. There is no `Load`, New or Save As button. Generation does not save Profile edits.
 6. Use the visible left/right arrow buttons beside each Speed/Volume slider to adjust by 1% (the buttons use Qt-drawn icons rather than font symbols). Click `Generate` with either saved or unsaved Audio settings. Generating never saves a Profile. Synthesis runs in the background; collection writes and media registration are handled by the Anki UI thread. Preview uses a managed Qt Multimedia player and a temporary MP3, not an Anki media file.

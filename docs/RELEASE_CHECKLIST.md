@@ -21,7 +21,7 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Verify the footer's left group (GitHub link → Restore Default LLM Parameters → Help) and right group (Close → Generate). Confirm Restore affects only the selected provider, preserves its API key and local server address, and is hidden on Audio.
 - Confirm the last successful model is still selected after closing and reopening the dialog.
 - On macOS, visually confirm that each Audio Speed/Volume slider has a visible Qt-drawn left/right arrow button; check both directions adjust 1% and disabled states remain correct.
-- Generate audio and confirm `[sound:...]` is appended to the configured field. Verify Edge/Kokoro selection and Audio Profile switching without unrequested saves.
+- Generate audio and confirm `[sound:...]` is appended to the configured field. Verify Edge/Kokoro selection and Audio Profile switching without unrequested saves. Edge voice labels show region codes before names (for example, `US-AriaNeural` and `GB-SoniaNeural`); voice IDs and filtering remain unchanged.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.

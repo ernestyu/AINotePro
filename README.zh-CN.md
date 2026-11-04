@@ -12,7 +12,7 @@ AINotePro 是一款 Anki 插件，可根据笔记字段内容生成 AI 文本或
 - 13 个内置文本 Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。
 - 支持模型列表 Refresh（服务端需提供模型枚举接口）、手动输入模型名称，以及按 Provider 保存模型和配置。
 - **Reasoning 对全部 13 个 Provider 开放**，按模型保存 Off、Low、Medium、High 或 Model Default。
-- Audio：Edge TTS 和可选本地 Kokoro MLX；三个独立 Voice 区块、Audio Profile、每条笔记随机选择已启用 Voice、异步合成与受控音频写入。
+- Audio：Edge TTS 和可选本地 Kokoro MLX；Edge 音色列表显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`）；三个独立 Voice 区块、Audio Profile、每条笔记随机选择已启用 Voice、异步合成与受控音频写入。
 - 浏览器可选择一条或多条笔记处理。Advanced **没有固定的每批 100 条上限**，但仍对全部选中笔记执行预检。
 
 ## 环境要求
@@ -80,7 +80,7 @@ Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中
 ## Audio 使用方法
 
 1. 选择 **Audio**，在 **Generate using** 选择 **Edge-TTS** 或 **Kokoro MLX (Local)**。Kokoro 需要自行启动本地 Gradio 服务，默认地址 `http://127.0.0.1:7860`；不可用时使用 Retry。
-2. 配置最多三个 Voice 区块。Kokoro 提供美式/英式口音、Female/Male、Voice 和速度（0.70–1.30 倍）；Edge 提供语言、Speed 和 Volume 调节，界面已移除原有 Pitch 控件。每条笔记从完整启用的 Voice 区块中等概率选择一个。
+2. 配置最多三个 Voice 区块。Kokoro 提供美式/英式口音、Female/Male、Voice 和速度（0.70–1.30 倍）；Edge 提供语言、性别筛选及 Speed、Volume 调节；现有音色列表在人名前显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`），不增加 Accent 筛选器。界面已移除原有 Pitch 控件。每条笔记从完整启用的 Voice 区块中等概率选择一个。
 3. Speed、Volume 滑杆两端用 **Qt 绘制的左/右箭头按钮**调节，每次调整 1%。Kokoro 不支持的 Volume 控件仍保持原有禁用规则。
 4. 选择 Source/Destination。默认遇到已有声音标签时跳过；Replace managed audio only 需要匹配本地来源记录及媒体哈希。
 5. 选择现有 Audio Profile 即立即加载其设置。有未保存更改时，切换会要求 Save / Discard / Cancel；Save 保存的是此前 Profile。新名称可用 Save 创建，Delete 只删除 Profile，不删除音频文件。Generate 可以使用未保存设置，不会自动保存 Profile。

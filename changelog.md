@@ -12,7 +12,7 @@
 
 ### Audio
 
-- **Updated Edge TTS:** Upgraded the bundled `edge-tts` library from **7.0.0 to 7.3.1**.
+- **Updated Edge TTS:** Upgraded the bundled `edge-tts` library from **7.0.0 to 7.3.1**. Edge voice names now show region codes (for example, `US-AriaNeural` and `GB-SoniaNeural`) to help identify accents, without changing voice selection or saved settings.
 - **Improved speed and volume controls:** Removed the Pitch slider from the Audio interface and improved Speed and Volume adjustments with sliders and step buttons.
 - **Local Kokoro TTS:** Added support for a separately deployed **Kokoro TTS** service, including a Kokoro MLX server running on **Mac mini M4**. AINotePro connects to the service; it does not install or run the TTS model itself.
 

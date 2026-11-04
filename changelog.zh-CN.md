@@ -12,7 +12,7 @@
 
 ### Audio
 
-- **升级 Edge TTS：** 内置 `edge-tts` 从 **7.0.0 升级到 7.3.1**。
+- **升级 Edge TTS：** 内置 `edge-tts` 从 **7.0.0 升级到 7.3.1**。音色列表在人名前显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`），便于区分不同地区的发音，不改变音色筛选方式和已保存的配置。
 - **改进 Speed 和 Volume：** 移除 Audio 界面中的 Pitch 滑杆，增强 Speed、Volume 的滑杆及增减按钮操作。
 - **支持本地 Kokoro TTS：** 可连接独立部署的 **Kokoro TTS** 服务，包括运行于 **Mac mini M4** 的 Kokoro MLX 服务。插件负责调用服务，不负责安装或启动模型。
 

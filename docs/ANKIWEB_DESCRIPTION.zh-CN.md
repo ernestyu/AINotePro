@@ -12,12 +12,12 @@ AINotePro 为 Anki 浏览器和笔记编辑器提供 AI 文本与语音生成工
 - 支持 13 个内置 Text Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。云端 Chat Endpoint 或本地 Server Address 可编辑。
 - 全部 13 个预设均可设置 **Temperature** 与按模型保存的 **Reasoning**（Off、Low、Medium、High、Model Default）。Model Default 不发送推理覆盖参数；其他档位是否有效取决于服务端接口。原生 Ollama 只保证 Think 开关，不保证三级推理强度。
 - 支持模型列表 Refresh 或手动输入模型；Models Endpoint 保留为内部设置，界面不提供单独的地址编辑框。
-- 支持 Edge TTS 或可选的本地 Kokoro MLX 生成 MP3。Audio V2 提供最多三个独立 Voice 区块、具名 Profile、后台合成，以及使用 Qt 绘制左右箭头的 Speed/Volume 调节按钮。
+- 支持 Edge TTS 或可选的本地 Kokoro MLX 生成 MP3。Edge TTS 音色列表在人名前显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`），便于辨认发音地区。Audio 提供最多三个独立 Voice 区块、具名 Profile、后台合成，以及使用 Qt 绘制左右箭头的 Speed/Volume 调节按钮。
 - 支持一条或多条笔记处理，并保留保守的笔记与媒体写入规则。
 
 ## 环境要求
 
-- 开发目标为 Anki 26.05 或更新版本；当前 Audio V2 尚未完成 Anki/macOS 实机验收。
+- 目标版本为 Anki 26.05 或更新版本；可用音色取决于所选语音服务。
 - 远程 Provider 需要网络及相应 API Key；Ollama、llama.cpp、vLLM、NInfer、Kokoro 等本地服务需自行启动。
 - OCR 需要实际支持视觉输入的接口。为保护隐私，只支持 Anki 媒体图像和 `data:image/...;base64,...`，不自动抓取远程图片 URL。
 

@@ -16,7 +16,7 @@
 - 确认界面显示完整 **Temperature**。打开 DEBUG 时，终端记录最终发出的 Temperature、Reasoning、输出 Token 上限和 Stream，且不泄露 API Key、Prompt 或完整响应。
 - 检查底部左侧 GitHub → Restore Default LLM Parameters → Help，以及右侧 Close → Generate。Restore 仅恢复当前 Text Provider，保留 API Key 和本地服务器地址，在 Audio 标签隐藏。
 - **Mac mini 实机**检查 Audio 所有 Speed/Volume 滑杆两端的 Qt 左右箭头可见；每次点击调整 1%，边界及不支持的控件保持正确禁用。
-- 使用 Edge TTS 和可用的本地 Kokoro 测试 Audio Profile、Voice、生成及 `[sound:...]` 字段写入，确认切换 Profile 不错误保存草稿。
+- 使用 Edge TTS 和可用的本地 Kokoro 测试 Audio Profile、Voice、生成及 `[sound:...]` 字段写入，确认切换 Profile 不错误保存草稿。Edge 音色列表显示地区代码加人名（如 `US-AriaNeural`、`GB-SoniaNeural`）；Voice ID 与筛选逻辑不变。
 - 视本次发布的功能声明，测试真实视觉模型的 OCR。
 - 确认 `user_files/user_config.json` 及提示词跨版本升级仍保留，失败请求不将 `[Error]` 写入字段。
 - 确认 OCR 拒绝 Anki 媒体目录外的 `file://` 文件，以及远程 `http(s)://` 图像 URL。
