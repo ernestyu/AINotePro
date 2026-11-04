@@ -170,7 +170,6 @@ class TTSTab(QWidget):
             row.addWidget(preview, 3)
             row.addWidget(button)
             vb.addLayout(row)
-            vb.addStretch(1)
 
             params = QHBoxLayout()
             params.setSpacing(5)
@@ -216,7 +215,11 @@ class TTSTab(QWidget):
             volume_plus.setToolTip("Increase Volume by 1%")
             params.addWidget(volume_plus)
             vb.addLayout(params)
-            root.addWidget(box, 1)
+            # Keep both controls rows at their natural compact height. Any
+            # extra window height is shared between Voice groups, not within
+            # a Voice between its selector and sliders.
+            root.addWidget(box)
+            root.addStretch(1)
 
             block = dict(enable=enable, voice=voice, preview=preview, button=button,
                          accent=accent, accent_label=accent_label, gender=gender,
@@ -241,6 +244,12 @@ class TTSTab(QWidget):
                     widget.valueChanged.connect(lambda _, b=block, k=kind: self._slider_changed(b, k))
                 else:
                     widget.currentIndexChanged.connect(self._mark_dirty)
+
+        # Visually separate voice setup from note-field destinations.
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        root.addWidget(separator)
 
         fields = QHBoxLayout()
         fields.setSpacing(6)

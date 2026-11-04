@@ -95,17 +95,30 @@ class FourVoiceTests(unittest.TestCase):
         self.assertNotEqual(select(voices, chooser=lambda candidates: candidates[-1])["voice"],
                             "voice-3")
 
-    def test_ui_allocates_equal_voice_stretch_before_source_and_profile(self):
+    def test_ui_keeps_voice_rows_compact_with_even_intergroup_spacing(self):
         source = (Path(__file__).resolve().parents[1] / "ainotepro" / "ui" /
                   "tts_tab.py").read_text(encoding="utf-8")
         self.assertIn("for index in range(VOICE_SLOTS):", source)
-        self.assertIn("root.addWidget(box, 1)", source)
-        self.assertIn("vb.addStretch(1)", source)
-        self.assertNotIn("root.addStretch(1)", source)
-        self.assertLess(source.index("root.addWidget(box, 1)"),
+        self.assertNotIn("vb.addStretch(1)", source)
+        self.assertIn("vb.setSpacing(3)", source)
+        self.assertIn("root.addWidget(box)\n            root.addStretch(1)", source)
+        self.assertEqual(source.count("root.addStretch(1)"), 1)
+        self.assertLess(source.index("vb.addLayout(row)"), source.index("vb.addLayout(params)"))
+        self.assertLess(source.index("root.addWidget(box)"), source.index("root.addWidget(separator)"))
+
+    def test_field_separator_and_bottom_profile_order(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro" / "ui" /
+                  "tts_tab.py").read_text(encoding="utf-8")
+        self.assertIn("separator.setFrameShape(QFrame.Shape.HLine)", source)
+        self.assertIn("separator.setFrameShadow(QFrame.Shadow.Sunken)", source)
+        self.assertLess(source.index("root.addWidget(separator)"),
                         source.index("root.addLayout(fields)"))
         self.assertLess(source.index("root.addLayout(fields)"),
                         source.index("root.addLayout(profile_row)"))
+        main = (Path(__file__).resolve().parents[1] / "ainotepro" /
+                "ainotepro_gui.py").read_text(encoding="utf-8")
+        self.assertIn("self.resize(1000, 700)", main)
+        self.assertIn("self.setMinimumSize(870, 700)", main)
 
 
 if __name__ == "__main__":

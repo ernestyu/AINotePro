@@ -14,9 +14,9 @@ class AiNoteProConfigDialog(QDialog):
         self.note_ids = list(note_ids or [])
         self.editor = editor
         self.setWindowTitle("AINotePro — v1.0.0")
-        # Give four equally expanding Audio voices space while keeping Source
-        # Field, Profile and the dialog footer visible without a scroll area.
-        self.resize(1000, 780)
+        # Four compact voices fit at the original dialog height; spare
+        # space is shared between groups, keeping fields and footer visible.
+        self.resize(1000, 700)
         self.setMinimumSize(870, 700)
 
         main_layout = QVBoxLayout(self)
