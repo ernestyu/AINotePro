@@ -202,7 +202,10 @@ class ConfigManager:
                     raw["audio"] = migrate_audio(audio)
                     needs_write = True
                 else:
-                    validate_audio(audio)
+                    upgraded = migrate_audio(audio)
+                    if upgraded != audio:
+                        raw["audio"] = upgraded
+                        needs_write = True
                 if needs_write:
                     # This is a one-time, targeted cleanup.  Keep the in-memory
                     # snapshot identical to the just-written disk snapshot.

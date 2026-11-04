@@ -7,6 +7,7 @@ import uuid
 
 DEFAULT_URL = "http://127.0.0.1:7860"
 PROFILE_VERSION = 2
+VOICE_SLOTS = 4
 ID_RE = re.compile(r"^(legacy-edge-default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 KOKORO_RE = re.compile(r"^(af|am|bf|bm)_[a-z0-9_]+$")
 
@@ -30,11 +31,12 @@ def default_profile(name="English", provider="edge_tts"):
         "provider_configs": {
             "edge_tts": {"language_code": "en", "voices": [
                 _edge_voice(False, "en-US-AriaNeural"),
-                _edge_voice(), _edge_voice()]},
+                *(_edge_voice() for _ in range(VOICE_SLOTS - 1))]},
             "kokoro_gradio": {"base_url": DEFAULT_URL, "language": "en", "voices": [
                 _kokoro_voice(False, "af_heart"),
                 _kokoro_voice(False, "bf_emma", "British"),
-                _kokoro_voice(False, "am_michael", gender="Male")]},
+                _kokoro_voice(False, "am_michael", gender="Male"),
+                _kokoro_voice()]},
         },
     }
 
@@ -43,6 +45,22 @@ def migrate_audio(audio):
     """Migrate legacy Edge once; never recreate a previously deleted profile."""
     audio = copy.deepcopy(audio or {})
     if "profiles" in audio or audio.get("migration", {}).get("legacy_edge_v1_done"):
+        # Upgrade existing three-slot profiles in memory before validating the
+        # four-slot layout. Never alter enabled voices or other saved settings.
+        profiles = audio.get("profiles")
+        if isinstance(profiles, dict):
+            for profile in profiles.values():
+                if not isinstance(profile, dict):
+                    continue
+                configs = profile.get("provider_configs")
+                if not isinstance(configs, dict):
+                    continue
+                for provider, factory in (("edge_tts", _edge_voice),
+                                          ("kokoro_gradio", _kokoro_voice)):
+                    config = configs.get(provider)
+                    if isinstance(config, dict) and isinstance(config.get("voices"), list):
+                        if len(config["voices"]) == VOICE_SLOTS - 1:
+                            config["voices"].append(factory())
         validate_audio(audio)
         return audio
     legacy = audio.get("edge_tts") or {}
@@ -50,7 +68,7 @@ def migrate_audio(audio):
     ecfg = profile["provider_configs"]["edge_tts"]
     ecfg["language_code"] = legacy.get("language_code") or "en"
     if isinstance(legacy.get("voices"), list):
-        for i, voice in enumerate(legacy["voices"][:3]):
+        for i, voice in enumerate(legacy["voices"][:VOICE_SLOTS]):
             if isinstance(voice, dict):
                 ecfg["voices"][i].update({k: voice[k] for k in ecfg["voices"][i] if k in voice})
     else:
@@ -103,8 +121,8 @@ def validate_audio(audio):
             raise ValueError("Kokoro URL must be local loopback HTTP")
         for provider, config in (("edge_tts", edge), ("kokoro_gradio", kokoro)):
             voices = config.get("voices")
-            if not isinstance(voices, list) or len(voices) != 3:
-                raise ValueError("Exactly three Voice blocks are required")
+            if not isinstance(voices, list) or len(voices) != VOICE_SLOTS:
+                raise ValueError(f"Exactly {VOICE_SLOTS} Voice blocks are required")
             for v in voices:
                 if not isinstance(v, dict) or not isinstance(v.get("enabled"), bool):
                     raise ValueError("Invalid Voice block")

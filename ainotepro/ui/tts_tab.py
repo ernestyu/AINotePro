@@ -1,4 +1,4 @@
-"""Audio V2 UI: existing three-Voice layout with profiles and asynchronous generation.
+"""Audio V2 UI: four-Voice layout with profiles and asynchronous generation.
 
 No Anki collection or Qt widgets are accessed from background workers.
 """
@@ -20,7 +20,7 @@ from aqt.qt import (
 from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager
-from ..config.audio_profiles import new_profile_id, validate_audio
+from ..config.audio_profiles import VOICE_SLOTS, new_profile_id, validate_audio
 from ..gen_audio.models.edge_tts.tts_handler import get_languages, get_voices
 from ..services.provider_factory import create_provider
 from ..core.async_task import AsyncTask
@@ -151,7 +151,7 @@ class TTSTab(QWidget):
         root.addLayout(state_row)
 
         self.voice_blocks = []
-        for index in range(3):
+        for index in range(VOICE_SLOTS):
             box = QGroupBox(f"Voice {index + 1}")
             vb = QVBoxLayout(box)
             vb.setContentsMargins(7, 5, 7, 5)
@@ -170,6 +170,7 @@ class TTSTab(QWidget):
             row.addWidget(preview, 3)
             row.addWidget(button)
             vb.addLayout(row)
+            vb.addStretch(1)
 
             params = QHBoxLayout()
             params.setSpacing(5)
@@ -215,7 +216,7 @@ class TTSTab(QWidget):
             volume_plus.setToolTip("Increase Volume by 1%")
             params.addWidget(volume_plus)
             vb.addLayout(params)
-            root.addWidget(box)
+            root.addWidget(box, 1)
 
             block = dict(enable=enable, voice=voice, preview=preview, button=button,
                          accent=accent, accent_label=accent_label, gender=gender,
@@ -252,7 +253,6 @@ class TTSTab(QWidget):
         self.replace_check = QCheckBox("Replace managed audio only")
         fields.addWidget(self.replace_check)
         root.addLayout(fields)
-        root.addStretch(1)
 
         # Selecting an existing Profile loads it immediately. Typing a new name
         # only changes the proposed Save target; it never loads another Profile.

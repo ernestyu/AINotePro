@@ -14,10 +14,10 @@ class AiNoteProConfigDialog(QDialog):
         self.note_ids = list(note_ids or [])
         self.editor = editor
         self.setWindowTitle("AINotePro — v1.0.0")
-        # Audio V2 has three voice blocks and an inline Profile editor.
-        # Give them one full page without introducing an Audio scroll area.
-        self.resize(1000, 700)
-        self.setMinimumSize(870, 610)
+        # Give four equally expanding Audio voices space while keeping Source
+        # Field, Profile and the dialog footer visible without a scroll area.
+        self.resize(1000, 780)
+        self.setMinimumSize(870, 700)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 6, 10, 6)
