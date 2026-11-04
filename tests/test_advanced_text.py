@@ -47,6 +47,17 @@ class AdvancedTextTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Note 2"):
             preflight_requests(records, ["Text"], ["Out"], "{Text} {OUT:Out} translate", ["Text", "Out"])
 
+    def test_advanced_preflight_rejects_mixed_note_types(self):
+        records = [
+            {"note_id": 1, "note_type_id": 9, "field_names": ["Text", "Out"],
+             "raw_values": {"Text": "hello", "Out": ""}},
+            {"note_id": 2, "note_type_id": 10, "field_names": ["Text", "Out"],
+             "raw_values": {"Text": "world", "Out": ""}},
+        ]
+        with self.assertRaisesRegex(ValueError, "different note types"):
+            preflight_requests(records, ["Text"], ["Out"],
+                               "{Text} {OUT:Out} translate", ["Text", "Out"])
+
     def test_preflight_accepts_more_than_100_valid_notes(self):
         records = [
             {"note_id": i, "note_type_id": 9, "field_names": ["Text", "Out"],

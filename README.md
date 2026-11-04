@@ -70,6 +70,8 @@ all selected notes still undergo the same batch-wide preflight before requests. 
 saved Easy prompts remain separate from Advanced prompts. Literal prompt braces
 must be escaped as `{{` and `}}`.
 
+Before Text Easy or Audio generation, all selected notes are checked for a single **Note Type** and valid Source/Destination fields. A mixed selection is rejected before any model or TTS request or note write. Different card templates of the same Note Type are allowed; Text Advanced already performs its own full-batch validation.
+
 For Audio (the compact Audio page has no internal scrollbar):
 
 1. Open `Audio`, select `Edge-TTS` or `Kokoro MLX (Local)` under `Generate using`.

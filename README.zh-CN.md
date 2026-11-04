@@ -77,6 +77,8 @@ Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中
 
 左侧从左到右为 **Enjoying AINotePro? Star it on GitHub → Restore Default LLM Parameters → Help**；右侧保持 **Close → Generate**。Restore 只恢复当前 Text Provider 的 LLM 参数；**保留 API Key**，本地 Provider 也保留当前服务器地址。Audio 标签不显示 Restore。
 
+Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属于同一个 **Note Type（笔记类型）**，且所选 Source/Destination 字段存在。存在不同笔记类型时会警告并停止整批生成，不调用模型，也不写入笔记。同一笔记类型的不同 Card Template（卡片模板）仍可一起处理；Text Advanced 已有独立整批预检。
+
 ## Audio 使用方法
 
 1. 选择 **Audio**，在 **Generate using** 选择 **Edge-TTS** 或 **Kokoro MLX (Local)**。Kokoro 需要自行启动本地 Gradio 服务，默认地址 `http://127.0.0.1:7860`；不可用时使用 Retry。

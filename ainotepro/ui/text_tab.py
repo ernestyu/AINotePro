@@ -21,6 +21,7 @@ from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate
 from ..services.provider_factory import create_provider
 from ..provider_presets import PROVIDER_PRESETS
 from ..core.utils import create_undo_checkpoint, update_field_content
+from ..core.batch_note_types import validate_batch_note_types
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
     preflight_requests, reconcile_field_selection,
@@ -1490,6 +1491,10 @@ class TextTab(QWidget):
             showWarning("Prompt Preview is empty."); return
         if not src or not dst:
             showWarning("Source/Destination field is not set."); return
+        try:
+            validate_batch_note_types(note_ids, mw.col.get_note, (src, dst))
+        except ValueError as exc:
+            showWarning(str(exc)); return
         if not self._confirm_write_risk(note_ids, src, dst):
             return
 

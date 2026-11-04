@@ -26,6 +26,7 @@ from ..services.provider_factory import create_provider
 from ..core.async_task import AsyncTask
 from ..core.audio_provenance import owned_tag, record
 from ..core.utils import add_audio_to_media_collection, get_field_content
+from ..core.batch_note_types import validate_batch_note_types
 
 SOUND_RE = re.compile(r"\[sound:[^\]\r\n]+\]")
 HTML_RE = re.compile(r"<[^>]*>")
@@ -814,6 +815,10 @@ class TTSTab(QWidget):
         src, dst = self._draft["source_field"], self._draft["destination_field"]
         if not ids or not src or not dst:
             showWarning("Select notes and valid Source/Destination fields."); return
+        try:
+            validate_batch_note_types(ids, mw.col.get_note, (src, dst))
+        except ValueError as exc:
+            showWarning(str(exc)); return
         provider = self._draft["provider"]
         if provider == "kokoro_gradio" and self._probe_state != "ready":
             showWarning("Kokoro is offline; retry before generating."); return
