@@ -22,6 +22,12 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Confirm the last successful model is still selected after closing and reopening the dialog.
 - On macOS, visually confirm that each Audio Speed/Volume slider has a visible Qt-drawn left/right arrow button; check both directions adjust 1% and disabled states remain correct.
 - Generate audio and confirm `[sound:...]` is appended to the configured field. Verify Edge/Kokoro selection and Audio Profile switching without unrequested saves. Edge voice labels show region codes before names (for example, `US-AriaNeural` and `GB-SoniaNeural`); voice IDs and filtering remain unchanged.
+- **v1.1.1 Library:** Export one unified JSON and verify it contains saved Easy/Advanced prompts and four-slot Edge/Kokoro Audio Profiles, but excludes provider API keys and Audio UUIDs. Import into a disposable Anki profile; verify conflicts are renamed, repeat imports are idempotent, and original Profile UUIDs and selection remain unchanged.
+- **v1.1.1 GitHub:** Use a disposable repository and least-privilege fine-grained token. Verify Save/Load with nested JSON path, public/private access behavior, repository-switch token status, Replace/Remove confirmations, and non-destructive merges. Confirm a public repository exposes library contents; never test with real private prompts.
+- **v1.1.1 Audio and batch preflight:** Verify four Voice blocks, migration of saved three-slot Profiles, and Edge/Kokoro generation. Mixed Note Types must be rejected before Text Easy or Audio requests and note writes, while multiple card templates of one Note Type remain supported.
+- Verify the V1.1.1 GitHub-synchronization acceptance items in `docs/testing/library-github-sync-v1-acceptance.md` on each supported OS. GitHub Actions tests mock native credentials and do not replace real Keychain/Credential Manager/Secret Service testing.
+- Check the four-platform matrix in `.github/workflows/library-sync-tests.yml` for the exact commit being released. If any required CI job is queued or fails, do not record CI as passed.
+- Confirm `manifest.json` and `__init__.py` both report version 1.1.1, and back up `user_files` before upgrade. Older single-prompt export JSON is not accepted by the new unified Library Import.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.
