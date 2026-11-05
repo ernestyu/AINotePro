@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import base64
 import json
+import datetime
 import logging
 import os
 import re
+import sys
 import threading
-from logging.handlers import RotatingFileHandler
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -38,12 +39,11 @@ def validate_settings(settings):
     return {"repository": repo, "branch": branch, "path": path}
 
 
-# Explicit, bounded local diagnostics. No tokens, headers, URLs with secrets,
-# remote response bodies or prompt contents are written to the log.
-_LOGGER = logging.getLogger("ainotepro.github.library")
-_LOGGER.setLevel(logging.INFO)
-_LOGGER.propagate = False
+# Bounded explicit log writes (rather than logging.Handler, whose emit errors
+# can be swallowed). Every event also appears in the Anki launch terminal.
+# Only allow-listed metadata is recorded, never token/header/request body.
 _LOG_LOCK = threading.Lock()
+_MAX_LOG_BYTES = 300_000
 
 
 def diagnostic_log_path():
@@ -51,48 +51,54 @@ def diagnostic_log_path():
     return os.path.join(USER_FILES_DIR, "logs", "github_sync.log")
 
 
-def _ensure_log():
-    if _LOGGER.handlers:
-        return
-    with _LOG_LOCK:
-        if _LOGGER.handlers:
-            return
-        path = diagnostic_log_path()
-        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-        # Restrict permissions when possible; never fail a sync just because
-        # a log directory is read-only.
-        if not os.path.exists(path):
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-            os.close(fd)
-        handler = RotatingFileHandler(path, maxBytes=300_000,
-                                      backupCount=2, encoding="utf-8")
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(message)s"
-        ))
-        _LOGGER.addHandler(handler)
-
-
-def _log(level, operation, cfg, status, request_id="-", note=""):
+def _log(level, operation, cfg, status, request_id="-", note="", *, has_token=False):
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    entry = (f"{now} [{logging.getLevelName(level)}] "
+             f"stage={operation} status={status} request_id={request_id} "
+             f"repository={cfg['repository']} branch={cfg['branch']} "
+             f"path={cfg['path']} token_present={bool(has_token)} {note}")
+    # Anki's terminal receives stage/status even if file I/O fails.
+    print(f"[AINotePro][GitHub] {entry}", file=sys.stderr, flush=True)
     try:
-        _ensure_log()
-        # Only settings passed through validate_settings can reach this point.
-        # No token, request/response body, exception stack, or headers logged.
-        _LOGGER.log(level,
-                    "operation=%s status=%s request_id=%s repository=%s branch=%s path=%s %s",
-                    operation, status, request_id, cfg["repository"],
-                    cfg["branch"], cfg["path"], note)
-    except (OSError, ValueError):
-        pass
+        path = diagnostic_log_path()
+        encoded = (entry + "\n").encode("utf-8")
+        with _LOG_LOCK:
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            if (os.path.exists(path)
+                    and os.path.getsize(path) + len(encoded) > _MAX_LOG_BYTES):
+                # Keep two previous bounded files.
+                if os.path.exists(path + ".2"):
+                    os.remove(path + ".2")
+                if os.path.exists(path + ".1"):
+                    os.replace(path + ".1", path + ".2")
+                os.replace(path, path + ".1")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(fd, "ab") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        return None
+    except (OSError, ValueError) as exc:
+        # Never claim diagnostics were written when they were not.
+        detail = f"{type(exc).__name__}: {str(exc)[:200]}"
+        print(f"[AINotePro][GitHub] Diagnostic file write FAILED: {detail}",
+              file=sys.stderr, flush=True)
+        return detail
 
 
 class GitHubAPIError(RuntimeError):
-    def __init__(self, operation, status, request_id, message):
+    def __init__(self, operation, status, request_id, message, log_error=None):
         self.operation = operation
         self.status = status
         self.request_id = request_id
+        self.log_error = log_error
+        location = (
+            f"\nDiagnostic logging failed ({log_error}). See Anki launch terminal."
+            if log_error else f"\nDiagnostic log: {diagnostic_log_path()}"
+        )
         super().__init__(
             f"{message} [stage={operation}, HTTP {status}, request_id={request_id}]"
-            + f"\nDiagnostic log: {diagnostic_log_path()}"
+            + location
         )
 
 
@@ -141,12 +147,14 @@ def _call(cfg, token, operation, *, method="GET", payload=None):
             if len(raw) > 2_000_000:
                 raise ValueError("GitHub response unexpectedly large")
             result = json.loads(raw)
-            _log(logging.INFO, operation, cfg, response.status, request_id, "ok")
+            _log(logging.INFO, operation, cfg, response.status, request_id,
+                 "ok", has_token=bool(token))
             return result
     except HTTPError as exc:
         request_id = (exc.headers.get("X-GitHub-Request-Id", "-")
                       if exc.headers else "-")
-        _log(logging.ERROR, operation, cfg, exc.code, request_id, "http_error")
+        log_error = _log(logging.ERROR, operation, cfg, exc.code, request_id,
+                         "http_error", has_token=bool(token))
         if exc.code == 404 and operation == "read_file":
             return None
         if exc.code == 404 and operation == "check_repository":
@@ -167,12 +175,15 @@ def _call(cfg, token, operation, *, method="GET", payload=None):
                        "Check the branch, target path and file revision.")
         else:
             message = "GitHub API request failed."
-        raise GitHubAPIError(operation, exc.code, request_id, message) from None
+        raise GitHubAPIError(operation, exc.code, request_id, message,
+                             log_error=log_error) from None
     except URLError as exc:
-        _log(logging.ERROR, operation, cfg, "network", note="connection_error")
+        log_error = _log(logging.ERROR, operation, cfg, "network",
+                         note="connection_error", has_token=bool(token))
         raise RuntimeError(
             f"Cannot contact GitHub during {operation} (network or TLS failure).\n"
-            f"Diagnostic log: {diagnostic_log_path()}"
+            + (f"Diagnostic logging failed ({log_error}). See terminal."
+               if log_error else f"Diagnostic log: {diagnostic_log_path()}")
         ) from None
 
 
