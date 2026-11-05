@@ -539,7 +539,12 @@ class TextTab(QWidget):
         self.github_settings_button = QToolButton()
         self.github_settings_button.setText("⚙")
         self.github_settings_button.setToolTip("GitHub Prompt Library Settings")
-        self.github_settings_button.setFixedWidth(30)
+        # The Unicode gear has a small default glyph on macOS; size it
+        # explicitly instead of relying on the platform's tiny toolbutton font.
+        self.github_settings_button.setStyleSheet(
+            "QToolButton { font-size: 22px; padding: 0px 4px; }"
+        )
+        self.github_settings_button.setFixedSize(40, 32)
         self.github_save_button.clicked.connect(self._on_save_to_github)
         self.github_load_button.clicked.connect(self._on_load_from_github)
         self.github_settings_button.clicked.connect(self._on_github_settings)
