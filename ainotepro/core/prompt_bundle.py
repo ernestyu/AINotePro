@@ -18,6 +18,24 @@ MODES = ("easy", "advanced")
 MAX_LIBRARY_BYTES = 900_000
 MAX_PROFILES = 500
 
+_SECRET_KEYS = {
+    "api_key", "apikey", "access_token", "token", "password",
+    "secret", "api_secret", "private_key", "authorization",
+}
+
+
+def _reject_secrets(data):
+    """Reject unexpected credentials rather than uploading them in JSON."""
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if isinstance(key, str) and key.lower().replace("-", "_") in _SECRET_KEYS:
+                raise ValueError("Audio Profile contains a credential field; it cannot be exported")
+            _reject_secrets(value)
+    elif isinstance(data, list):
+        for value in data:
+            _reject_secrets(value)
+
+
 
 def _mapping(raw, label):
     if not isinstance(raw, dict) or any(
@@ -40,6 +58,7 @@ def _profiles(raw):
         # The library transports profiles, not the local UUIDs of their owner.
         if "id" in profile or "profile_id" in profile:
             raise ValueError("Audio Profile IDs must not appear in library exports")
+        _reject_secrets(profile)
         ids[str(uuid.uuid4())] = profile
     if ids:
         validate_audio({
