@@ -43,6 +43,14 @@ class CredentialStoreTests(unittest.TestCase):
                     credentials.set_token("owner/repo", token)
         store.assert_not_called()
 
+    def test_windows_compatible_token_length_limit(self):
+        with patch.object(credentials.sys, "platform", "win32"), \
+             patch.object(credentials, "_windows_set") as store:
+            credentials.set_token("owner/repo", "a" * 512)
+            with self.assertRaisesRegex(ValueError, "512-byte"):
+                credentials.set_token("owner/repo", "b" * 513)
+        store.assert_called_once()
+
     def test_linux_secret_goes_to_stdin_not_process_arguments(self):
         call_args = []
 
@@ -87,15 +95,15 @@ class CredentialStoreTests(unittest.TestCase):
                   "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
         dialog = (Path(__file__).resolve().parents[1] /
                   "ainotepro/ui/github_prompt_dialog.py").read_text(encoding="utf-8")
-        self.assertIn('self.token.setEnabled(not saved)', dialog)
+        self.assertIn('self.token.setEnabled(status == "missing")', dialog)
         self.assertIn('self.replace_token = QPushButton("Replace Token")', dialog)
         self.assertIn('Token status: Saved in system credential store', dialog)
         self.assertIn('Token status: Not saved for this repository', dialog)
         self.assertIn('QMessageBox.question(', dialog)
         self.assertIn('QMessageBox.StandardButton.No,', dialog)
         self.assertIn('if confirmation != QMessageBox.StandardButton.Yes:', dialog)
-        self.assertIn('if get_token(dialog.value["repository"]) != dialog.new_token:', source)
-        self.assertIn('if get_token(dialog.value["repository"]):', source)
+        self.assertIn('apply_github_settings(', source)
+        self.assertIn('restore_settings=manager.restore_github_prompt_settings', source)
         self.assertIn('GitHub token saved and verified', source)
         self.assertIn('Saved GitHub token removed', source)
         self.assertNotIn('self.token.setText(', dialog)
@@ -106,8 +114,8 @@ class CredentialStoreTests(unittest.TestCase):
         dialog = (Path(__file__).resolve().parents[1] /
                   "ainotepro/ui/github_prompt_dialog.py").read_text(encoding="utf-8")
         for required in ("get_token(settings[\"repository\"])",
-                         "set_token(dialog.value[\"repository\"], dialog.new_token)",
-                         "delete_token(dialog.value[\"repository\"])",
+                         "apply_github_settings(",
+                         "credential_lookup=get_token",
                          "QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow",
                          "self.path.setMinimumWidth(430)"):
             self.assertIn(required, source + dialog)
