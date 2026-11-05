@@ -8,7 +8,7 @@ import threading
 import hashlib
 import copy
 
-from .audio_profiles import migrate_audio, validate_audio
+from .audio_profiles import migrate_audio, validate_audio, new_profile_id
 from ..core.prompt_bundle import make_bundle, merge_bundles, parse_bundle
 from ..services.github_prompts import validate_settings
 from ..provider_presets import PROVIDER_PRESETS, default_provider_config
@@ -405,30 +405,59 @@ class ConfigManager:
         self._replace_raw(update)
         return prompt_digest(proposed, mode)
 
-    def prompt_library_snapshot(self):
-        """Export both saved prompt domains from the current local configuration."""
+    def library_snapshot(self):
+        """Read both Prompt modes and saved Audio Profiles from one locked store."""
         with _CONFIG_LOCK:
-            easy, _ = self.prompt_snapshot("easy")
-            advanced, _ = self.prompt_snapshot("advanced")
-            return make_bundle(easy, advanced)
-
-    def merge_prompt_library(self, incoming):
-        """Merge both modes in one atomic write; no saved name is overwritten."""
-        incoming = parse_bundle(incoming)
-        with _CONFIG_LOCK:
-            # Ensure the one-time legacy migration is complete first.
             self.prompt_snapshot("easy")
             self.prompt_snapshot("advanced")
             raw = self._read_raw()
+            audio = raw["audio"]
+            validate_audio(audio)
             text = raw["text"]
-            original = make_bundle(text["prompts"], text["advanced_prompts"])
-            combined, stats = merge_bundles(original, incoming)
-            if combined != original:
+            return make_bundle(
+                text["prompts"], text["advanced_prompts"],
+                list(audio["profiles"].values()),
+            )
+
+    def merge_library(self, incoming):
+        """Validate all domains, then commit all changes in one atomic JSON write.
+
+        Existing local Audio Profile IDs and the selected last_profile_id remain
+        stable. Imported profiles receive new UUIDs only if they are new entries.
+        """
+        incoming = parse_bundle(incoming)
+        with _CONFIG_LOCK:
+            self.prompt_snapshot("easy")
+            self.prompt_snapshot("advanced")
+            raw = self._read_raw()
+            audio = raw["audio"]
+            validate_audio(audio)
+            original = make_bundle(
+                raw["text"]["prompts"], raw["text"]["advanced_prompts"],
+                list(audio["profiles"].values()),
+            )
+            merged, stats = merge_bundles(original, incoming)
+            if merged != original:
+                updated_audio = copy.deepcopy(audio)
+                known = {
+                    profile["name"].casefold()
+                    for profile in updated_audio["profiles"].values()
+                }
+                for profile in merged["audio_profiles"]:
+                    if profile["name"].casefold() not in known:
+                        updated_audio["profiles"][new_profile_id()] = copy.deepcopy(profile)
+                        known.add(profile["name"].casefold())
+                validate_audio(updated_audio)
+
                 def update(current):
-                    current["text"]["prompts"] = combined["easy"]
-                    current["text"]["advanced_prompts"] = combined["advanced"]
+                    current["text"]["prompts"] = copy.deepcopy(merged["prompts"]["easy"])
+                    current["text"]["advanced_prompts"] = copy.deepcopy(merged["prompts"]["advanced"])
+                    current["audio"] = copy.deepcopy(updated_audio)
+
+                # _replace_raw writes the full config by os.replace and validates
+                # Audio before disk mutation. There is no prompt-only commit path.
                 self._replace_raw(update)
-            return combined, stats
+            return merged, stats
 
     def github_prompt_settings(self):
         """Read non-secret GitHub settings. Tokens are deliberately never stored."""
@@ -439,7 +468,7 @@ class ConfigManager:
                 saved = {}
             return {"repository": str(saved.get("repository", "")),
                     "branch": str(saved.get("branch", "main")),
-                    "path": str(saved.get("path", "prompts.json"))}
+                    "path": str(saved.get("path", "ainotepro-library.json"))}
 
     def set_github_prompt_settings(self, settings):
         saved = validate_settings(settings)
