@@ -108,6 +108,39 @@ class PromptStoreTests(unittest.TestCase):
         self.assertEqual(stats_again["audio_profiles"]["added"], 0)
         self.assertEqual(open(manager.CONFIG_FILE, "rb").read(), snapshot)
 
+    def test_library_import_keeps_nfd_audio_identity_when_nfc_alias_matches(self):
+        import copy
+        from ainotepro.core.prompt_bundle import make_bundle
+
+        # The audio name is valid but has decomposed Unicode spelling.
+        self.store.library_snapshot()  # finish one-time legacy migration
+        audio, revision = self.store.get_audio_snapshot()
+        profile_id = next(iter(audio["profiles"]))
+        audio["profiles"][profile_id]["name"] = "Cafe\\u0301"
+        self.store.replace_audio(audio, expected_revision=revision)
+        original = copy.deepcopy(self.store._read_raw())
+
+        equivalent = copy.deepcopy(audio["profiles"][profile_id])
+        equivalent["name"] = "Café"
+        incoming = make_bundle(
+            {"Unicode import": "text-only change"}, {}, [equivalent],
+        )
+        merged, stats = self.store.merge_library(incoming)
+        updated = self.store._read_raw()
+
+        self.assertIn("Unicode import", merged["prompts"]["easy"])
+        self.assertEqual(stats["audio_profiles"]["added"], 0)
+        self.assertEqual(updated["audio"], original["audio"])
+        self.assertEqual(set(updated["audio"]["profiles"]), {profile_id})
+        self.assertEqual(updated["audio"]["last_profile_id"],
+                         original["audio"]["last_profile_id"])
+
+        after_first_import = open(manager.CONFIG_FILE, "rb").read()
+        again, repeat_stats = self.store.merge_library(incoming)
+        self.assertEqual(again, merged)
+        self.assertEqual(repeat_stats["audio_profiles"]["added"], 0)
+        self.assertEqual(open(manager.CONFIG_FILE, "rb").read(), after_first_import)
+
     def test_invalid_audio_rejects_entire_import_without_file_changes(self):
         import copy
         from ainotepro.core.prompt_bundle import make_bundle
