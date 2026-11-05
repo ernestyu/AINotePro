@@ -40,7 +40,8 @@ def validate_settings(settings):
 
 
 # Bounded explicit log writes (rather than logging.Handler, whose emit errors
-# can be swallowed). Every event also appears in the Anki launch terminal.
+# can be swallowed). Mirror diagnostics to stdout, NOT stderr: Anki's error
+# handler treats any stderr write as an add-on exception report.
 # Only allow-listed metadata is recorded, never token/header/request body.
 _LOG_LOCK = threading.Lock()
 _MAX_LOG_BYTES = 300_000
@@ -57,8 +58,8 @@ def _log(level, operation, cfg, status, request_id="-", note="", *, has_token=Fa
              f"stage={operation} status={status} request_id={request_id} "
              f"repository={cfg['repository']} branch={cfg['branch']} "
              f"path={cfg['path']} token_present={bool(has_token)} {note}")
-    # Anki's terminal receives stage/status even if file I/O fails.
-    print(f"[AINotePro][GitHub] {entry}", file=sys.stderr, flush=True)
+    # Normal expected HTTP errors must not trigger Anki's stderr error popup.
+    print(f"[AINotePro][GitHub] {entry}", file=sys.stdout, flush=True)
     try:
         path = diagnostic_log_path()
         encoded = (entry + "\n").encode("utf-8")
@@ -82,7 +83,7 @@ def _log(level, operation, cfg, status, request_id="-", note="", *, has_token=Fa
         # Never claim diagnostics were written when they were not.
         detail = f"{type(exc).__name__}: {str(exc)[:200]}"
         print(f"[AINotePro][GitHub] Diagnostic file write FAILED: {detail}",
-              file=sys.stderr, flush=True)
+              file=sys.stdout, flush=True)
         return detail
 
 
