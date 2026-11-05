@@ -113,7 +113,7 @@ def save_to_github(settings, token, local_bundle):
         current, sha = fetch_remote(settings, token)
         if current is None:
             current = make_bundle({}, {})
-        combined, stats = merge_bundles(current, local)
+        combined, stats = merge_bundles(current, local, protect_default=False)
         if sha is not None and combined == current:
             return {"changed": False, "stats": stats}
         payload = {"message": "chore(prompts): sync AINotePro prompt library",
