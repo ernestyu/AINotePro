@@ -25,6 +25,9 @@ from ..core.batch_note_types import validate_batch_note_types
 from ..core.async_task import AsyncTask
 from ..core.prompt_bundle import parse_bundle, serialize_bundle
 from ..services.github_prompts import load_from_github, save_to_github
+from ..services.github_credentials import (
+    CredentialStoreError, get_token, set_token, delete_token,
+)
 from .github_prompt_dialog import GitHubPromptSettingsDialog
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
@@ -359,7 +362,6 @@ class TextTab(QWidget):
         self._advanced_run_id = 0
         self._advanced_ui_finished = False
         self._advanced_ledger = AdvancedBatchLedger.for_notes([])
-        self._github_token = ""  # Never persisted to user_config.json.
         self._github_busy = False
         self._github_worker = None
         self._discarded_dynamic_default = False
@@ -1265,16 +1267,27 @@ class TextTab(QWidget):
             showWarning(f"Failed to export AINotePro library: {exc}")
 
     def _on_github_settings(self):
-        dialog = GitHubPromptSettingsDialog(
-            ConfigManager().github_prompt_settings(), self._github_token, self)
+        saved_settings = ConfigManager().github_prompt_settings()
+        has_saved_token = False
+        if saved_settings["repository"]:
+            try:
+                has_saved_token = bool(get_token(saved_settings["repository"]))
+            except CredentialStoreError as exc:
+                showWarning(f"Could not read the operating system credential store: {exc}")
+        dialog = GitHubPromptSettingsDialog(saved_settings, has_saved_token, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
         try:
+            # Refuse a failed secure-store write instead of silently falling
+            # back to a plaintext configuration file or session-only token.
+            if dialog.new_token:
+                set_token(dialog.value["repository"], dialog.new_token)
+            elif dialog.remove_saved_token:
+                delete_token(dialog.value["repository"])
             ConfigManager().set_github_prompt_settings(dialog.value)
-        except Exception as exc:
+        except (ValueError, CredentialStoreError, OSError) as exc:
             showWarning(f"Could not save GitHub settings: {exc}")
             return False
-        self._github_token = dialog.session_token
         return True
 
     def _github_configuration(self, *, require_token=False):
@@ -1283,11 +1296,24 @@ class TextTab(QWidget):
             if not self._on_github_settings():
                 return None
             settings = ConfigManager().github_prompt_settings()
-        if require_token and not self._github_token:
-            showWarning("GitHub Save needs a token. Open GitHub Settings and enter a "
-                        "fine-grained token with Contents read/write permission.")
+        try:
+            token = get_token(settings["repository"])
+        except CredentialStoreError as exc:
+            showWarning(f"Could not access the system credential store: {exc}")
             return None
-        return settings
+        if require_token and not token:
+            if self._on_github_settings():
+                settings = ConfigManager().github_prompt_settings()
+                try:
+                    token = get_token(settings["repository"])
+                except CredentialStoreError as exc:
+                    showWarning(f"Could not access the system credential store: {exc}")
+                    return None
+            if not token:
+                showWarning("GitHub Save needs a token. Open GitHub Settings and "
+                            "enter a fine-grained token with Contents read/write access.")
+                return None
+        return settings, token
 
     def _start_github_sync(self, work, on_success):
         if self._github_busy:
@@ -1326,15 +1352,15 @@ class TextTab(QWidget):
             return
         if not self._audio_ready_for_library_transfer():
             return
-        settings = self._github_configuration(require_token=True)
-        if not settings:
+        configured = self._github_configuration(require_token=True)
+        if not configured:
             return
+        settings, token = configured
         try:
             library = ConfigManager().library_snapshot()
         except Exception as exc:
             showWarning(f"Could not read the saved AINotePro library: {exc}")
             return
-        token = self._github_token
         self._start_github_sync(
             lambda: save_to_github(settings, token, library),
             self._github_saved)
@@ -1356,10 +1382,10 @@ class TextTab(QWidget):
             return
         if not self._audio_ready_for_library_transfer():
             return
-        settings = self._github_configuration()
-        if not settings:
+        configured = self._github_configuration()
+        if not configured:
             return
-        token = self._github_token
+        settings, token = configured
         self._start_github_sync(
             lambda: load_from_github(settings, token),
             self._github_loaded)
