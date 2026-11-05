@@ -1306,12 +1306,26 @@ class TextTab(QWidget):
             # back to a plaintext configuration file or session-only token.
             if dialog.new_token:
                 set_token(dialog.value["repository"], dialog.new_token)
+                if get_token(dialog.value["repository"]) != dialog.new_token:
+                    raise CredentialStoreError(
+                        "Token could not be verified after saving to the system credential store"
+                    )
             elif dialog.remove_saved_token:
                 delete_token(dialog.value["repository"])
+                if get_token(dialog.value["repository"]):
+                    raise CredentialStoreError(
+                        "Token is still present after removal from the system credential store"
+                    )
             ConfigManager().set_github_prompt_settings(dialog.value)
         except (ValueError, CredentialStoreError, OSError) as exc:
             showWarning(f"Could not save GitHub settings: {exc}")
             return False
+        if dialog.new_token:
+            showInfo("GitHub token saved and verified in the system credential store "
+                     f"for {dialog.value['repository']}.")
+        elif dialog.remove_saved_token:
+            showInfo("Saved GitHub token removed from the system credential store "
+                     f"for {dialog.value['repository']}.")
         return True
 
     def _github_configuration(self, *, require_token=False):
