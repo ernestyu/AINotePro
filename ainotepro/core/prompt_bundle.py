@@ -150,6 +150,15 @@ def _candidate(base, number):
     return base[:100 - len(suffix)] + suffix
 
 
+def _same_numbered_family(name, base):
+    """Recognize numbered siblings including suffixes on 100-char base names."""
+    if profile_name_key(name) == profile_name_key(base):
+        return True
+    match = re.search(r" \(([1-9][0-9]*)\)$", name)
+    return bool(match and profile_name_key(name) ==
+                profile_name_key(_candidate(base, int(match.group(1)))))
+
+
 def _merge_named(existing, incoming, content_equal, *, protect_default=False):
     """Return a non-destructive, idempotent union of two named collections."""
     result = copy.deepcopy(existing)
@@ -166,7 +175,7 @@ def _merge_named(existing, incoming, content_equal, *, protect_default=False):
         # previous import already inserted this item. Do not multiply copies.
         # Numeric siblings belong to the same name family, but unrelated
         # aliases are intentional and never deduplicated by content alone.
-        if any(profile_name_key(_base_name(entry["name"])) == profile_name_key(base)
+        if any(_same_numbered_family(entry["name"], base)
                and content_equal(entry, item) for entry in result):
             stats["unchanged"] += 1
             continue
