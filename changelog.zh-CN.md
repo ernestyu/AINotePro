@@ -2,6 +2,26 @@
 
 [English](changelog.md) | [简体中文](changelog.zh-CN.md)
 
+## v1.1.1 — Library 同步与 Audio 更新（2026-11-05）
+
+### Text Library
+
+- **统一导入/导出：** Text Import/Export 现使用单个 `AINotePro.library` v1 JSON 文件，同时保存 Easy Prompt、Advanced Prompt 与完整 Audio Profiles（包括 Edge/Kokoro 的四个 Voice 区块）。升级不会删除 `user_files` 中已有的提示词和 Profile。新版 Import 只接受统一 Library 格式，不接受旧的仅含 Prompt 的导出 JSON。
+- **新增 GitHub 手动同步：** 增加 Save to GitHub、Load from GitHub 和仓库、分支、JSON 路径设置；支持仓库子目录。通过 HTTPS Contents API 工作，不需要本地安装 Git、gh 或配置 SSH。导入和同步均采用非覆盖式合并，同名不同内容追加数字后缀，重复导入避免产生新的编号副本。
+- **系统凭据存储：** GitHub Fine-grained Token 按仓库保存在 macOS Keychain、Windows Credential Manager 或 Linux Secret Service 中。界面明确显示已保存状态但不显示 Token；首次保存、替换、删除均需确认；设置写入失败时尝试恢复并提示可能的部分完成。Token 不写入 Library JSON 或普通配置文件。
+- **稳定性与安全性：** 增加仓库与分支预检、GitHub 文件 SHA 冲突处理、异步网络操作、限量诊断日志、三域数据校验与本地原子写入、Audio 导出字段白名单，以及 Unicode 名称一致性检查。
+
+### Audio 与笔记写入安全
+
+- **第四个 Voice Slot：** Edge TTS 与 Kokoro 的独立 Voice 区块由三个增至四个，已有三槽 Profile 可以迁移。
+- **Note Type 整批预检：** Text Easy 和 Audio 在生成前检查所有选中笔记属于同一 Note Type，并验证 Source/Destination 字段存在；混合笔记类型时整批停止。同一 Note Type 的不同 Card Template 仍可一起处理。
+
+### 兼容性与升级
+
+- GitHub Library 使用 `AINotePro.library` v1 统一格式，属于**手动同步**，并非后台自动同步。不同名称、相同内容允许保留为别名；设备之间冲突名称映射可以不同，但已有内容不会因导入被覆盖。
+- 升级时保留插件的 `user_files` 目录，安装新的 `.ankiaddon` 后重启 Anki。
+- 相比 v1.1.0，本次未升级内置依赖，也未增加 Text Provider 数量（仍为 13 个）。
+
 ## v1.1.0 — Text 与 Audio 功能升级（2026-11-03）
 
 ### Text
