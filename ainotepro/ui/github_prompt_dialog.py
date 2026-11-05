@@ -11,14 +11,14 @@ from ..services.github_prompts import validate_settings
 class GitHubPromptSettingsDialog(QDialog):
     def __init__(self, settings, session_token="", parent=None):
         super().__init__(parent)
-        self.setWindowTitle("GitHub Prompt Library Settings")
+        self.setWindowTitle("GitHub AINotePro Library Settings")
         self.setMinimumWidth(470)
         root = QVBoxLayout(self)
         form = QFormLayout()
         self.repository = QLineEdit(settings.get("repository", ""))
         self.repository.setPlaceholderText("owner/repository")
         self.branch = QLineEdit(settings.get("branch", "main"))
-        self.path = QLineEdit(settings.get("path", "prompts.json"))
+        self.path = QLineEdit(settings.get("path", "ainotepro-library.json"))
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
         self.token.setPlaceholderText("Token kept for this Anki session" if session_token else
