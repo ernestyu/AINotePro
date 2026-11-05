@@ -225,7 +225,7 @@ def fetch_remote(settings, token):
 def load_from_github(settings, token):
     result, _sha = fetch_remote(settings, token)
     if result is None:
-        raise ValueError("No AINotePro library file found at the configured GitHub path")
+        raise ValueError("AINotePro library is missing or not accessible at the configured GitHub path (HTTP 404)")
     return result
 
 
