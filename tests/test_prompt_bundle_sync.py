@@ -109,6 +109,12 @@ class BundleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_bundle({}, {}, [dict(profile("ID"), id="insecure")])
 
+    def test_audio_profile_with_unexpected_api_key_is_rejected(self):
+        dangerous = profile("Secret")
+        dangerous["provider_configs"]["edge_tts"]["api_key"] = "do-not-upload"
+        with self.assertRaisesRegex(ValueError, "credential field"):
+            make_bundle({}, {}, [dangerous])
+
     def test_advanced_default_is_not_exported(self):
         with self.assertRaises(ValueError):
             make_bundle({}, {"Default": "dynamic"}, [])
