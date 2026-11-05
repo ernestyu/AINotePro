@@ -137,6 +137,18 @@ class PromptStoreTests(unittest.TestCase):
         raw = self.store._read_raw()
         self.assertNotIn('token', str(raw.get('text', {}).get('github_prompt_sync')))
 
+    def test_credential_settings_rollback_restores_unconfigured_state(self):
+        original = self.store.github_prompt_settings()
+        self.assertEqual(original["repository"], "")
+        self.store.set_github_prompt_settings({
+            "repository": "owner/repo", "branch": "main",
+            "path": "anki/ainotepro-library.json",
+        })
+        self.assertIn("github_prompt_sync", self.store._read_raw()["text"])
+        self.store.restore_github_prompt_settings(original)
+        self.assertNotIn("github_prompt_sync", self.store._read_raw()["text"])
+        self.assertEqual(self.store.github_prompt_settings(), original)
+
     def test_prompt_maps_cannot_bypass_mode_cas(self):
         self.store.prompt_snapshot('easy')
         before = self.store._read_raw()
