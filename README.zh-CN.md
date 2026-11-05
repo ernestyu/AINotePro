@@ -81,7 +81,7 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 ## 提示词库导入、导出与 GitHub
 
-**Import / Export** 现在一次处理完整提示词库（Easy 与 Advanced 两套已保存提示词），以单个 UTF-8 JSON 文件保存。Export 不包括未保存的编辑草稿，若目标文件同名，自动使用 `(1)`、`(2)` 后缀避免覆盖；Import 同时兼容新版全量文件、旧版单模式文件及旧 Easy 提示词映射。导入时不会覆盖已有内容：名称和内容都相同则跳过，名称相同而内容不同则将新提示词命名为 `名称 (1)`、`名称 (2)`。Easy 的受保护 Default 不会被改写，Advanced 动态 Default 不参与导出。
+**Import / Export** 现在一次处理完整的 AINotePro Library（`format: AINotePro.library`，`version: 1`），单个 UTF-8 JSON 同时保存 Easy、Advanced 提示词和完整 Audio Profiles（Edge/Kokoro、四个 Voice、源/目标字段等）。新功能仅接受该统一格式，不兼容开发阶段未发布的 Prompt-only 格式。不导出未保存的草稿、Text Provider 设置、API Key 或当前机器的 Audio Profile ID。若本地导出文件已存在，自动追加 `(1)`、`(2)`。导入遇到同名不同内容则重命名，内容完全相同则跳过；新的 Audio Profile 分配新 UUID，已有 Profile ID 与当前选中项不变。Easy Default 不被覆盖，Advanced 动态 Default 不导出。全部数据先校验，再一次性写入本地配置。
 
 **Save to GitHub / Load from GitHub / ⚙** 是手动同步入口，远端使用指定仓库、分支及路径下的一个 `prompts.json` 文件。无需安装 Git、GitHub CLI 或配置 SSH；插件使用 HTTPS API。首次在设置中填写 `owner/repository`、Branch、JSON path，以及 GitHub Fine-grained Token（保存需要该仓库的 Contents 读写权限）。令牌只保留在当前 Anki 会话的内存中，不写入配置或导出文件；重启后需要重新输入。公开仓库的 Load 可以不填写 Token。Save/Load 均合并两套提示词，遇到同名不同内容加数字后缀，不删除已有提示词；网络请求不阻塞界面。编辑器有未保存的修改时请先保存或放弃，不会自动同步。
 
