@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import re
+import unicodedata
 import uuid
 
 DEFAULT_URL = "http://127.0.0.1:7860"
@@ -10,6 +11,12 @@ PROFILE_VERSION = 2
 VOICE_SLOTS = 4
 ID_RE = re.compile(r"^(legacy-edge-default|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 KOKORO_RE = re.compile(r"^(af|am|bf|bm)_[a-z0-9_]+$")
+
+
+def profile_name_key(name):
+    """Case-insensitive, NFC-normalized key; preserve original display name."""
+    text = unicodedata.normalize("NFC", name.strip())
+    return unicodedata.normalize("NFC", text.casefold())
 
 
 def _edge_voice(enabled=False, voice="", gender="Female", speed=0, volume=0, pitch=0, preview_text=""):
@@ -98,9 +105,9 @@ def validate_audio(audio):
         if not isinstance(profile, dict) or profile.get("schema_version") != 2:
             raise ValueError("Invalid Profile version")
         name = str(profile.get("name", "")).strip()
-        if not name or len(name) > 100 or name.casefold() in names:
+        if not name or len(name) > 100 or profile_name_key(name) in names:
             raise ValueError("Invalid or duplicate Profile name")
-        names.add(name.casefold())
+        names.add(profile_name_key(name))
         if profile.get("provider") not in ("edge_tts", "kokoro_gradio"):
             raise ValueError("Invalid Audio provider")
         if profile.get("random_strategy") != "uniform_per_note":
