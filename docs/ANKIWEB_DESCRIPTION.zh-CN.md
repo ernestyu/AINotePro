@@ -8,11 +8,14 @@ AINotePro 为 Anki 浏览器和笔记编辑器提供 AI 文本与语音生成工
 
 - **Text Easy：** 根据一个来源字段生成文本，并写入一个目标字段；支持复用 Prompt 和可选的视觉识别/OCR 输入。
 - **Text Advanced：** 支持多个来源及目标字段，通过 `{OUT:字段名}` 定义输出，严格验证 JSON 响应。生成前统一预检所有选中笔记；不再存在固定的 100 条批次上限。
-- 保存、复用、导入及导出提示词；内置 Default 提示词受到保护。
+- 保存、复用提示词；内置 Default 提示词受到保护。
+- **统一 Library 导入/导出：** 单个 JSON 文件包含 Easy、Advanced 提示词及完整 Audio Profiles；导入时保留已有本地数据。
+- **GitHub 手动同步：** 可通过 GitHub Contents API Save/Load 完整 Library，支持仓库子目录；Fine-grained Token 保存在操作系统凭据库中，不需要 Git、gh 或 SSH，也不启用自动同步。
 - 支持 13 个内置 Text Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。云端 Chat Endpoint 或本地 Server Address 可编辑。
 - 全部 13 个预设均可设置 **Temperature** 与按模型保存的 **Reasoning**（Off、Low、Medium、High、Model Default）。Model Default 不发送推理覆盖参数；其他档位是否有效取决于服务端接口。原生 Ollama 只保证 Think 开关，不保证三级推理强度。
 - 支持模型列表 Refresh 或手动输入模型；Models Endpoint 保留为内部设置，界面不提供单独的地址编辑框。
-- 支持 Edge TTS 或可选的本地 Kokoro MLX 生成 MP3。Edge TTS 音色列表在人名前显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`），便于辨认发音地区。Audio 提供最多三个独立 Voice 区块、具名 Profile、后台合成，以及使用 Qt 绘制左右箭头的 Speed/Volume 调节按钮。
+- 支持 Edge TTS 或可选的本地 Kokoro MLX 生成 MP3。Edge TTS 音色列表在人名前显示地区代码（如 `US-AriaNeural`、`GB-SoniaNeural`），便于辨认发音地区。Audio 提供最多四个独立 Voice 区块、具名 Profile、后台合成，以及使用 Qt 绘制左右箭头的 Speed/Volume 调节按钮。
+- **批量安全检查：** Text Easy 与 Audio 在生成前检查所选笔记属于同一 Note Type，且来源及目标字段有效；不符合条件时整批停止。
 - 支持一条或多条笔记处理，并保留保守的笔记与媒体写入规则。
 
 ## 环境要求
@@ -23,7 +26,7 @@ AINotePro 为 Anki 浏览器和笔记编辑器提供 AI 文本与语音生成工
 
 ## 隐私
 
-AINotePro 会向选择的 LLM Endpoint 发送来源字段文本与 Prompt；开启图像输入时，可能将 Anki 媒体图像编码为 Base64 发送。Audio 会将文本发送到 Edge TTS 或配置的本地 Kokoro 服务。API Key 等配置保存在本地。处理敏感笔记前请先阅读所用服务的隐私政策。
+AINotePro 会向选择的 LLM Endpoint 发送来源字段文本与 Prompt；开启图像输入时，可能将 Anki 媒体图像编码为 Base64 发送。Audio 会将文本发送到 Edge TTS 或配置的本地 Kokoro 服务。API Key 等配置保存在本地。手动使用 GitHub Sync 时，完整 Library JSON（包含提示词内容和 Audio Profile 设置）会写入用户指定的 GitHub 仓库；公开仓库中的内容可被他人读取。GitHub Token 保存在系统凭据库，不随 Library 上传。处理敏感笔记前请先阅读所用服务的隐私政策。
 
 ## 支持
 
