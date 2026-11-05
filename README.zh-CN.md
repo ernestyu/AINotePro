@@ -8,7 +8,8 @@ AINotePro 是一款 Anki 插件，可根据笔记字段内容生成 AI 文本或
 
 - **Text Easy**：从一个来源字段生成文本，写入一个目标字段；支持已保存的提示词和可选图像识别。
 - **Text Advanced**：支持多个来源字段及多个目标字段，以严格 JSON 格式返回结果；生成前对整批笔记统一验证。
-- 保存、加载、删除、导入和导出提示词；支持受保护的内置 Default 提示词。
+- 保存、加载和删除提示词，支持受保护的 Default；Import/Export 一次处理 Easy、Advanced 提示词和全部 Audio Profile 的统一 JSON。
+- GitHub 手动 Save/Load 可同步完整 Library；通过 HTTPS API 工作，Token 保存在系统凭据库，不需要 Git、gh 或 SSH。
 - 13 个内置文本 Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。
 - 支持模型列表 Refresh（服务端需提供模型枚举接口）、手动输入模型名称，以及按 Provider 保存模型和配置。
 - **Reasoning 对全部 13 个 Provider 开放**，按模型保存 Off、Low、Medium、High 或 Model Default。
