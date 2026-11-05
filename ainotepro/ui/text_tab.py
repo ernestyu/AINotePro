@@ -13,7 +13,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QEvent, QMenu
+    QIcon, QStyle, QEvent, QMenu, QDialog
 )
 from aqt.utils import showInfo, showWarning
 
@@ -22,6 +22,10 @@ from ..services.provider_factory import create_provider
 from ..provider_presets import PROVIDER_PRESETS
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.batch_note_types import validate_batch_note_types
+from ..core.async_task import AsyncTask
+from ..core.prompt_bundle import parse_bundle, serialize_bundle
+from ..services.github_prompts import load_from_github, save_to_github
+from .github_prompt_dialog import GitHubPromptSettingsDialog
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
     preflight_requests, reconcile_field_selection,
@@ -34,6 +38,7 @@ from ..core.advanced_ledger import AdvancedBatchLedger
 ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PROMPT_DIR = os.path.join(USER_FILES_DIR, "gen_text")
 PROMPT_FILE = os.path.join(PROMPT_DIR, "prompt.json")
+_GITHUB_SYNC_WORKERS = set()  # Keep QThreads alive until finished.
 USER_CONFIG_FILE = CONFIG_FILE
 DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
@@ -354,6 +359,9 @@ class TextTab(QWidget):
         self._advanced_run_id = 0
         self._advanced_ui_finished = False
         self._advanced_ledger = AdvancedBatchLedger.for_notes([])
+        self._github_token = ""  # Never persisted to user_config.json.
+        self._github_busy = False
+        self._github_worker = None
         self._discarded_dynamic_default = False
         self.destroyed.connect(self._abandon_advanced_task)
         if parent is not None:
@@ -526,6 +534,18 @@ class TextTab(QWidget):
         self.import_button.clicked.connect(self._on_import_prompt)
         self.export_button.clicked.connect(self._on_export_prompt)
         btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button)
+        self.github_save_button = QPushButton("Save to GitHub")
+        self.github_load_button = QPushButton("Load from GitHub")
+        self.github_settings_button = QToolButton()
+        self.github_settings_button.setText("⚙")
+        self.github_settings_button.setToolTip("GitHub Prompt Library Settings")
+        self.github_settings_button.setFixedWidth(30)
+        self.github_save_button.clicked.connect(self._on_save_to_github)
+        self.github_load_button.clicked.connect(self._on_load_from_github)
+        self.github_settings_button.clicked.connect(self._on_github_settings)
+        for button in (self.github_save_button, self.github_load_button,
+                       self.github_settings_button):
+            btn_row.addWidget(button)
         btn_row.addStretch(1)
         self.new_button = QPushButton("New")
         self.save_button = QPushButton(" Save"); self.save_button.setIcon(save_icon)
@@ -1147,77 +1167,178 @@ class TextTab(QWidget):
         except Exception as exc:
             showWarning(f"Could not delete prompt '{name}': {exc}")
 
+    def _prompt_library_changed(self):
+        """Refresh the current mode after a two-domain import."""
+        self._load_prompt_list()
+
+    @staticmethod
+    def _prompt_merge_summary(stats):
+        return (f"Added {sum(v['added'] for v in stats.values())} prompts "
+                f"({sum(v['renamed'] for v in stats.values())} renamed; "
+                f"{sum(v['unchanged'] for v in stats.values())} already present).")
+
     def _on_import_prompt(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Import Prompts", "", "JSON Files (*.json)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Prompt Library", "", "JSON Files (*.json)")
         if not file_path:
             return
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                imported = json.load(f)
-            if not isinstance(imported, dict):
-                showWarning("Invalid prompt file format. Expected a JSON object."); return
-            if "mode" in imported or "prompts" in imported:
-                imported_mode = imported.get("mode")
-                new_prompts = imported.get("prompts")
-                if imported_mode != self._field_mode:
-                    showWarning(f"This is a {imported_mode!r} Prompt export; switch modes before importing it.")
-                    return
-            else:
-                if self._field_mode != "easy":
-                    showWarning("Legacy prompt files can only be imported in Easy mode.")
-                    return
-                new_prompts = imported
-            if not isinstance(new_prompts, dict) or any(not isinstance(key, str) or not isinstance(value, str)
-                                                        for key, value in new_prompts.items()):
-                showWarning("Invalid prompt names or contents."); return
-            if "Default" in new_prompts:
-                del new_prompts["Default"]
-                showWarning("Default is protected and was skipped during import.")
-            if not new_prompts:
+            if os.path.getsize(file_path) > 10_000_000:
+                raise ValueError("Prompt library file is larger than 10 MB")
+            with open(file_path, "r", encoding="utf-8-sig") as stream:
+                imported = parse_bundle(json.load(stream))
+            if not self._confirm_leave_prompt():
                 return
-
-            current_prompts = dict(self.all_prompts)
-            if self._field_mode == "advanced":
-                current_prompts.pop("Default", None)
-            conflicts = [k for k in new_prompts if k in current_prompts]
-            if conflicts:
-                if QMessageBox.question(self, "Confirm Overwrite", 
-                                        f"The following prompts already exist: {', '.join(conflicts)}. Overwrite them?",
-                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
-                    # Don't overwrite, just import non-conflicting ones
-                    for k in conflicts:
-                        del new_prompts[k]
-            
-            current_prompts.update(new_prompts)
-            self._prompt_digest = _save_prompts(current_prompts, self._field_mode, self._prompt_digest)
-            self.all_prompts = current_prompts
-            if self._field_mode == "advanced":
-                self.all_prompts["Default"] = default_prompt(
-                    self.advanced_source_fields.selected_fields(),
-                    self.advanced_destination_fields.selected_fields(),
-                )
-            self._filter_prompts()
-            showInfo(f"Successfully imported {len(new_prompts)} prompts.")
-
-        except Exception as e:
-            showWarning(f"Failed to import prompts: {e}")
+            merged, stats = ConfigManager().merge_prompt_library(imported)
+            try:
+                _write_json_file(PROMPT_FILE, merged["easy"])
+            except OSError as exc:
+                print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
+            self._prompt_library_changed()
+            showInfo("Prompt library imported. " + self._prompt_merge_summary(stats))
+        except Exception as exc:
+            showWarning(f"Failed to import prompt library: {exc}")
 
     def _on_export_prompt(self):
-        name = self._prompt_name_text()
-        if not name:
-            showWarning("Please select a prompt to export."); return
-        
-        content = self.prompt_edit.toPlainText()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Export Prompt", f"{name}.json", "JSON Files (*.json)")
+        if self._prompt_is_dirty():
+            showWarning("Save or discard the current prompt draft before exporting.")
+            return
+        default_name = "AINotePro-prompts.json"
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export All Prompts (Easy + Advanced)", default_name,
+            "JSON Files (*.json)", options=QFileDialog.Option.DontConfirmOverwrite)
         if not file_path:
             return
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "mode": self._field_mode,
-                           "prompts": {name: content}}, f, ensure_ascii=False, indent=2)
-            showInfo(f"Prompt '{name}' exported successfully.")
-        except Exception as e:
-            showWarning(f"Failed to export prompt: {e}")
+            data = serialize_bundle(ConfigManager().prompt_library_snapshot())
+            if not file_path.lower().endswith(".json"):
+                file_path += ".json"
+            base, ext = os.path.splitext(file_path)
+            target = file_path
+            suffix = 1
+            while os.path.exists(target):
+                target = f"{base} ({suffix}){ext}"
+                suffix += 1
+            with open(target, "xb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            showInfo(f"All Easy and Advanced prompts exported to:\n{target}")
+        except Exception as exc:
+            showWarning(f"Failed to export prompt library: {exc}")
+
+    def _on_github_settings(self):
+        dialog = GitHubPromptSettingsDialog(
+            ConfigManager().github_prompt_settings(), self._github_token, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        try:
+            ConfigManager().set_github_prompt_settings(dialog.value)
+        except Exception as exc:
+            showWarning(f"Could not save GitHub settings: {exc}")
+            return False
+        self._github_token = dialog.session_token
+        return True
+
+    def _github_configuration(self, *, require_token=False):
+        settings = ConfigManager().github_prompt_settings()
+        if not settings["repository"]:
+            if not self._on_github_settings():
+                return None
+            settings = ConfigManager().github_prompt_settings()
+        if require_token and not self._github_token:
+            showWarning("GitHub Save needs a token. Open GitHub Settings and enter a "
+                        "fine-grained token with Contents read/write permission.")
+            return None
+        return settings
+
+    def _start_github_sync(self, work, on_success):
+        if self._github_busy:
+            return
+        self._github_busy = True
+        for button in (self.github_save_button, self.github_load_button,
+                       self.github_settings_button):
+            button.setEnabled(False)
+        task = AsyncTask(work)
+        self._github_worker = task
+        _GITHUB_SYNC_WORKERS.add(task)
+        task.finished_ok.connect(on_success)
+        task.failed.connect(self._on_github_sync_error)
+        task.finished.connect(self._on_github_sync_finished)
+        task.finished.connect(lambda t=task: _GITHUB_SYNC_WORKERS.discard(t))
+        task.start()
+
+    def _on_github_sync_finished(self):
+        self._github_busy = False
+        self._github_worker = None
+        if self._advanced_closing:
+            return
+        for button in (self.github_save_button, self.github_load_button,
+                       self.github_settings_button):
+            button.setEnabled(True)
+
+    def _on_github_sync_error(self, message):
+        if not self._advanced_closing:
+            showWarning(f"GitHub prompt synchronization failed: {message}")
+
+    def _on_save_to_github(self):
+        if self._github_busy:
+            return
+        if self._prompt_is_dirty():
+            showWarning("Save or discard the current prompt draft before GitHub Save.")
+            return
+        settings = self._github_configuration(require_token=True)
+        if not settings:
+            return
+        try:
+            library = ConfigManager().prompt_library_snapshot()
+        except Exception as exc:
+            showWarning(f"Could not read the saved prompt library: {exc}")
+            return
+        token = self._github_token
+        self._start_github_sync(
+            lambda: save_to_github(settings, token, library),
+            self._github_saved)
+
+    def _github_saved(self, result):
+        if self._advanced_closing:
+            return
+        if not result["changed"]:
+            showInfo("GitHub prompt library is already up to date.")
+        else:
+            showInfo("Prompt library saved to GitHub. "
+                     + self._prompt_merge_summary(result["stats"]))
+
+    def _on_load_from_github(self):
+        if self._github_busy:
+            return
+        if self._prompt_is_dirty():
+            showWarning("Save or discard the current prompt draft before GitHub Load.")
+            return
+        settings = self._github_configuration()
+        if not settings:
+            return
+        token = self._github_token
+        self._start_github_sync(
+            lambda: load_from_github(settings, token),
+            self._github_loaded)
+
+    def _github_loaded(self, library):
+        if self._advanced_closing:
+            return
+        if self._prompt_is_dirty():
+            showWarning("The prompt editor has unsaved edits; GitHub Load was not applied.")
+            return
+        try:
+            merged, stats = ConfigManager().merge_prompt_library(library)
+            try:
+                _write_json_file(PROMPT_FILE, merged["easy"])
+            except OSError as exc:
+                print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
+            self._prompt_library_changed()
+            showInfo("GitHub prompt library loaded. " + self._prompt_merge_summary(stats))
+        except Exception as exc:
+            showWarning(f"Could not import GitHub prompts: {exc}")
 
     # Provider config
     def _service_map(self) -> str:
