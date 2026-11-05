@@ -8,7 +8,7 @@ import threading
 import hashlib
 import copy
 
-from .audio_profiles import migrate_audio, validate_audio, new_profile_id
+from .audio_profiles import migrate_audio, validate_audio, new_profile_id, profile_name_key
 from ..core.prompt_bundle import make_bundle, merge_bundles, parse_bundle
 from ..services.github_prompts import validate_settings
 from ..provider_presets import PROVIDER_PRESETS, default_provider_config
@@ -440,7 +440,7 @@ class ConfigManager:
             if merged != original:
                 updated_audio = copy.deepcopy(audio)
                 known = {
-                    profile["name"].casefold()
+                    profile_name_key(profile["name"])
                     for profile in updated_audio["profiles"].values()
                 }
                 for profile in merged["audio_profiles"]:
@@ -477,6 +477,24 @@ class ConfigManager:
                 "github_prompt_sync", dict(saved)
             )
         )
+
+    def restore_github_prompt_settings(self, previous):
+        """Compensate a partially committed GitHub settings change.
+
+        An empty repository represents the original absence of a GitHub sync
+        configuration; do not persist an invalid placeholder record.
+        """
+        if not isinstance(previous, dict):
+            raise ValueError("Invalid previous GitHub settings")
+        if previous.get("repository"):
+            return self.set_github_prompt_settings(previous)
+
+        def update(raw):
+            text = raw.get("text", {})
+            if isinstance(text, dict):
+                text.pop("github_prompt_sync", None)
+
+        return self._replace_raw(update)
 
     def update_text_fields(self, fields):
         """Write non-Prompt Text UI state without weakening Prompt CAS.
