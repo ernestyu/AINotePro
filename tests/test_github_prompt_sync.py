@@ -1,6 +1,9 @@
 """Offline GitHub library synchronization tests using a mocked HTTPS response."""
 import base64
+import io
 import json
+import os
+import tempfile
 import unittest
 from urllib.error import HTTPError
 from pathlib import Path
@@ -146,6 +149,43 @@ class GitHubLibraryTests(unittest.TestCase):
         with patch.object(gh._OPENER, "open", return_value=FakeResponse(response)):
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 gh.load_from_github(self.settings, "")
+
+    def test_diagnostics_write_file_and_terminal_without_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "logs", "github_sync.log")
+            stream = io.StringIO()
+            with patch.object(gh, "diagnostic_log_path", return_value=path), \
+                 patch.object(gh.sys, "stderr", stream):
+                error = gh._log(gh.logging.ERROR, "check_repository", self.settings,
+                                404, "request-123", "http_error", has_token=True)
+            self.assertIsNone(error)
+            self.assertTrue(os.path.isfile(path))
+            with open(path, "r", encoding="utf-8") as inp:
+                log = inp.read()
+            self.assertIn("stage=check_repository status=404", log)
+            self.assertIn("request_id=request-123", log)
+            self.assertIn("token_present=True", log)
+            self.assertNotIn("secret-token", log)
+            self.assertIn("stage=check_repository status=404", stream.getvalue())
+
+    def test_logging_failure_is_visible_in_dialog_and_terminal(self):
+        stream = io.StringIO()
+        def blocked(*args, **kwargs):
+            raise PermissionError("read-only log folder")
+        def open_(req, timeout):
+            raise HTTPError(req.full_url, 404, "Not Found",
+                            {"X-GitHub-Request-Id": "blocked-log"}, None)
+        with patch.object(gh._OPENER, "open", side_effect=open_), \
+             patch.object(gh.os, "makedirs", side_effect=blocked), \
+             patch.object(gh.sys, "stderr", stream):
+            with self.assertRaises(gh.GitHubAPIError) as error:
+                gh.fetch_remote(self.settings, "secret-token")
+        message = str(error.exception)
+        self.assertIn("Diagnostic logging failed", message)
+        self.assertIn("PermissionError", message)
+        self.assertIn("Diagnostic file write FAILED", stream.getvalue())
+        self.assertNotIn("secret-token", stream.getvalue())
+        self.assertNotIn("secret-token", message)
 
     def test_private_repo_404_is_not_treated_as_new_library(self):
         writes = []
