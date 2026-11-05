@@ -74,6 +74,19 @@ class GitHubLibraryTests(unittest.TestCase):
                          "Bearer secret-token")
         self.assertNotIn("secret-token", requests[0].full_url)
 
+    def test_nested_directory_path_uses_contents_api(self):
+        library = bundle(3)
+        calls = []
+
+        def open_(req, timeout):
+            calls.append(req.full_url)
+            return FakeResponse(remote_document(library))
+
+        settings = dict(self.settings, path="anki/ainotepro-library.json")
+        with patch.object(gh._OPENER, "open", side_effect=open_):
+            self.assertEqual(gh.load_from_github(settings, ""), library)
+        self.assertIn("/contents/anki/ainotepro-library.json?ref=main", calls[0])
+
     def test_save_merges_three_domains_and_uses_sha(self):
         remote = bundle(3)
         local = bundle(7)
