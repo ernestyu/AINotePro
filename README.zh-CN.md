@@ -83,7 +83,7 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 **Import / Export** 现在一次处理完整的 AINotePro Library（`format: AINotePro.library`，`version: 1`），单个 UTF-8 JSON 同时保存 Easy、Advanced 提示词和完整 Audio Profiles（Edge/Kokoro、四个 Voice、源/目标字段等）。新功能仅接受该统一格式，不兼容开发阶段未发布的 Prompt-only 格式。不导出未保存的草稿、Text Provider 设置、API Key 或当前机器的 Audio Profile ID。若本地导出文件已存在，自动追加 `(1)`、`(2)`。导入遇到同名不同内容则重命名，内容完全相同则跳过；新的 Audio Profile 分配新 UUID，已有 Profile ID 与当前选中项不变。Easy Default 不被覆盖，Advanced 动态 Default 不导出。全部数据先校验，再一次性写入本地配置。
 
-**Save to GitHub / Load from GitHub / ⚙** 是手动同步入口，远端使用指定仓库、分支及路径下的一个 `prompts.json` 文件。无需安装 Git、GitHub CLI 或配置 SSH；插件使用 HTTPS API。首次在设置中填写 `owner/repository`、Branch、JSON path，以及 GitHub Fine-grained Token（保存需要该仓库的 Contents 读写权限）。令牌只保留在当前 Anki 会话的内存中，不写入配置或导出文件；重启后需要重新输入。公开仓库的 Load 可以不填写 Token。Save/Load 均合并两套提示词，遇到同名不同内容加数字后缀，不删除已有提示词；网络请求不阻塞界面。编辑器有未保存的修改时请先保存或放弃，不会自动同步。
+**Save to GitHub / Load from GitHub / ⚙** 仍是手动同步入口，远端统一文件默认 `ainotepro-library.json`（可配置路径），包含全部提示词和 Audio Profiles。无需安装 Git、GitHub CLI 或配置 SSH；使用 HTTPS API。设置 Repository、Branch、JSON path 和仓库限定的 Fine-grained Token（Save 需要 Contents 读写权限）。Token 只保留在当前 Anki 会话内存中，不进入 JSON；公开仓库的 Load 可以不填写 Token。Save/Load 均采用非覆盖合并，遇到同名不同内容加数字后缀，不删除数据；网络请求不阻塞界面。请先保存未提交的 Text Prompt 或 Audio Profile。导入后 Audio 页刷新列表和服务可用性检测，服务不在线时保留 Profile，只提示无法生成。
 
 ## Audio 使用方法
 
