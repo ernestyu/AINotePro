@@ -22,6 +22,14 @@ AINotePro 不运行自有云端服务。它将处理所需的数据发送至用�
 
 Provider 配置（包含 Temperature 及按模型保存的 Reasoning）、API Key、模型名称、Audio Profile 与 Prompt 模板等保存在插件的 `user_files` 目录。Anki 升级插件时会保留该目录。
 
+## 可选的 GitHub Library 手动同步
+
+只有在用户主动点击 **Save to GitHub** 时，AINotePro 才通过 GitHub HTTPS Contents API 将一个完整 Library JSON 写入所设置的仓库、分支和路径。文件包含已保存的 Easy/Advanced Prompt 文本与 Audio Profile 设置（Voice、Provider、来源/目标字段名称、Kokoro 本地服务地址等）。**有权限读取该仓库的其他人也能读取这些内容；如果仓库是公开的，任何人都可以查看。** **Load from GitHub** 则读取此 JSON 并与本地数据合并。此功能不做后台自动同步。
+
+Library 不包含 Text Provider 的 API Key 和配置、GitHub Token、未保存的草稿、Audio Profile 的本地 UUID 或当前选中项。GitHub Fine-grained Token 按仓库存入操作系统凭据库（macOS Keychain、Windows Credential Manager 或 Linux Secret Service），不写入 Library 或 `user_config.json`。进行需要身份验证的 HTTPS 请求时，GitHub 会收到相应的认证凭据。
+
+GitHub 同步日志位于 `user_files/logs/github_sync.log`，并同步输出到启动 Anki 的终端，记录操作阶段、HTTP 状态、GitHub Request ID、仓库/分支/路径以及是否提供 Token；不会主动记录 Token 值、Authorization 请求头或 Library 内容。仓库名称与路径本身也可能透露信息，公开日志前应检查并脱敏。
+
 ## 诊断日志
 
 启用 DEBUG 后，插件记录 Provider、模型、经过脱敏的 Endpoint URL、实际发出的 Temperature 与 Reasoning 请求参数、可获取的 Token 统计及耗时等元数据。目前的日志实现不打印完整 Prompt、生成响应或 API Key。
