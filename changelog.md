@@ -2,6 +2,26 @@
 
 [English](changelog.md) | [简体中文](changelog.zh-CN.md)
 
+## v1.1.1 — Library synchronization and Audio updates (2026-11-05)
+
+### Text Library
+
+- **Full-library Import/Export:** Text Import and Export now operate on one `AINotePro.library` version 1 JSON file containing saved Easy prompts, Advanced prompts, and Audio Profiles, including all four Edge/Kokoro Voice slots. Existing local saved prompts and profiles remain in `user_files` during an add-on upgrade. The new Import accepts the unified library format, not old prompt-only export JSON.
+- **Manual GitHub synchronization:** Added Save to GitHub, Load from GitHub, and repository/branch/JSON-path settings, including repository subdirectories. Uses the HTTPS Contents API; no local git, gh or SSH configuration is required. Remote and local imports are non-destructive; conflicting names gain numbered suffixes and repeated imports avoid duplicate numbered entries.
+- **Secure GitHub credentials:** Fine-grained tokens are stored per repository in macOS Keychain, Windows Credential Manager, or Linux Secret Service. The UI displays saved state without revealing the token, requires confirmation to save/replace/remove it, and checks for partial changes when settings persistence fails. Tokens do not enter exported JSON or normal settings files.
+- **Reliability and diagnostics:** Added credential/branch/repository preflight, conflict-aware GitHub writes, async network calls, bounded diagnostic logs, full-library validation, atomic local config updates, Audio export field allowlisting, and Unicode-safe prompt/profile name checks.
+
+### Audio and note safety
+
+- **Fourth Voice slot:** Increased the number of independent Voice blocks from three to four for Edge TTS and Kokoro, including migration of saved three-slot profiles.
+- **Note Type preflight:** Text Easy and Audio check that all selected notes share one Note Type and that source/destination fields exist before generating or writing. Mixed Note Types reject the batch; different card templates within one Note Type are still supported.
+
+### Compatibility and upgrades
+
+- The GitHub sync format is `AINotePro.library` version 1; sync is manual, not automatic. Different names with identical content are retained as separate aliases; conflicting names can map differently on different devices while saved content is preserved.
+- Keep the add-on's `user_files` directory during upgrades. Restart Anki after installing the new `.ankiaddon`.
+- The bundled libraries and the 13 Text providers are unchanged from v1.1.0 in this release.
+
 ## v1.1.0 — Text and Audio upgrades (2026-11-03)
 
 ### Text
