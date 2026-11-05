@@ -11,6 +11,7 @@ on:
       - "tests/test_github_prompt_sync.py"
       - "tests/test_github_credentials.py"
       - "tests/test_advanced_prompt_store.py"
+      - "tests/test_library_import_ui.py"
       - ".github/workflows/library-sync-tests.yml"
 
 jobs:
@@ -29,3 +30,4 @@ jobs:
           python -m unittest discover -s tests -p "test_github_prompt_sync.py" -v
           python -m unittest discover -s tests -p "test_github_credentials.py" -v
           python -m unittest discover -s tests -p "test_advanced_prompt_store.py" -v
+          python -m unittest discover -s tests -p "test_library_import_ui.py" -v
