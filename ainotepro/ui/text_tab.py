@@ -1172,19 +1172,47 @@ class TextTab(QWidget):
         except Exception as exc:
             showWarning(f"Could not delete prompt '{name}': {exc}")
 
-    def _prompt_library_changed(self):
-        """Refresh the current mode after a two-domain import."""
+    def _audio_library_tab(self):
+        """Return the paired Audio tab, when shown inside the main dialog."""
+        parent = self.parent()
+        tabs = getattr(parent, "tabs", None)
+        return tabs.get("Audio") if isinstance(tabs, dict) else None
+
+    def _audio_ready_for_library_import(self):
+        audio = self._audio_library_tab()
+        if audio is None:
+            return True
+        if audio._running:
+            showWarning("Audio generation is running. Finish or cancel it before importing a library.")
+            return False
+        if audio._is_dirty():
+            showWarning("The Audio tab has unsaved Profile changes. Save or discard "
+                        "those changes before importing a library.")
+            return False
+        return True
+
+    def _library_changed(self, stats):
+        """Refresh Text and Audio editors after a single atomic library import."""
         self._load_prompt_list()
+        if stats["audio_profiles"]["added"]:
+            audio = self._audio_library_tab()
+            if audio is not None and not audio.refresh_after_library_import():
+                showWarning("Library imported, but the Audio tab could not refresh. "
+                            "Reopen AINotePro to load imported Profiles.")
 
     @staticmethod
     def _prompt_merge_summary(stats):
-        return (f"Added {sum(v['added'] for v in stats.values())} prompts "
-                f"({sum(v['renamed'] for v in stats.values())} renamed; "
-                f"{sum(v['unchanged'] for v in stats.values())} already present).")
+        prompts = {key: sum(stats[m][key] for m in ("easy", "advanced"))
+                   for key in ("added", "renamed", "unchanged")}
+        audio = stats["audio_profiles"]
+        return (f"Prompts: {prompts['added']} added, {prompts['renamed']} renamed, "
+                f"{prompts['unchanged']} unchanged. "
+                f"Audio Profiles: {audio['added']} added, {audio['renamed']} renamed, "
+                f"{audio['unchanged']} unchanged.")
 
     def _on_import_prompt(self):
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Import Prompt Library", "", "JSON Files (*.json)")
+            self, "Import AINotePro Library", "", "JSON Files (*.json)")
         if not file_path:
             return
         try:
@@ -1192,15 +1220,17 @@ class TextTab(QWidget):
                 raise ValueError("Prompt library file is larger than 10 MB")
             with open(file_path, "r", encoding="utf-8-sig") as stream:
                 imported = parse_bundle(json.load(stream))
+            if not self._audio_ready_for_library_import():
+                return
             if not self._confirm_leave_prompt():
                 return
-            merged, stats = ConfigManager().merge_prompt_library(imported)
+            merged, stats = ConfigManager().merge_library(imported)
             try:
                 _write_json_file(PROMPT_FILE, merged["easy"])
             except OSError as exc:
                 print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
-            self._prompt_library_changed()
-            showInfo("Prompt library imported. " + self._prompt_merge_summary(stats))
+            self._library_changed(stats)
+            showInfo("AINotePro library imported. " + self._prompt_merge_summary(stats))
         except Exception as exc:
             showWarning(f"Failed to import prompt library: {exc}")
 
@@ -1208,14 +1238,14 @@ class TextTab(QWidget):
         if self._prompt_is_dirty():
             showWarning("Save or discard the current prompt draft before exporting.")
             return
-        default_name = "AINotePro-prompts.json"
+        default_name = "AINotePro-library.json"
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export All Prompts (Easy + Advanced)", default_name,
+            self, "Export AINotePro Library (Text + Audio)", default_name,
             "JSON Files (*.json)", options=QFileDialog.Option.DontConfirmOverwrite)
         if not file_path:
             return
         try:
-            data = serialize_bundle(ConfigManager().prompt_library_snapshot())
+            data = serialize_bundle(ConfigManager().library_snapshot())
             if not file_path.lower().endswith(".json"):
                 file_path += ".json"
             base, ext = os.path.splitext(file_path)
@@ -1228,7 +1258,7 @@ class TextTab(QWidget):
                 stream.write(data)
                 stream.flush()
                 os.fsync(stream.fileno())
-            showInfo(f"All Easy and Advanced prompts exported to:\n{target}")
+            showInfo(f"All saved Text prompts and Audio Profiles exported to:\n{target}")
         except Exception as exc:
             showWarning(f"Failed to export prompt library: {exc}")
 
@@ -1296,7 +1326,7 @@ class TextTab(QWidget):
         if not settings:
             return
         try:
-            library = ConfigManager().prompt_library_snapshot()
+            library = ConfigManager().library_snapshot()
         except Exception as exc:
             showWarning(f"Could not read the saved prompt library: {exc}")
             return
@@ -1309,9 +1339,9 @@ class TextTab(QWidget):
         if self._advanced_closing:
             return
         if not result["changed"]:
-            showInfo("GitHub prompt library is already up to date.")
+            showInfo("GitHub AINotePro library is already up to date.")
         else:
-            showInfo("Prompt library saved to GitHub. "
+            showInfo("AINotePro library saved to GitHub. "
                      + self._prompt_merge_summary(result["stats"]))
 
     def _on_load_from_github(self):
@@ -1319,6 +1349,8 @@ class TextTab(QWidget):
             return
         if self._prompt_is_dirty():
             showWarning("Save or discard the current prompt draft before GitHub Load.")
+            return
+        if not self._audio_ready_for_library_import():
             return
         settings = self._github_configuration()
         if not settings:
@@ -1334,14 +1366,16 @@ class TextTab(QWidget):
         if self._prompt_is_dirty():
             showWarning("The prompt editor has unsaved edits; GitHub Load was not applied.")
             return
+        if not self._audio_ready_for_library_import():
+            return
         try:
-            merged, stats = ConfigManager().merge_prompt_library(library)
+            merged, stats = ConfigManager().merge_library(library)
             try:
                 _write_json_file(PROMPT_FILE, merged["easy"])
             except OSError as exc:
                 print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
-            self._prompt_library_changed()
-            showInfo("GitHub prompt library loaded. " + self._prompt_merge_summary(stats))
+            self._library_changed(stats)
+            showInfo("GitHub AINotePro library loaded. " + self._prompt_merge_summary(stats))
         except Exception as exc:
             showWarning(f"Could not import GitHub prompts: {exc}")
 
