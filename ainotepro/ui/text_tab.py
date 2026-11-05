@@ -1178,16 +1178,16 @@ class TextTab(QWidget):
         tabs = getattr(parent, "tabs", None)
         return tabs.get("Audio") if isinstance(tabs, dict) else None
 
-    def _audio_ready_for_library_import(self):
+    def _audio_ready_for_library_transfer(self):
         audio = self._audio_library_tab()
         if audio is None:
             return True
         if audio._running:
-            showWarning("Audio generation is running. Finish or cancel it before importing a library.")
+            showWarning("Audio generation is running. Finish or cancel it before transferring the AINotePro library.")
             return False
         if audio._is_dirty():
             showWarning("The Audio tab has unsaved Profile changes. Save or discard "
-                        "those changes before importing a library.")
+                        "those changes before transferring the AINotePro library.")
             return False
         return True
 
@@ -1217,10 +1217,10 @@ class TextTab(QWidget):
             return
         try:
             if os.path.getsize(file_path) > 10_000_000:
-                raise ValueError("Prompt library file is larger than 10 MB")
+                raise ValueError("AINotePro library file is larger than 10 MB")
             with open(file_path, "r", encoding="utf-8-sig") as stream:
                 imported = parse_bundle(json.load(stream))
-            if not self._audio_ready_for_library_import():
+            if not self._audio_ready_for_library_transfer():
                 return
             if not self._confirm_leave_prompt():
                 return
@@ -1232,11 +1232,13 @@ class TextTab(QWidget):
             self._library_changed(stats)
             showInfo("AINotePro library imported. " + self._prompt_merge_summary(stats))
         except Exception as exc:
-            showWarning(f"Failed to import prompt library: {exc}")
+            showWarning(f"Failed to import AINotePro library: {exc}")
 
     def _on_export_prompt(self):
         if self._prompt_is_dirty():
             showWarning("Save or discard the current prompt draft before exporting.")
+            return
+        if not self._audio_ready_for_library_transfer():
             return
         default_name = "AINotePro-library.json"
         file_path, _ = QFileDialog.getSaveFileName(
@@ -1260,7 +1262,7 @@ class TextTab(QWidget):
                 os.fsync(stream.fileno())
             showInfo(f"All saved Text prompts and Audio Profiles exported to:\n{target}")
         except Exception as exc:
-            showWarning(f"Failed to export prompt library: {exc}")
+            showWarning(f"Failed to export AINotePro library: {exc}")
 
     def _on_github_settings(self):
         dialog = GitHubPromptSettingsDialog(
@@ -1314,7 +1316,7 @@ class TextTab(QWidget):
 
     def _on_github_sync_error(self, message):
         if not self._advanced_closing:
-            showWarning(f"GitHub prompt synchronization failed: {message}")
+            showWarning(f"GitHub library synchronization failed: {message}")
 
     def _on_save_to_github(self):
         if self._github_busy:
@@ -1322,13 +1324,15 @@ class TextTab(QWidget):
         if self._prompt_is_dirty():
             showWarning("Save or discard the current prompt draft before GitHub Save.")
             return
+        if not self._audio_ready_for_library_transfer():
+            return
         settings = self._github_configuration(require_token=True)
         if not settings:
             return
         try:
             library = ConfigManager().library_snapshot()
         except Exception as exc:
-            showWarning(f"Could not read the saved prompt library: {exc}")
+            showWarning(f"Could not read the saved AINotePro library: {exc}")
             return
         token = self._github_token
         self._start_github_sync(
@@ -1350,7 +1354,7 @@ class TextTab(QWidget):
         if self._prompt_is_dirty():
             showWarning("Save or discard the current prompt draft before GitHub Load.")
             return
-        if not self._audio_ready_for_library_import():
+        if not self._audio_ready_for_library_transfer():
             return
         settings = self._github_configuration()
         if not settings:
@@ -1366,7 +1370,7 @@ class TextTab(QWidget):
         if self._prompt_is_dirty():
             showWarning("The prompt editor has unsaved edits; GitHub Load was not applied.")
             return
-        if not self._audio_ready_for_library_import():
+        if not self._audio_ready_for_library_transfer():
             return
         try:
             merged, stats = ConfigManager().merge_library(library)
@@ -1377,7 +1381,7 @@ class TextTab(QWidget):
             self._library_changed(stats)
             showInfo("GitHub AINotePro library loaded. " + self._prompt_merge_summary(stats))
         except Exception as exc:
-            showWarning(f"Could not import GitHub prompts: {exc}")
+            showWarning(f"Could not import the GitHub library: {exc}")
 
     # Provider config
     def _service_map(self) -> str:
