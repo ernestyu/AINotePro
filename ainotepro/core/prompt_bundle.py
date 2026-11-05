@@ -111,7 +111,7 @@ def _profiles(raw):
 def make_bundle(easy, advanced, audio_profiles):
     easy = _mapping(easy, "Easy")
     advanced = _mapping(advanced, "Advanced")
-    if "Default" in advanced:
+    if any(profile_name_key(name) == "default" for name in advanced):
         raise ValueError("Advanced Default is generated dynamically and cannot be saved")
     return {
         "format": FORMAT,
