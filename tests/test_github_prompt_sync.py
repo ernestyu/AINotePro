@@ -100,6 +100,25 @@ class GitHubLibraryTests(unittest.TestCase):
         self.assertEqual(saved["audio_profiles"][1]
                          ["provider_configs"]["edge_tts"]["voices"][0]["speed"], 7)
 
+    def test_first_github_save_creates_unified_json_file(self):
+        import urllib.error
+
+        local = bundle(7)
+        writes = []
+
+        def open_(req, timeout):
+            if req.get_method() == "GET":
+                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+            writes.append(json.loads(req.data))
+            return FakeResponse({"commit": {"sha": "first"}})
+
+        with patch.object(gh._OPENER, "open", side_effect=open_):
+            result = gh.save_to_github(self.settings, "secret-token", local)
+        self.assertTrue(result["changed"])
+        self.assertNotIn("sha", writes[0])  # New file, no previous SHA.
+        saved = json.loads(base64.b64decode(writes[0]["content"]))
+        self.assertEqual(saved, local)
+
     def test_unreleased_prompt_only_remote_is_rejected(self):
         response = remote_document({
             "format": "AINotePro.prompt-library", "version": 2,
@@ -118,7 +137,7 @@ class GitHubLibraryTests(unittest.TestCase):
             "Save to GitHub", "Load from GitHub",
             "GitHubPromptSettingsDialog", "def _on_import_prompt(",
             "def _on_export_prompt(", "library_snapshot()",
-            "merge_library(", "def _audio_ready_for_library_import(",
+            "merge_library(", "def _audio_ready_for_library_transfer(",
             "def _library_changed(", "_GITHUB_SYNC_WORKERS",
         ):
             self.assertIn(fragment, source)
