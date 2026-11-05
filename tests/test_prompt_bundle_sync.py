@@ -109,11 +109,76 @@ class BundleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             make_bundle({}, {}, [dict(profile("ID"), id="insecure")])
 
-    def test_audio_profile_with_unexpected_api_key_is_rejected(self):
+    def test_audio_profile_whitelist_omits_unknown_nested_secret_fields(self):
         dangerous = profile("Secret")
-        dangerous["provider_configs"]["edge_tts"]["api_key"] = "do-not-upload"
-        with self.assertRaisesRegex(ValueError, "credential field"):
-            make_bundle({}, {}, [dangerous])
+        dangerous["credentials"] = "top-secret-profile"
+        dangerous["provider_configs"]["edge_tts"]["client_secret"] = "nested-secret"
+        dangerous["provider_configs"]["kokoro_gradio"]["api_key"] = "provider-secret"
+        dangerous["provider_configs"]["edge_tts"]["voices"][0]["access_token"] = "voice-secret"
+        encoded = serialize_bundle(make_bundle({}, {}, [dangerous])).decode()
+        for secret in ("top-secret-profile", "nested-secret", "provider-secret",
+                       "voice-secret", "client_secret", "credentials", "access_token"):
+            self.assertNotIn(secret, encoded)
+        restored = parse_bundle(json.loads(encoded))
+        self.assertEqual(len(restored["audio_profiles"]), 1)
+        self.assertEqual(len(restored["audio_profiles"][0]
+                             ["provider_configs"]["edge_tts"]["voices"]), 4)
+
+    def test_names_reject_casefold_nfc_and_whitespace_collisions(self):
+        cases = [
+            {"A": "x", "a": "y"},
+            {"Straße": "x", "STRASSE": "y"},
+            {"Café": "x", "Cafe\u0301": "y"},
+            {"Name": "x", " Name ": "y"},
+        ]
+        for prompts in cases:
+            with self.subTest(prompts=prompts), self.assertRaisesRegex(
+                ValueError, "Duplicate Easy prompt name"
+            ):
+                make_bundle(prompts, {}, [])
+        with self.assertRaisesRegex(ValueError, "Duplicate Audio Profile"):
+            make_bundle({}, {}, [profile("Straße"), profile("STRASSE")])
+        with self.assertRaisesRegex(ValueError, "Advanced Default"):
+            make_bundle({}, {"default": "dynamic"}, [])
+
+    def test_aliases_are_intentionally_distinct_by_name(self):
+        aliases = make_bundle({"My Prompt": "Translate this",
+                               "Translation": "Translate this"}, {}, [])
+        merged, stats = merge_bundles(make_bundle({}, {}, []), aliases)
+        self.assertEqual(len(merged["prompts"]["easy"]), 2)
+        self.assertEqual(stats["easy"]["added"], 2)
+
+    def test_multi_device_rounds_preserve_content_without_name_convergence(self):
+        """V1 requires content union and idempotence, not identical local names."""
+        devices = [
+            make_bundle({"A": "x"}, {"Scenario": "x"}, [profile("Voice", speed=0)]),
+            make_bundle({"A": "y"}, {"Scenario": "y"}, [profile("Voice", speed=5)]),
+            make_bundle({"A": "z"}, {"Scenario": "z"}, [profile("Voice", speed=10)]),
+        ]
+        remote = make_bundle({}, {}, [])
+        def saved_values(bundle):
+            return (
+                set(bundle["prompts"]["easy"].values()),
+                set(bundle["prompts"]["advanced"].values()),
+                {p["provider_configs"]["edge_tts"]["voices"][0]["speed"]
+                 for p in bundle["audio_profiles"]},
+            )
+        for index in (0, 1, 2, 2, 0, 1, 1, 2, 0):
+            remote, _ = merge_bundles(remote, devices[index], protect_default=False)
+            devices[index], _ = merge_bundles(devices[index], remote)
+        for idx in range(3):
+            devices[idx], _ = merge_bundles(devices[idx], remote)
+        expected = ({"x", "y", "z"}, {"x", "y", "z"}, {0, 5, 10})
+        self.assertEqual(saved_values(remote), expected)
+        for device in devices:
+            self.assertEqual(saved_values(device), expected)
+        before = json.dumps(remote, sort_keys=True)
+        for device in devices:
+            remote, result = merge_bundles(remote, device, protect_default=False)
+            self.assertEqual(result["easy"]["added"], 0)
+            self.assertEqual(result["advanced"]["added"], 0)
+            self.assertEqual(result["audio_profiles"]["added"], 0)
+        self.assertEqual(json.dumps(remote, sort_keys=True), before)
 
     def test_advanced_default_is_not_exported(self):
         with self.assertRaises(ValueError):
