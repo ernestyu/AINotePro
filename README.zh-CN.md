@@ -79,6 +79,12 @@ Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中
 
 Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属于同一个 **Note Type（笔记类型）**，且所选 Source/Destination 字段存在。存在不同笔记类型时会警告并停止整批生成，不调用模型，也不写入笔记。同一笔记类型的不同 Card Template（卡片模板）仍可一起处理；Text Advanced 已有独立整批预检。
 
+## 提示词库导入、导出与 GitHub
+
+**Import / Export** 现在一次处理完整提示词库（Easy 与 Advanced 两套已保存提示词），以单个 UTF-8 JSON 文件保存。Export 不包括未保存的编辑草稿，若目标文件同名，自动使用 `(1)`、`(2)` 后缀避免覆盖；Import 同时兼容新版全量文件、旧版单模式文件及旧 Easy 提示词映射。导入时不会覆盖已有内容：名称和内容都相同则跳过，名称相同而内容不同则将新提示词命名为 `名称 (1)`、`名称 (2)`。Easy 的受保护 Default 不会被改写，Advanced 动态 Default 不参与导出。
+
+**Save to GitHub / Load from GitHub / ⚙** 是手动同步入口，远端使用指定仓库、分支及路径下的一个 `prompts.json` 文件。无需安装 Git、GitHub CLI 或配置 SSH；插件使用 HTTPS API。首次在设置中填写 `owner/repository`、Branch、JSON path，以及 GitHub Fine-grained Token（保存需要该仓库的 Contents 读写权限）。令牌只保留在当前 Anki 会话的内存中，不写入配置或导出文件；重启后需要重新输入。公开仓库的 Load 可以不填写 Token。Save/Load 均合并两套提示词，遇到同名不同内容加数字后缀，不删除已有提示词；网络请求不阻塞界面。编辑器有未保存的修改时请先保存或放弃，不会自动同步。
+
 ## Audio 使用方法
 
 1. 选择 **Audio**，在 **Generate using** 选择 **Edge-TTS** 或 **Kokoro MLX (Local)**。Kokoro 需要自行启动本地 Gradio 服务，默认地址 `http://127.0.0.1:7860`；不可用时使用 Retry。
