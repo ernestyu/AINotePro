@@ -58,26 +58,75 @@ class PromptStoreTests(unittest.TestCase):
             self.store.prompt_snapshot('easy')
         self.assertEqual(before, self.store._revision())
 
-    def test_complete_library_merge_is_atomic_and_never_overwrites_names(self):
+    def test_complete_library_merge_is_atomic_and_preserves_audio_identity(self):
+        import copy
         from ainotepro.core.prompt_bundle import make_bundle
-        self.store.prompt_snapshot('easy')
-        self.store.prompt_snapshot('advanced')
-        initial = self.store.prompt_library_snapshot()
-        self.assertIn('Default', initial['easy'])
+
+        initial = self.store.library_snapshot()
+        before = copy.deepcopy(self.store._read_raw())
+        audio = initial["audio_profiles"][0]
+        imported = copy.deepcopy(audio)
+        imported["provider_configs"]["edge_tts"]["voices"][0]["speed"] = 7
         incoming = make_bundle(
-            {'Default': 'A different Default', 'Backup': 'easy text'},
-            {'Backup': 'advanced text'},
+            {"Default": "A different Default", "Backup": "easy text"},
+            {"Backup": "advanced text"}, [imported],
         )
-        merged, stats = self.store.merge_prompt_library(incoming)
-        self.assertEqual(merged['easy']['Default'], initial['easy']['Default'])
-        self.assertEqual(merged['easy']['Default (1)'], 'A different Default')
-        self.assertEqual(merged['easy']['Backup'], 'easy text')
-        self.assertEqual(merged['advanced']['Backup'], 'advanced text')
-        self.assertEqual(self.store.prompt_library_snapshot(), merged)
-        again, stats_again = self.store.merge_prompt_library(incoming)
+
+        writes = []
+        original = self.store._atomic_write
+
+        def count_write(data):
+            writes.append(copy.deepcopy(data))
+            return original(data)
+
+        with patch.object(self.store, "_atomic_write", side_effect=count_write):
+            merged, stats = self.store.merge_library(incoming)
+        self.assertEqual(len(writes), 1, "All three domains must commit together")
+        self.assertEqual(merged["prompts"]["easy"]["Default"],
+                         initial["prompts"]["easy"]["Default"])
+        self.assertEqual(merged["prompts"]["easy"]["Default (1)"],
+                         "A different Default")
+        self.assertEqual(merged["prompts"]["advanced"]["Backup"],
+                         "advanced text")
+        self.assertEqual(len(merged["audio_profiles"]), 2)
+        self.assertEqual(self.store.library_snapshot(), merged)
+
+        disk = self.store._read_raw()
+        old_id = next(iter(before["audio"]["profiles"]))
+        self.assertIn(old_id, disk["audio"]["profiles"])
+        self.assertEqual(disk["audio"]["profiles"][old_id],
+                         before["audio"]["profiles"][old_id])
+        self.assertEqual(disk["audio"]["last_profile_id"],
+                         before["audio"]["last_profile_id"])
+        self.assertEqual(len(disk["audio"]["profiles"]), 2)
+        self.assertEqual(disk["text"]["openai"], before["text"]["openai"])
+        self.assertEqual(stats["audio_profiles"]["renamed"], 1)
+
+        snapshot = open(manager.CONFIG_FILE, "rb").read()
+        again, stats_again = self.store.merge_library(incoming)
         self.assertEqual(again, merged)
-        self.assertEqual(stats_again['easy']['added'], 0)
-        self.assertEqual(stats_again['advanced']['added'], 0)
+        self.assertEqual(stats_again["audio_profiles"]["added"], 0)
+        self.assertEqual(open(manager.CONFIG_FILE, "rb").read(), snapshot)
+
+    def test_invalid_audio_rejects_entire_import_without_file_changes(self):
+        import copy
+        from ainotepro.core.prompt_bundle import make_bundle
+
+        original = self.store.library_snapshot()
+        before = open(manager.CONFIG_FILE, "rb").read()
+        invalid = copy.deepcopy(original)
+        invalid["prompts"]["easy"]["New"] = "Should not be imported"
+        invalid["audio_profiles"][0]["provider_configs"]["edge_tts"]["voices"][0]["speed"] = 999
+        with self.assertRaises(ValueError):
+            self.store.merge_library(invalid)
+        self.assertEqual(open(manager.CONFIG_FILE, "rb").read(), before)
+
+        incoming = make_bundle({"Another": "text"}, {}, [])
+        with patch.object(self.store, "_atomic_write",
+                          side_effect=OSError("simulated write failure")):
+            with self.assertRaises(OSError):
+                self.store.merge_library(incoming)
+        self.assertEqual(open(manager.CONFIG_FILE, "rb").read(), before)
 
     def test_github_settings_do_not_contain_token(self):
         self.store.set_github_prompt_settings(
