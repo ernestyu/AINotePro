@@ -1299,8 +1299,12 @@ class TextTab(QWidget):
         try:
             token = get_token(settings["repository"])
         except CredentialStoreError as exc:
-            showWarning(f"Could not access the system credential store: {exc}")
-            return None
+            if require_token:
+                showWarning(f"Could not access the system credential store: {exc}")
+                return None
+            # Public repository downloads need no token; allow anonymous Load
+            # when the operating system has no credential service available.
+            token = ""
         if require_token and not token:
             if self._on_github_settings():
                 settings = ConfigManager().github_prompt_settings()
