@@ -120,6 +120,32 @@ class GitHubLibraryTests(unittest.TestCase):
         self.assertEqual(saved["audio_profiles"][1]
                          ["provider_configs"]["edge_tts"]["voices"][0]["speed"], 7)
 
+    def test_github_put_never_contains_unknown_audio_credential_keys(self):
+        local = bundle(7)
+        local["audio_profiles"][0]["credentials"] = "profile_secret_01"
+        local["audio_profiles"][0]["provider_configs"]["edge_tts"]["client_secret"] = (
+            "provider_secret_02"
+        )
+        local["audio_profiles"][0]["provider_configs"]["kokoro_gradio"]["voices"][0][
+            "private_key"
+        ] = "voice_secret_03"
+        writes = []
+        def open_(req, timeout):
+            if req.get_method() == "GET" and "/contents/" in req.full_url:
+                raise HTTPError(req.full_url, 404, "Not Found", {}, None)
+            if req.get_method() == "GET":
+                return FakeResponse({"ok": True})
+            writes.append(json.loads(req.data))
+            return FakeResponse({"commit": {"sha": "new"}})
+        with patch.object(gh._OPENER, "open", side_effect=open_):
+            self.assertTrue(gh.save_to_github(self.settings, "secret-token", local)["changed"])
+        sent = base64.b64decode(writes[0]["content"]).decode("utf-8")
+        for forbidden in ("profile_secret_01", "provider_secret_02",
+                          "voice_secret_03", "credentials", "client_secret",
+                          "private_key"):
+            self.assertNotIn(forbidden, sent)
+        self.assertIn('"audio_profiles"', sent)
+
     def test_first_github_save_creates_unified_json_file(self):
         import urllib.error
 
