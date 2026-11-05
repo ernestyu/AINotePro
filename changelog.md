@@ -21,6 +21,8 @@
 - The GitHub sync format is `AINotePro.library` version 1; sync is manual, not automatic. Different names with identical content are retained as separate aliases; conflicting names can map differently on different devices while saved content is preserved.
 - Keep the add-on's `user_files` directory during upgrades. Restart Anki after installing the new `.ankiaddon`.
 - The bundled libraries and the 13 Text providers are unchanged from v1.1.0 in this release.
+- **Before upgrading:** Back up `user_files`. The new Import accepts unified Library JSON, not previously exported single-prompt JSON files. Export a fresh library from v1.1.1 when moving saved prompts and Audio Profiles between computers.
+- **GitHub visibility:** Save to GitHub uploads prompt text and Audio Profile settings to the repository and path you select. Do not use a public repository for private prompt content. Provider API keys and GitHub tokens are excluded.
 
 ## v1.1.0 — Text and Audio upgrades (2026-11-03)
 
