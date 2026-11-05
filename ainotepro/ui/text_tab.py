@@ -28,6 +28,9 @@ from ..services.github_prompts import load_from_github, save_to_github
 from ..services.github_credentials import (
     CredentialStoreError, get_token, set_token, delete_token,
 )
+from ..services.github_settings_transaction import (
+    apply_github_settings, GitHubSettingsTransactionError,
+)
 from .github_prompt_dialog import GitHubPromptSettingsDialog
 from ..core.advanced_text import (
     AdvancedRequest, compile_prompt, default_prompt, parse_response,
@@ -1291,39 +1294,42 @@ class TextTab(QWidget):
             showWarning(f"Failed to export AINotePro library: {exc}")
 
     def _on_github_settings(self):
-        saved_settings = ConfigManager().github_prompt_settings()
+        manager = ConfigManager()
+        saved_settings = manager.github_prompt_settings()
         has_saved_token = False
         if saved_settings["repository"]:
             try:
                 has_saved_token = bool(get_token(saved_settings["repository"]))
             except CredentialStoreError as exc:
                 showWarning(f"Could not read the operating system credential store: {exc}")
-        dialog = GitHubPromptSettingsDialog(saved_settings, has_saved_token, self)
+                return False
+        dialog = GitHubPromptSettingsDialog(
+            saved_settings, has_saved_token, self, credential_lookup=get_token,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
         try:
-            # Refuse a failed secure-store write instead of silently falling
-            # back to a plaintext configuration file or session-only token.
-            if dialog.new_token:
-                set_token(dialog.value["repository"], dialog.new_token)
-                if get_token(dialog.value["repository"]) != dialog.new_token:
-                    raise CredentialStoreError(
-                        "Token could not be verified after saving to the system credential store"
-                    )
-            elif dialog.remove_saved_token:
-                delete_token(dialog.value["repository"])
-                if get_token(dialog.value["repository"]):
-                    raise CredentialStoreError(
-                        "Token is still present after removal from the system credential store"
-                    )
-            ConfigManager().set_github_prompt_settings(dialog.value)
-        except (ValueError, CredentialStoreError, OSError) as exc:
-            showWarning(f"Could not save GitHub settings: {exc}")
+            result = apply_github_settings(
+                dialog.value,
+                new_token=dialog.new_token,
+                remove_token=dialog.remove_saved_token,
+                read_settings=manager.github_prompt_settings,
+                save_settings=manager.set_github_prompt_settings,
+                restore_settings=manager.restore_github_prompt_settings,
+                get_token=get_token,
+                set_token=set_token,
+                delete_token=delete_token,
+            )
+        except GitHubSettingsTransactionError as exc:
+            showWarning(str(exc))
             return False
-        if dialog.new_token:
+        except Exception as exc:
+            showWarning(f"Could not update GitHub settings: {type(exc).__name__}")
+            return False
+        if result == "saved":
             showInfo("GitHub token saved and verified in the system credential store "
                      f"for {dialog.value['repository']}.")
-        elif dialog.remove_saved_token:
+        elif result == "removed":
             showInfo("Saved GitHub token removed from the system credential store "
                      f"for {dialog.value['repository']}.")
         return True
