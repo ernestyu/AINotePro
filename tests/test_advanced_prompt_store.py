@@ -58,6 +58,36 @@ class PromptStoreTests(unittest.TestCase):
             self.store.prompt_snapshot('easy')
         self.assertEqual(before, self.store._revision())
 
+    def test_complete_library_merge_is_atomic_and_never_overwrites_names(self):
+        from ainotepro.core.prompt_bundle import make_bundle
+        self.store.prompt_snapshot('easy')
+        self.store.prompt_snapshot('advanced')
+        initial = self.store.prompt_library_snapshot()
+        self.assertIn('Default', initial['easy'])
+        incoming = make_bundle(
+            {'Default': 'A different Default', 'Backup': 'easy text'},
+            {'Backup': 'advanced text'},
+        )
+        merged, stats = self.store.merge_prompt_library(incoming)
+        self.assertEqual(merged['easy']['Default'], initial['easy']['Default'])
+        self.assertEqual(merged['easy']['Default (1)'], 'A different Default')
+        self.assertEqual(merged['easy']['Backup'], 'easy text')
+        self.assertEqual(merged['advanced']['Backup'], 'advanced text')
+        self.assertEqual(self.store.prompt_library_snapshot(), merged)
+        again, stats_again = self.store.merge_prompt_library(incoming)
+        self.assertEqual(again, merged)
+        self.assertEqual(stats_again['easy']['added'], 0)
+        self.assertEqual(stats_again['advanced']['added'], 0)
+
+    def test_github_settings_do_not_contain_token(self):
+        self.store.set_github_prompt_settings(
+            {'repository': 'user/prompts', 'branch': 'main', 'path': 'prompts.json'}
+        )
+        self.assertEqual(self.store.github_prompt_settings()['repository'],
+                         'user/prompts')
+        raw = self.store._read_raw()
+        self.assertNotIn('token', str(raw.get('text', {}).get('github_prompt_sync')))
+
     def test_prompt_maps_cannot_bypass_mode_cas(self):
         self.store.prompt_snapshot('easy')
         before = self.store._read_raw()
