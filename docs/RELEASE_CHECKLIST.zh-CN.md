@@ -17,6 +17,12 @@
 - 检查底部左侧 GitHub → Restore Default LLM Parameters → Help，以及右侧 Close → Generate。Restore 仅恢复当前 Text Provider，保留 API Key 和本地服务器地址，在 Audio 标签隐藏。
 - **Mac mini 实机**检查 Audio 所有 Speed/Volume 滑杆两端的 Qt 左右箭头可见；每次点击调整 1%，边界及不支持的控件保持正确禁用。
 - 使用 Edge TTS 和可用的本地 Kokoro 测试 Audio Profile、Voice、生成及 `[sound:...]` 字段写入，确认切换 Profile 不错误保存草稿。Edge 音色列表显示地区代码加人名（如 `US-AriaNeural`、`GB-SoniaNeural`）；Voice ID 与筛选逻辑不变。
+- **V1.1.1 Library：** 导出统一 JSON，检查包含已保存的 Easy/Advanced Prompt 和 Edge/Kokoro 四 Voice 的 Audio Profile，且不含 Provider API Key、本地 Profile UUID。使用临时 Anki 配置导入，检查冲突重命名、重复导入幂等性及原有 UUID、选中 Profile 不变。
+- **V1.1.1 GitHub：** 使用临时测试仓库和最小权限 Fine-grained Token，检查包含子目录路径的 Save/Load、公开与私有仓库的权限表现、切换仓库的 Token 状态、Replace/Remove 确认及非覆盖合并。公开仓库可被他人读取，测试不得上传私人 Prompt。
+- **V1.1.1 Audio 与批量预检：** 检查四个 Voice 区块、已有三槽 Profile 的迁移，以及 Edge/Kokoro 生成；Text Easy 和 Audio 遇到混合 Note Type 时必须在请求或写入前拒绝整批，同一 Note Type 不同 Card Template 可一起处理。
+- 按 `docs/testing/library-github-sync-v1-acceptance.md` 在支持的桌面系统执行真实 Anki/Qt 和凭据库验收。GitHub Actions 使用 Mock 代替系统凭据服务，不能视为真实平台测试完成。
+- 确认 `.github/workflows/library-sync-tests.yml` 对待发布 Commit 的四平台矩阵全部通过；排队或失败不得记录为通过。
+- 确认 `manifest.json` 和 `__init__.py` 的版本号均为 1.1.1，升级前备份 `user_files`。此前单 Prompt 导出 JSON 不能直接作为新版统一 Library 导入。
 - 视本次发布的功能声明，测试真实视觉模型的 OCR。
 - 确认 `user_files/user_config.json` 及提示词跨版本升级仍保留，失败请求不将 `[Error]` 写入字段。
 - 确认 OCR 拒绝 Anki 媒体目录外的 `file://` 文件，以及远程 `http(s)://` 图像 URL。
