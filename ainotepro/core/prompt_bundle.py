@@ -10,7 +10,7 @@ import json
 import re
 import uuid
 
-from ..config.audio_profiles import validate_audio
+from ..config.audio_profiles import profile_name_key, validate_audio
 
 FORMAT = "AINotePro.library"
 VERSION = 1
@@ -18,48 +18,84 @@ MODES = ("easy", "advanced")
 MAX_LIBRARY_BYTES = 900_000
 MAX_PROFILES = 500
 
-_SECRET_KEYS = {
-    "api_key", "apikey", "access_token", "token", "password",
-    "secret", "api_secret", "private_key", "authorization",
+# Export only fields defined in Audio Profile V1. Unknown nested properties,
+# including future credentials, must never reach local JSON or GitHub.
+_PROFILE_FIELDS = (
+    "schema_version", "name", "provider", "source_field",
+    "destination_field", "random_strategy",
+)
+_PROVIDER_FIELDS = {
+    "edge_tts": ("language_code",),
+    "kokoro_gradio": ("base_url", "language"),
+}
+_VOICE_FIELDS = {
+    "edge_tts": ("enabled", "voice", "gender", "speed", "volume",
+                 "pitch", "preview_text"),
+    "kokoro_gradio": ("enabled", "voice", "accent", "locale", "gender",
+                      "speed", "preview_text"),
 }
 
 
-def _reject_secrets(data):
-    """Reject unexpected credentials rather than uploading them in JSON."""
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(key, str) and key.lower().replace("-", "_") in _SECRET_KEYS:
-                raise ValueError("Audio Profile contains a credential field; it cannot be exported")
-            _reject_secrets(value)
-    elif isinstance(data, list):
-        for value in data:
-            _reject_secrets(value)
-
+def _project(record, keys, label):
+    if not isinstance(record, dict):
+        raise ValueError(f"Invalid {label} in Audio Profile")
+    return {key: copy.deepcopy(record[key]) for key in keys if key in record}
 
 
 def _mapping(raw, label):
-    if not isinstance(raw, dict) or any(
-        not isinstance(name, str) or not name.strip() or len(name) > 100
-        or not isinstance(value, str) for name, value in raw.items()
-    ):
-        raise ValueError(f"Invalid {label} prompts: names must be 1–100 characters and values must be text")
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid {label} prompt mapping")
+    names = set()
+    for name, value in raw.items():
+        if (not isinstance(name, str) or not name.strip()
+                or len(name) > 100 or not isinstance(value, str)):
+            raise ValueError(
+                f"Invalid {label} prompts: names must be 1–100 characters "
+                "and values must be text"
+            )
+        identity = profile_name_key(name)
+        if identity in names:
+            raise ValueError(f"Duplicate {label} prompt name (case/NFC equivalent): {name!r}")
+        names.add(identity)
     return copy.deepcopy(raw)
 
 
 def _profiles(raw):
-    """Validate full four-Voice profiles without consulting live TTS services."""
+    """Only export known Audio fields, then validate their complete schema."""
     if not isinstance(raw, list) or len(raw) > MAX_PROFILES:
         raise ValueError(f"Audio Profiles must be a list of at most {MAX_PROFILES} entries")
-    entries = copy.deepcopy(raw)
+    entries = []
     ids = {}
-    for profile in entries:
+    names = set()
+    for profile in raw:
         if not isinstance(profile, dict):
             raise ValueError("Invalid Audio Profile entry")
-        # The library transports profiles, not the local UUIDs of their owner.
         if "id" in profile or "profile_id" in profile:
             raise ValueError("Audio Profile IDs must not appear in library exports")
-        _reject_secrets(profile)
-        ids[str(uuid.uuid4())] = profile
+        saved = _project(profile, _PROFILE_FIELDS, "Profile")
+        configs = profile.get("provider_configs")
+        if not isinstance(configs, dict):
+            raise ValueError("Invalid Audio Profile provider_configs")
+        saved["provider_configs"] = {}
+        for provider in ("edge_tts", "kokoro_gradio"):
+            config = _project(configs.get(provider), _PROVIDER_FIELDS[provider], provider)
+            original_voices = configs[provider].get("voices")
+            if not isinstance(original_voices, list):
+                raise ValueError(f"Invalid {provider} Voice list")
+            config["voices"] = [
+                _project(voice, _VOICE_FIELDS[provider], f"{provider} Voice")
+                for voice in original_voices
+            ]
+            saved["provider_configs"][provider] = config
+        name = saved.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Invalid Audio Profile name")
+        identity = profile_name_key(name)
+        if identity in names:
+            raise ValueError("Duplicate Audio Profile name (case/NFC equivalent)")
+        names.add(identity)
+        entries.append(saved)
+        ids[str(uuid.uuid4())] = saved
     if ids:
         validate_audio({
             "schema_version": 2,
@@ -67,7 +103,9 @@ def _profiles(raw):
             "last_profile_id": None,
             "migration": {"legacy_edge_v1_done": True},
         })
-    return sorted(entries, key=lambda profile: (profile["name"].casefold(), profile["name"]))
+    return sorted(entries, key=lambda profile: (
+        profile_name_key(profile["name"]), profile["name"],
+    ))
 
 
 def make_bundle(easy, advanced, audio_profiles):
@@ -118,27 +156,28 @@ def _merge_named(existing, incoming, content_equal, *, protect_default=False):
     stats = {"added": 0, "renamed": 0, "unchanged": 0}
     for item in incoming:
         proposed = item["name"]
-        names = {entry["name"].casefold(): entry for entry in result}
-        match = names.get(proposed.casefold())
+        names = {profile_name_key(entry["name"]): entry for entry in result}
+        match = names.get(profile_name_key(proposed))
         if match is not None and content_equal(match, item):
             stats["unchanged"] += 1
             continue
         base = _base_name(proposed)
         # An existing numbered sibling with the same contents means that a
         # previous import already inserted this item. Do not multiply copies.
-        family = re.compile(r"^" + re.escape(base) + r"(?: \([1-9][0-9]*\))?$", re.I)
-        if any(family.fullmatch(entry["name"]) and content_equal(entry, item)
-               for entry in result):
+        # Numeric siblings belong to the same name family, but unrelated
+        # aliases are intentional and never deduplicated by content alone.
+        if any(profile_name_key(_base_name(entry["name"])) == profile_name_key(base)
+               and content_equal(entry, item) for entry in result):
             stats["unchanged"] += 1
             continue
-        if match is None and (proposed.casefold() != "default" or not protect_default):
+        if match is None and (profile_name_key(proposed) != "default" or not protect_default):
             result.append(copy.deepcopy(item))
             stats["added"] += 1
             continue
         number = 1
         while True:
             candidate = _candidate(base, number)
-            previous = names.get(candidate.casefold())
+            previous = names.get(profile_name_key(candidate))
             if previous is not None:
                 if content_equal(previous, item):
                     stats["unchanged"] += 1
