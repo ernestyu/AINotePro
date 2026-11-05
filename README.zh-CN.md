@@ -85,6 +85,8 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 **Save to GitHub / Load from GitHub / ⚙** 仍是手动同步入口，远端统一文件默认 `ainotepro-library.json`（可配置路径），包含全部提示词和 Audio Profiles。无需安装 Git、GitHub CLI 或配置 SSH；使用 HTTPS API。设置 Repository、Branch、JSON path 和仓库限定的 Fine-grained Token（Save 需要 Contents 读写权限）。Token 会按 Repository 分别保存在操作系统凭据库（macOS Keychain、Windows Credential Manager；Linux 需要可用的 Secret Service/secret-tool），重启 Anki 后可再次读取，不写入 user_config.json、导出文件或命令行参数。已保存 Token 时，输入框灰显并明确标注已存储；需点击 **Replace Token** 才能重新输入，或勾选删除。首次保存、替换和删除均弹窗确认；写入后从系统凭据库读回验证，并明确提示成功。凭据库不可用时显示错误，不降级为明文存储。JSON path 支持仓库内的子目录，例如 `anki/ainotepro-library.json`。公开仓库的 Load 可以不填写 Token。Save/Load 均采用非覆盖合并，遇到同名不同内容加数字后缀，不删除数据；网络请求不阻塞界面。请先保存未提交的 Text Prompt 或 Audio Profile。导入后 Audio 页刷新列表和服务可用性检测，服务不在线时保留 Profile，只提示无法生成。
 
+**V1 冲突合同：** 同步只保证已保存内容的非覆盖合并及同一编号名称系列的重复导入幂等性，**不要求不同电脑的“名称→内容”映射完全一致**。同名不同内容追加数字后缀；不同名称即使提示词文本相同，也允许作为有意保留的别名。Easy/Advanced Prompt 和 Audio Profile 统一使用 Unicode NFC 规范化及大小写无关名称判断。Audio 导出仅包含 V1 允许的 Profile/Provider/Voice 字段；未知字段（包括可能误存的凭据）不会上传或导出。Text Provider 设置和 API Key 不参与同步。
+
 **GitHub 同步诊断：** 程序会先检查 Token 是否能访问仓库与分支，确认后才将目标文件 404 解释为尚未创建。出错弹窗会显示失败阶段（`check_repository`、`check_branch`、`read_file`、`create_or_update_file`）、HTTP 状态码和 GitHub Request ID。轮转日志位于 `user_files/logs/github_sync.log`，**请求结果也会同步输出到启动 Anki 的终端**；内容包括阶段、HTTP 状态、GitHub Request ID、仓库/分支/路径和是否提供 Token，绝不记录 Token 本身、Authorization 请求头或 Library 内容。若日志文件写入失败，弹窗将明确显示日志写入失败的原因，不再误报日志路径。Keychain 显示已保存 Token 不代表其已获得私有仓库权限；请检查 Fine-grained Token 的 Resource owner、Selected repositories、Contents 权限和有效期。反馈问题时提供错误阶段及脱敏日志即可，不要提供 Token。
 
 
