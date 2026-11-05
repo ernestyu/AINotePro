@@ -32,8 +32,11 @@ def _account(repository):
 def _validate_token(token):
     if not isinstance(token, str) or not _TOKEN_PATTERN.fullmatch(token):
         raise ValueError("GitHub token must contain only letters, numbers and underscores")
-    if len(token) > 8192:
-        raise ValueError("GitHub token is too long")
+    # Windows CRED_MAX_CREDENTIAL_BLOB_SIZE historically has a 512-byte
+    # compatibility ceiling. GitHub PATs are much shorter; use one portable
+    # limit for all supported platforms.
+    if len(token.encode("ascii")) > 512:
+        raise ValueError("GitHub token exceeds 512-byte cross-platform limit")
     return token
 
 
