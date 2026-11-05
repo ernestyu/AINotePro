@@ -1,4 +1,4 @@
-"""GitHub Contents API for one small prompt JSON; no git/gh dependency."""
+"""GitHub Contents API for the unified AINotePro library (no git/gh)."""
 from __future__ import annotations
 
 import base64
@@ -20,7 +20,7 @@ def validate_settings(settings):
         raise ValueError("GitHub settings must be an object")
     repo = str(settings.get("repository", "")).strip()
     branch = str(settings.get("branch", "main")).strip()
-    path = str(settings.get("path", "prompts.json")).strip()
+    path = str(settings.get("path", "ainotepro-library.json")).strip()
     if not REPO_RE.fullmatch(repo) or any(seg in (".", "..") for seg in repo.split("/")):
         raise ValueError("Repository must use owner/name, without a URL")
     if (not branch or len(branch) > 200
@@ -30,7 +30,7 @@ def validate_settings(settings):
     if (not path or len(path) > 240 or path.startswith("/") or "\\" in path
             or any(x in ("", ".", "..") for x in path.split("/"))
             or not path.lower().endswith(".json")):
-        raise ValueError("Path must be a relative JSON path (for example prompts.json)")
+        raise ValueError("Path must be a relative JSON path (for example ainotepro-library.json)")
     return {"repository": repo, "branch": branch, "path": path}
 
 
@@ -101,7 +101,7 @@ def fetch_remote(settings, token):
 def load_from_github(settings, token):
     result, _sha = fetch_remote(settings, token)
     if result is None:
-        raise ValueError("No prompts JSON file found at the configured GitHub path")
+        raise ValueError("No AINotePro library file found at the configured GitHub path")
     return result
 
 
@@ -116,7 +116,7 @@ def save_to_github(settings, token, local_bundle):
         combined, stats = merge_bundles(current, local, protect_default=False)
         if sha is not None and combined == current:
             return {"changed": False, "stats": stats}
-        payload = {"message": "chore(prompts): sync AINotePro prompt library",
+        payload = {"message": "chore(library): sync AINotePro prompts and Audio Profiles",
                    "content": base64.b64encode(
                        serialize_bundle(combined, max_bytes=MAX_LIBRARY_BYTES)
                    ).decode("ascii"),
