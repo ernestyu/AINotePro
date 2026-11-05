@@ -116,7 +116,7 @@ class PromptStoreTests(unittest.TestCase):
         self.store.library_snapshot()  # finish one-time legacy migration
         audio, revision = self.store.get_audio_snapshot()
         profile_id = next(iter(audio["profiles"]))
-        audio["profiles"][profile_id]["name"] = "Cafe\\u0301"
+        audio["profiles"][profile_id]["name"] = "Cafe\u0301"
         self.store.replace_audio(audio, expected_revision=revision)
         original = copy.deepcopy(self.store._read_raw())
 
