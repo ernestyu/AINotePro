@@ -51,7 +51,7 @@ def serialize_bundle(bundle, max_bytes=None):
     return data
 
 
-def merge_mode(existing, incoming, mode):
+def merge_mode(existing, incoming, mode, *, protect_default=True):
     """Never replace stored content; conflicting names acquire numeric suffixes."""
     result = _mapping(existing, mode)
     addition = _mapping(incoming, mode)
@@ -63,7 +63,7 @@ def merge_mode(existing, incoming, mode):
             stats["unchanged"] += 1
             continue
         # Protect the built-in or dynamically generated Default entry.
-        if match is None and proposed != "Default":
+        if match is None and (proposed != "Default" or not protect_default):
             result[proposed] = content
             stats["added"] += 1
             continue
@@ -85,10 +85,10 @@ def merge_mode(existing, incoming, mode):
     return result, stats
 
 
-def merge_bundles(existing, incoming):
+def merge_bundles(existing, incoming, *, protect_default=True):
     old, new = parse_bundle(existing), parse_bundle(incoming)
     merged = make_bundle(old["easy"], old["advanced"])
     stats = {}
     for mode in MODES:
-        merged[mode], stats[mode] = merge_mode(merged[mode], new[mode], mode)
+        merged[mode], stats[mode] = merge_mode(merged[mode], new[mode], mode, protect_default=protect_default)
     return merged, stats
