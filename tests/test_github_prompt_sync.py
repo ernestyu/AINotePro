@@ -2,6 +2,7 @@
 import base64
 import json
 import unittest
+from urllib.error import HTTPError
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,6 +14,8 @@ from ainotepro.services import github_prompts as gh
 class FakeResponse:
     def __init__(self, body):
         self.body = body
+        self.status = 200
+        self.headers = {"X-GitHub-Request-Id": "test-request-id"}
 
     def __enter__(self):
         return self
@@ -68,8 +71,9 @@ class GitHubLibraryTests(unittest.TestCase):
         with patch.object(gh._OPENER, "open", side_effect=open_):
             self.assertEqual(gh.load_from_github(self.settings, "secret-token"),
                              remote)
-        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests), 3)  # repository, branch, contents
         self.assertEqual(requests[0].get_method(), "GET")
+        self.assertIn("/branches/main", requests[1].full_url)
         self.assertEqual(requests[0].get_header("Authorization"),
                          "Bearer secret-token")
         self.assertNotIn("secret-token", requests[0].full_url)
@@ -85,7 +89,7 @@ class GitHubLibraryTests(unittest.TestCase):
         settings = dict(self.settings, path="anki/ainotepro-library.json")
         with patch.object(gh._OPENER, "open", side_effect=open_):
             self.assertEqual(gh.load_from_github(settings, ""), library)
-        self.assertIn("/contents/anki/ainotepro-library.json?ref=main", calls[0])
+        self.assertIn("/contents/anki/ainotepro-library.json?ref=main", calls[2])
 
     def test_save_merges_three_domains_and_uses_sha(self):
         remote = bundle(3)
@@ -120,8 +124,10 @@ class GitHubLibraryTests(unittest.TestCase):
         writes = []
 
         def open_(req, timeout):
-            if req.get_method() == "GET":
+            if req.get_method() == "GET" and "/contents/" in req.full_url:
                 raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+            if req.get_method() == "GET":
+                return FakeResponse({"ok": True})
             writes.append(json.loads(req.data))
             return FakeResponse({"commit": {"sha": "first"}})
 
@@ -140,6 +146,61 @@ class GitHubLibraryTests(unittest.TestCase):
         with patch.object(gh._OPENER, "open", return_value=FakeResponse(response)):
             with self.assertRaisesRegex(ValueError, "Unsupported"):
                 gh.load_from_github(self.settings, "")
+
+    def test_private_repo_404_is_not_treated_as_new_library(self):
+        writes = []
+        def open_(req, timeout):
+            writes.append(req.get_method())
+            raise HTTPError(req.full_url, 404, "Not Found",
+                            {"X-GitHub-Request-Id": "private-repo-id"}, None)
+        with patch.object(gh._OPENER, "open", side_effect=open_), \
+             patch.object(gh, "_log"):
+            with self.assertRaisesRegex(gh.GitHubAPIError, "check_repository.*HTTP 404"):
+                gh.save_to_github(self.settings, "secret-token", bundle(2))
+        self.assertEqual(writes, ["GET"])  # never PUT a private repo 404
+
+    def test_missing_branch_does_not_try_create_file(self):
+        methods = []
+        def open_(req, timeout):
+            methods.append(req.get_method())
+            if "/branches/" in req.full_url:
+                raise HTTPError(req.full_url, 404, "Not Found",
+                                {"X-GitHub-Request-Id": "missing-branch"}, None)
+            return FakeResponse({"ok": True})
+        with patch.object(gh._OPENER, "open", side_effect=open_), \
+             patch.object(gh, "_log"):
+            with self.assertRaisesRegex(gh.GitHubAPIError, "check_branch.*HTTP 404"):
+                gh.save_to_github(self.settings, "secret-token", bundle(2))
+        self.assertEqual(methods, ["GET", "GET"])
+
+    def test_permission_denied_reports_write_stage_and_request_id(self):
+        def open_(req, timeout):
+            if req.get_method() == "PUT":
+                raise HTTPError(req.full_url, 403, "Forbidden",
+                                {"X-GitHub-Request-Id": "write-rejected"}, None)
+            if "/contents/" in req.full_url:
+                raise HTTPError(req.full_url, 404, "Not Found", {}, None)
+            return FakeResponse({"ok": True})
+        with patch.object(gh._OPENER, "open", side_effect=open_), \
+             patch.object(gh, "_log"):
+            with self.assertRaises(gh.GitHubAPIError) as error:
+                gh.save_to_github(self.settings, "secret-token", bundle(2))
+        self.assertIn("stage=create_or_update_file", str(error.exception))
+        self.assertIn("HTTP 403", str(error.exception))
+        self.assertIn("write-rejected", str(error.exception))
+        self.assertNotIn("secret-token", str(error.exception))
+
+    def test_missing_contents_is_allowed_only_after_repository_preflight(self):
+        calls = []
+        def open_(req, timeout):
+            calls.append(req.full_url)
+            if "/contents/" in req.full_url:
+                raise HTTPError(req.full_url, 404, "Not Found", {}, None)
+            return FakeResponse({"ok": True})
+        with patch.object(gh._OPENER, "open", side_effect=open_), \
+             patch.object(gh, "_log"):
+            self.assertEqual(gh.fetch_remote(self.settings, "secret-token"), (None, None))
+        self.assertEqual(len(calls), 3)
 
     def test_ui_wiring_and_audio_refresh_contract(self):
         source = (Path(__file__).resolve().parents[1] /
