@@ -20,6 +20,14 @@ When you generate speech, AINotePro sends the selected source field text to **Ed
 
 Provider settings (including Temperature and per-model Reasoning preferences), API keys, model names, Audio Profiles, and prompt templates are stored locally in the add-on's `user_files` folder, which Anki preserves during add-on upgrades.
 
+## Optional manual GitHub library synchronization
+
+When you explicitly choose **Save to GitHub**, AINotePro uploads one library JSON file to the repository, branch, and path you configure using GitHub's HTTPS Contents API. The file contains saved Easy and Advanced prompt text and Audio Profile settings (including Voice, provider, source/destination field names, and the configured local Kokoro address). **Anyone with read access to that repository can read these contents**; public repositories are publicly readable. **Load from GitHub** reads this file and merges it into local saved data. Sync is manual, not automatic.
+
+The library excludes Text provider API keys and configuration, GitHub credentials, unsaved drafts, local Audio Profile UUIDs, and the current Audio Profile selection. A GitHub fine-grained token, if used, is stored per repository in the operating system's credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service), not in the library or `user_config.json`. GitHub receives the token as an HTTPS authorization credential when authenticated requests are made.
+
+GitHub sync logs at `user_files/logs/github_sync.log` and the Anki launch terminal record the operation stage, HTTP status, GitHub Request ID, repository/branch/path, and whether a token was present; they do not intentionally record token values, Authorization headers, or library contents. Repository and path names may still reveal information, so review or redact them before sharing logs.
+
 ## Diagnostic logging
 
 When DEBUG logging is enabled, AINotePro records request metadata such as model/provider, sanitized endpoint URL, Temperature and Reasoning request parameters, optional usage counts, and timing. The current logger does not print full prompts, generated responses, or API keys. The remote provider still receives the selected note data needed for processing.
