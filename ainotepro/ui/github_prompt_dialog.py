@@ -18,6 +18,8 @@ class GitHubPromptSettingsDialog(QDialog):
         root = QVBoxLayout(self)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        self._initial_repository = settings.get("repository", "").strip().casefold()
+        self._initial_has_saved_token = bool(has_saved_token)
         self.repository = QLineEdit(settings.get("repository", ""))
         self.repository.setPlaceholderText("owner/repository")
         self.branch = QLineEdit(settings.get("branch", "main"))
@@ -37,6 +39,7 @@ class GitHubPromptSettingsDialog(QDialog):
         root.addLayout(form)
         self.forget_token = QCheckBox("Remove saved token for this repository")
         self.forget_token.setEnabled(has_saved_token)
+        self.repository.textChanged.connect(self._repository_edited)
         root.addWidget(self.forget_token)
         hint = QLabel(
             "A relative JSON path can include directories (for example, "
@@ -58,6 +61,17 @@ class GitHubPromptSettingsDialog(QDialog):
         self.value = None
         self.new_token = ""
         self.remove_saved_token = False
+
+    def _repository_edited(self, text):
+        same_repository = text.strip().casefold() == self._initial_repository
+        saved_here = self._initial_has_saved_token and same_repository
+        self.forget_token.setEnabled(saved_here)
+        if not saved_here:
+            self.forget_token.setChecked(False)
+        self.token.setPlaceholderText(
+            "Saved in system credential store — leave blank to keep"
+            if saved_here else "Paste a fine-grained GitHub token to save securely"
+        )
 
     def _accept_settings(self):
         try:
