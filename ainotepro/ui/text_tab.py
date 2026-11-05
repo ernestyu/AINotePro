@@ -1212,6 +1212,34 @@ class TextTab(QWidget):
                 f"Audio Profiles: {audio['added']} added, {audio['renamed']} renamed, "
                 f"{audio['unchanged']} unchanged.")
 
+    def _finish_library_import(self, merged, stats, source):
+        """Report the committed import independently of optional UI/mirror work.
+
+        ConfigManager.merge_library() has already validated and atomically
+        committed all three domains. A legacy mirror failure or an open-window
+        refresh failure cannot roll that transaction back and must not be
+        reported as a failed import.
+        """
+        followup_errors = []
+        try:
+            _write_json_file(PROMPT_FILE, merged["prompts"]["easy"])
+        except Exception as exc:
+            followup_errors.append(
+                f"Legacy prompt.json mirror was not updated: {exc}"
+            )
+        try:
+            self._library_changed(stats)
+        except Exception as exc:
+            followup_errors.append(
+                f"Open editor could not refresh: {exc}. Reopen AINotePro."
+            )
+        result = f"{source} imported successfully. {self._prompt_merge_summary(stats)}"
+        if followup_errors:
+            showWarning(result + "\nThe main configuration is already saved.\n"
+                        + "\n".join(followup_errors))
+        else:
+            showInfo(result)
+
     def _on_import_prompt(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Import AINotePro Library", "", "JSON Files (*.json)")
@@ -1227,14 +1255,10 @@ class TextTab(QWidget):
             if not self._confirm_leave_prompt():
                 return
             merged, stats = ConfigManager().merge_library(imported)
-            try:
-                _write_json_file(PROMPT_FILE, merged["easy"])
-            except OSError as exc:
-                print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
-            self._library_changed(stats)
-            showInfo("AINotePro library imported. " + self._prompt_merge_summary(stats))
         except Exception as exc:
             showWarning(f"Failed to import AINotePro library: {exc}")
+            return
+        self._finish_library_import(merged, stats, "AINotePro library")
 
     def _on_export_prompt(self):
         if self._prompt_is_dirty():
@@ -1404,14 +1428,10 @@ class TextTab(QWidget):
             return
         try:
             merged, stats = ConfigManager().merge_library(library)
-            try:
-                _write_json_file(PROMPT_FILE, merged["easy"])
-            except OSError as exc:
-                print(f"[AINotePro] Prompt compatibility mirror failed: {exc}")
-            self._library_changed(stats)
-            showInfo("GitHub AINotePro library loaded. " + self._prompt_merge_summary(stats))
         except Exception as exc:
             showWarning(f"Could not import the GitHub library: {exc}")
+            return
+        self._finish_library_import(merged, stats, "GitHub AINotePro library")
 
     # Provider config
     def _service_map(self) -> str:
