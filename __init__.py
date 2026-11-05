@@ -1,7 +1,7 @@
 """
 AINotePro - Anki plugin
 Author: Ernest
-Version: 1.1.0
+Version: 1.1.1
 Description: An Anki plugin with a layered architecture (UI/Core/Services).
 """
 import os
