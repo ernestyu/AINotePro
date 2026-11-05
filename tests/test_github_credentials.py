@@ -82,6 +82,24 @@ class CredentialStoreTests(unittest.TestCase):
             with self.assertRaisesRegex(credentials.CredentialStoreError, "secret-tool"):
                 credentials.set_token("owner/repo", "github_pat_example")
 
+    def test_saved_token_requires_explicit_replace_and_confirmation(self):
+        source = (Path(__file__).resolve().parents[1] /
+                  "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        dialog = (Path(__file__).resolve().parents[1] /
+                  "ainotepro/ui/github_prompt_dialog.py").read_text(encoding="utf-8")
+        self.assertIn('self.token.setEnabled(not saved)', dialog)
+        self.assertIn('self.replace_token = QPushButton("Replace Token")', dialog)
+        self.assertIn('Token status: Saved in system credential store', dialog)
+        self.assertIn('Token status: Not saved for this repository', dialog)
+        self.assertIn('QMessageBox.question(', dialog)
+        self.assertIn('QMessageBox.StandardButton.No,', dialog)
+        self.assertIn('if confirmation != QMessageBox.StandardButton.Yes:', dialog)
+        self.assertIn('if get_token(dialog.value["repository"]) != dialog.new_token:', source)
+        self.assertIn('if get_token(dialog.value["repository"]):', source)
+        self.assertIn('GitHub token saved and verified', source)
+        self.assertIn('Saved GitHub token removed', source)
+        self.assertNotIn('self.token.setText(', dialog)
+
     def test_ui_reads_credentials_and_never_writes_token_to_config(self):
         source = (Path(__file__).resolve().parents[1] /
                   "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
