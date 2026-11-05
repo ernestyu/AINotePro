@@ -8,7 +8,8 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 
 - Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields with strict JSON output).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
-- Save, load, delete, import, and export prompt templates.
+- Save, load, and delete prompt templates; import/export a complete library containing both Text prompt modes and saved Audio Profiles in one JSON file.
+- Manually save/load that library to GitHub using the HTTPS Contents API. GitHub tokens are kept in the operating system credential store; sync is not automatic.
 - Use the 13 built-in chat providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
 - Refresh available models when the provider exposes a models endpoint. Chat Endpoint remains editable; model discovery uses its own built-in endpoint or the local server address.
 - Remember settings and model selections for each provider, including per-model Reasoning preferences. All 13 providers expose the Reasoning selector; **Model Default** sends no reasoning override.
