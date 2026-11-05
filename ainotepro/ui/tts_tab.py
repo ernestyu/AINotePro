@@ -294,6 +294,29 @@ class TTSTab(QWidget):
             except Exception: return []
         return list(self.note_ids)
 
+    def refresh_after_library_import(self):
+        """Reload saved profiles after a Text-tab Import or GitHub Load.
+
+        The merge never changes existing Profile IDs/contents, but the Audio
+        tab's revision and combo list must be refreshed to allow later saves.
+        Only call when there is no running generation or unsaved Audio draft.
+        """
+        if self._running or self._is_dirty():
+            return False
+        audio, revision = ConfigManager().get_audio_snapshot()
+        pid = self._profile_id
+        if pid not in audio["profiles"]:
+            pid = (audio.get("last_profile_id") if audio.get("last_profile_id")
+                   in audio["profiles"] else next(iter(audio["profiles"])))
+        profile = copy.deepcopy(audio["profiles"][pid])
+        self._audio, self._revision = audio, revision
+        self._profile_id = pid
+        self._draft = profile
+        self._saved = copy.deepcopy(profile)
+        self._refresh_profiles(profile["name"])
+        self._apply_draft()
+        return True
+
     def _load_fields(self):
         try:
             ids = self._selected_note_ids()
