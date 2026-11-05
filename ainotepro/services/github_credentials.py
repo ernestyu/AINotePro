@@ -226,6 +226,10 @@ def _linux_run(operation, repository, token=""):
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise CredentialStoreError("Linux Secret Service is unavailable or timed out") from exc
     if response.returncode != 0:
+        # secret-tool uses exit code 1 (with no stderr) for a missing item.
+        if (operation in ("lookup", "clear") and response.returncode == 1
+                and not response.stderr.strip()):
+            return ""
         raise CredentialStoreError("Linux Secret Service operation failed or keyring is locked")
     return response.stdout.rstrip("\r\n") if operation == "lookup" else ""
 
