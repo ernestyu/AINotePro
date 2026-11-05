@@ -21,6 +21,8 @@
 - GitHub Library 使用 `AINotePro.library` v1 统一格式，属于**手动同步**，并非后台自动同步。不同名称、相同内容允许保留为别名；设备之间冲突名称映射可以不同，但已有内容不会因导入被覆盖。
 - 升级时保留插件的 `user_files` 目录，安装新的 `.ankiaddon` 后重启 Anki。
 - 相比 v1.1.0，本次未升级内置依赖，也未增加 Text Provider 数量（仍为 13 个）。
+- **升级前注意：** 建议备份 `user_files`。新版 Import 只接受统一 Library JSON，不直接导入此前导出的单条 Prompt JSON。跨电脑迁移时，应使用 v1.1.1 导出完整 Library。
+- **仓库可见性：** Save to GitHub 会上传提示词文本和 Audio Profile 设置。公开仓库中的这些内容可被他人读取；涉及私人内容时应使用私有仓库。Text Provider API Key 与 GitHub Token 不会随 Library 上传。
 
 ## v1.1.0 — Text 与 Audio 功能升级（2026-11-03）
 
