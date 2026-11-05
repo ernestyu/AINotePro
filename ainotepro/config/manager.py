@@ -444,9 +444,10 @@ class ConfigManager:
                     for profile in updated_audio["profiles"].values()
                 }
                 for profile in merged["audio_profiles"]:
-                    if profile["name"].casefold() not in known:
+                    identity = profile_name_key(profile["name"])
+                    if identity not in known:
                         updated_audio["profiles"][new_profile_id()] = copy.deepcopy(profile)
-                        known.add(profile["name"].casefold())
+                        known.add(identity)
                 validate_audio(updated_audio)
 
                 def update(current):
