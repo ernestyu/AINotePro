@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from typing import Dict, List
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
+
+from ...provider_presets import NO_MODELS_ENDPOINT_PROVIDERS
 
 from ..base import TextProvider, clean_html_output, remove_think_tags
 from ._diagnostics import (request_failed, request_finished, request_http_returned,
@@ -29,8 +32,11 @@ class OpenAITextProvider(TextProvider):
         raw = ((config or {}).get("chat_endpoint") or (config or {}).get("base_url") or "").strip().rstrip("/")
         for suffix in ("/v1/chat/completions", "/chat/completions", "/v1/models", "/models"):
             if raw.endswith(suffix):
-                return raw[:-len(suffix)].rstrip("/")
-        return raw
+                raw = raw[:-len(suffix)].rstrip("/")
+                break
+        if raw.endswith("/v1"):
+            raw = raw[:-len("/v1")]
+        return raw.rstrip("/")
 
     def _chat_endpoint(self, config: Dict) -> str:
         if (config or {}).get("provider_key") in {"llama_cpp", "vllm"}:
@@ -40,16 +46,23 @@ class OpenAITextProvider(TextProvider):
         return f"{self._base(config)}/chat/completions"
 
     def _models_endpoint(self, config: Dict) -> str:
-        if (config or {}).get("provider_key") in {"llama_cpp", "vllm"}:
-            return self._local_server(config) + "/v1/models"
-        if "models_endpoint" in (config or {}):
-            return (config or {}).get("models_endpoint", "").strip()
-        return f"{self._base(config)}/models"
+        provider_key = (config or {}).get("provider_key") or self.name
+        if provider_key in NO_MODELS_ENDPOINT_PROVIDERS:
+            return ""
+        # Never query another server: derive /models from the effective chat URL.
+        chat_url = self._chat_endpoint(config)
+        parsed = urlsplit(chat_url)
+        if (parsed.scheme not in ("http", "https") or not parsed.netloc
+                or not parsed.path.endswith("/chat/completions")):
+            return ""
+        models_path = parsed.path[:-len("/chat/completions")] + "/models"
+        return urlunsplit((parsed.scheme, parsed.netloc, models_path,
+                           parsed.query, parsed.fragment))
 
     def list_models(self, config: Dict) -> List[str]:
         url = self._models_endpoint(config)
         if not url:
-            raise ValueError("This provider has no Models Endpoint; enter the model manually.")
+            raise ValueError("No compatible model list route for this Chat Endpoint; enter the model manually.")
         try:
             response = requests.get(url, headers=self._headers(config), timeout=12)
             response.raise_for_status()

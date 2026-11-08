@@ -19,7 +19,7 @@ from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
-from ..provider_presets import PROVIDER_PRESETS
+from ..provider_presets import PROVIDER_PRESETS, NO_MODELS_ENDPOINT_PROVIDERS
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.batch_note_types import validate_batch_note_types
 from ..core.async_task import AsyncTask
@@ -1486,16 +1486,11 @@ class TextTab(QWidget):
         }
         if key in {"llama_cpp", "vllm"}:
             server = self._local_server_address(displayed_chat)
-            config.update({"base_url": server, "chat_endpoint": server + "/v1/chat/completions",
-                           "models_endpoint": server + "/v1/models"})
+            config.update({"base_url": server, "chat_endpoint": server + "/v1/chat/completions"})
         elif key == "ollama":
             config["base_url"] = self._local_server_address(displayed_chat)
         elif self._stored_chat_endpoint or displayed_chat != self._shown_chat_endpoint:
             config["chat_endpoint"] = displayed_chat
-        if key not in {"llama_cpp", "vllm", "ollama"}:
-            stored = self.cfg.get_provider_config("text", key)
-            if "models_endpoint" in stored:
-                config["models_endpoint"] = stored["models_endpoint"]
         return config
 
     def _temperature_value(self) -> float:
@@ -1618,8 +1613,11 @@ class TextTab(QWidget):
         value = (value or "").strip().rstrip("/")
         for suffix in ("/v1/chat/completions", "/chat/completions", "/v1/models", "/models", "/api/chat", "/api/tags"):
             if value.endswith(suffix):
-                return value[:-len(suffix)].rstrip("/")
-        return value
+                value = value[:-len(suffix)].rstrip("/")
+                break
+        if value.endswith("/v1"):
+            value = value[:-len("/v1")]
+        return value.rstrip("/")
 
     def restore_current_provider_defaults(self) -> bool:
         pv = self._service_map()
@@ -1641,14 +1639,11 @@ class TextTab(QWidget):
     def _apply_provider_capabilities(self, provider_key: Optional[str] = None) -> None:
         """Restore per-provider UI restrictions after load or a batch finishes."""
         pv = provider_key or self._active_provider or self._service_map()
-        local = pv in {"llama_cpp", "vllm", "ollama"}
         provider_cfg = self.cfg.get_provider_config("text", pv) if pv else {}
-        # An old configuration with only base_url deliberately has no
-        # models_endpoint key.  It still uses the historical /v1/models route;
-        # an explicitly stored empty endpoint instead means manual Model only.
-        has_models_endpoint = "models_endpoint" in provider_cfg
-        models_ready = (local or bool(provider_cfg.get("models_endpoint"))
-                        or (not has_models_endpoint and bool(provider_cfg.get("base_url"))))
+        # The models route is derived from the configured service. Providers
+        # without a compatible model enumeration API use manual model IDs.
+        endpoint = provider_cfg.get("chat_endpoint") or provider_cfg.get("base_url") or ""
+        models_ready = bool(endpoint.strip()) and pv not in NO_MODELS_ENDPOINT_PROVIDERS
         self.reasoning_combo.setEnabled(True)
         self.refresh_button.setEnabled(models_ready)
         self.refresh_button.setToolTip("This provider has no model list; type a model manually." if not models_ready else "")
@@ -1664,10 +1659,11 @@ class TextTab(QWidget):
         if not pv:
             showWarning("Select a provider before refreshing models."); return
         print(f"[AINotePro] Refresh models clicked. service={pv}")
-        if (pv not in {"ollama", "llama_cpp", "vllm"}
-                and (("models_endpoint" in cfg and not cfg["models_endpoint"])
-                     or ("models_endpoint" not in cfg and not cfg.get("base_url")))):
-            showWarning("This provider has no Models Endpoint. Enter the model manually or provide one.")
+        if pv in NO_MODELS_ENDPOINT_PROVIDERS:
+            showWarning("This provider does not expose a compatible model list; enter the model manually.")
+            return
+        if not (cfg.get("chat_endpoint") or cfg.get("base_url")):
+            showWarning("Configure a Chat Endpoint or server address before refreshing models.")
             return
         provider = create_provider(st, pv, cfg)
         try:

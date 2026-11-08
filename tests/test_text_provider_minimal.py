@@ -23,7 +23,7 @@ if "requests" not in sys.modules:
 
 from ainotepro.config import manager
 from ainotepro.config.audio_profiles import migrate_audio
-from ainotepro.provider_presets import PROVIDER_PRESETS
+from ainotepro.provider_presets import PROVIDER_PRESETS, NO_MODELS_ENDPOINT_PROVIDERS
 from ainotepro.services.provider_factory import OPENAI_COMPATIBLE_TEXT_PROVIDERS, create_provider
 from ainotepro.services.text.ollama_text import OllamaTextProvider
 from ainotepro.services.text.openai_text import OpenAITextProvider
@@ -65,6 +65,29 @@ class TextProviderMinimalTests(unittest.TestCase):
         for removed in ("together", "perplexity", "lmstudio", "localai", "custom_providers"):
             self.assertNotIn(removed, raw["text"])
 
+    def test_legacy_models_urls_are_pruned_without_touching_chat_credentials_or_prompts(self):
+        defaults = manager._get_default_config()
+        raw = {"text": {"provider": "openai", "prompts": {"Keep": "unchanged"},
+                        "openai": {"chat_endpoint": "http://100.75.97.86:8799/v1/chat/completions",
+                                   "models_endpoint": "https://api.openai.com/v1/models",
+                                   "api_key": "kept-secret", "model": "custom-model"},
+                        "vllm": {"base_url": "http://host:8799/v1",
+                                 "models_endpoint": "http://stale-server/v1/models"}},
+               "audio": migrate_audio(defaults["audio"])}
+        Path(manager.CONFIG_FILE).write_text(json.dumps(raw), encoding="utf-8")
+        cfg = manager.ConfigManager()
+        saved = self.raw()
+        for key in ("openai", "vllm"):
+            self.assertNotIn("models_endpoint", saved["text"][key])
+            self.assertNotIn("models_endpoint", cfg.get_provider_config("text", key))
+        self.assertEqual(saved["text"]["openai"]["chat_endpoint"],
+                         "http://100.75.97.86:8799/v1/chat/completions")
+        self.assertEqual(saved["text"]["openai"]["api_key"], "kept-secret")
+        self.assertEqual(saved["text"]["openai"]["model"], "custom-model")
+        self.assertEqual(saved["text"]["prompts"], {"Keep": "unchanged"})
+        manager.ConfigManager()
+        self.assertEqual(self.raw(), saved)
+
     def test_cleanup_persists_once_and_keeps_other_values(self):
         defaults = manager._get_default_config()
         raw = {"text": {"provider": "custom:old", "together": {"api_key": "x"},
@@ -84,12 +107,29 @@ class TextProviderMinimalTests(unittest.TestCase):
         for removed in ("together", "perplexity", "lmstudio", "localai", "custom_providers"):
             self.assertNotIn(removed, disk["text"])
 
-    def test_cloud_refresh_keeps_independent_explicit_models_url(self):
-        config = {"provider_key": "deepseek", "base_url": "https://chat.example",
-                  "chat_endpoint": "https://chat.example/custom", "models_endpoint": "https://models.example/list"}
-        with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
-            self.assertEqual(OpenAITextProvider("deepseek").list_models(config), [])
-        self.assertEqual(get.call_args.args[0], "https://models.example/list")
+    def test_refresh_uses_chat_endpoint_even_when_old_models_url_is_present(self):
+        for chat, expected_models in (
+            ("http://100.75.97.86:8799/v1/chat/completions", "http://100.75.97.86:8799/v1/models"),
+            ("https://proxy.example/api/v1/chat/completions", "https://proxy.example/api/v1/models"),
+            ("https://api.deepseek.com/chat/completions", "https://api.deepseek.com/models"),
+            ("https://proxy.example/v1beta/openai/chat/completions", "https://proxy.example/v1beta/openai/models"),
+        ):
+            with self.subTest(chat=chat):
+                config = {"provider_key": "openai", "base_url": "https://api.openai.com",
+                          "chat_endpoint": chat, "models_endpoint": "https://api.openai.com/v1/models"}
+                provider = OpenAITextProvider("openai")
+                with patch("ainotepro.services.text.openai_text.requests.get",
+                           return_value=Response({"data": [{"id": "served-model"}]})) as get:
+                    self.assertEqual(provider.list_models(config), ["served-model"])
+                self.assertEqual(get.call_args.args[0], expected_models)
+
+    def test_no_compatible_models_api_does_not_issue_requests(self):
+        for key in NO_MODELS_ENDPOINT_PROVIDERS:
+            config = {"provider_key": key, "chat_endpoint": "https://provider.example/v1/chat/completions"}
+            with patch("ainotepro.services.text.openai_text.requests.get") as get:
+                with self.assertRaisesRegex(ValueError, "enter the model manually"):
+                    OpenAITextProvider(key).list_models(config)
+                get.assert_not_called()
 
     def test_old_cloud_base_url_keeps_refresh_enabled_and_uses_legacy_models_route(self):
         source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
@@ -99,6 +139,7 @@ class TextProviderMinimalTests(unittest.TestCase):
                    for name in ("_apply_provider_capabilities", "_refresh_models")]
         warnings = []
         namespace = {"Optional": Optional, "create_provider": create_provider,
+                     "NO_MODELS_ENDPOINT_PROVIDERS": NO_MODELS_ENDPOINT_PROVIDERS,
                      "showWarning": lambda message: warnings.append(message)}
         module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[], body=methods,
                                                 decorator_list=[])], type_ignores=[])
@@ -132,6 +173,9 @@ class TextProviderMinimalTests(unittest.TestCase):
         for provider_key in PROVIDER_PRESETS:
             instance._apply_provider_capabilities(provider_key)
             self.assertTrue(instance.reasoning_combo.enabled)
+            self.assertEqual(instance.refresh_button.enabled,
+                             provider_key not in NO_MODELS_ENDPOINT_PROVIDERS)
+        instance._apply_provider_capabilities("deepseek")
         self.assertTrue(instance.refresh_button.enabled)
         with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
             instance._refresh_models()
@@ -187,15 +231,37 @@ class TextProviderMinimalTests(unittest.TestCase):
 
     def test_local_llama_and_vllm_use_same_server_for_chat_and_refresh(self):
         for key in ("llama_cpp", "vllm"):
-            config = {"provider_key": key, "chat_endpoint": "http://server-b:9000/v1/chat/completions",
-                      "models_endpoint": "http://server-a:8000/v1/models", "model": "m"}
-            provider = OpenAITextProvider(key)
-            with patch("ainotepro.services.text.openai_text.requests.get", return_value=Response({"data": []})) as get:
-                provider.list_models(config)
-            with patch("ainotepro.services.text.openai_text.requests.post", return_value=Response({"choices": [{"message": {"content": "ok"}}]})) as post:
-                provider.generate("p", config)
-            self.assertEqual(get.call_args.args[0], "http://server-b:9000/v1/models")
-            self.assertEqual(post.call_args.args[0], "http://server-b:9000/v1/chat/completions")
+            for address in ("http://server-b:9000", "http://server-b:9000/v1",
+                            "http://server-b:9000/v1/chat/completions",
+                            "http://server-b:9000/prefix/v1"):
+                with self.subTest(key=key, address=address):
+                    config = {"provider_key": key, "chat_endpoint": address,
+                              "models_endpoint": "http://server-a:8000/v1/models", "model": "m"}
+                    expected_root = "http://server-b:9000/prefix" if "/prefix/" in address else "http://server-b:9000"
+                    provider = OpenAITextProvider(key)
+                    with patch("ainotepro.services.text.openai_text.requests.get",
+                               return_value=Response({"data": []})) as get:
+                        provider.list_models(config)
+                    with patch("ainotepro.services.text.openai_text.requests.post",
+                               return_value=Response({"choices": [{"message": {"content": "ok"}}]})) as post:
+                        provider.generate("p", config)
+                    self.assertEqual(get.call_args.args[0], expected_root + "/v1/models")
+                    self.assertEqual(post.call_args.args[0], expected_root + "/v1/chat/completions")
+
+    def test_local_server_address_ui_normalization(self):
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tab = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "TextTab")
+        method = next(n for n in tab.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_local_server_address")
+        module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[],
+                                               body=[method], decorator_list=[])], type_ignores=[])
+        namespace = {}
+        exec(compile(ast.fix_missing_locations(module), "<server address>", "exec"), namespace)
+        normalize = namespace["Tab"]._local_server_address
+        for address in ("http://host:8799", "http://host:8799/v1",
+                        "http://host:8799/v1/chat/completions",
+                        "http://host:8799/v1/models"):
+            self.assertEqual(normalize(address), "http://host:8799")
 
     def test_ollama_uses_native_routes_from_current_server(self):
         provider = OllamaTextProvider()
@@ -240,18 +306,19 @@ class TextProviderMinimalTests(unittest.TestCase):
         cfg.set_provider_config("text", "deepseek", {"api_key": "keep", "chat_endpoint": "https://private/chat",
                                                         "models_endpoint": "https://private/models", "model": "old",
                                                         "temperature": 0.1, "reasoning_by_model": {"old": "high"}})
+        self.assertNotIn("models_endpoint", self.raw()["text"]["deepseek"])
         cfg.set_provider_config("text", "openai", {"model": "untouched"})
         cfg.restore_provider_defaults("deepseek")
         raw = self.raw()["text"]
         self.assertEqual(raw["deepseek"]["api_key"], "keep")
         self.assertEqual(raw["deepseek"]["chat_endpoint"], PROVIDER_PRESETS["deepseek"][2])
-        self.assertEqual(raw["deepseek"]["models_endpoint"], PROVIDER_PRESETS["deepseek"][3])
+        self.assertNotIn("models_endpoint", raw["deepseek"])
         self.assertEqual(raw["deepseek"]["temperature"], 0.7)
         self.assertNotIn("reasoning_by_model", raw["deepseek"])
         self.assertEqual(raw["openai"]["model"], "untouched")
         cfg.set_provider_config("text", "anthropic", {"models_endpoint": "https://private/models"})
         cfg.restore_provider_defaults("anthropic")
-        self.assertEqual(self.raw()["text"]["anthropic"]["models_endpoint"], "")
+        self.assertNotIn("models_endpoint", self.raw()["text"]["anthropic"])
         cfg.set_provider_config("text", "vllm", {"base_url": "http://server-b:9000", "api_key": "local-key",
                                                     "model": "old", "temperature": 0.1, "reasoning_by_model": {"old": "high"}})
         cfg.restore_provider_defaults("vllm")

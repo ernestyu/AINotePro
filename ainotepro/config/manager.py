@@ -63,6 +63,11 @@ def _prune_removed_config_keys(data: Dict[str, Any]) -> bool:
             if key in text_cfg:
                 text_cfg.pop(key)
                 changed = True
+        for key in PROVIDER_PRESETS:
+            stored = text_cfg.get(key)
+            if isinstance(stored, dict) and "models_endpoint" in stored:
+                stored.pop("models_endpoint")
+                changed = True
         provider = str(text_cfg.get("provider", ""))
         if provider in {"together", "perplexity", "lmstudio", "localai"} or provider.startswith("custom:"):
             text_cfg["provider"] = "openai"
@@ -228,7 +233,7 @@ class ConfigManager:
         raw_value = raw_service.get(provider_name) if isinstance(raw_service, dict) else None
         if isinstance(raw_value, dict):
             defaults = copy.deepcopy(_get_default_config().get(service_type, {}).get(provider_name, {}))
-            for endpoint in ("chat_endpoint", "models_endpoint"):
+            for endpoint in ("chat_endpoint",):
                 if endpoint not in raw_value:
                     defaults.pop(endpoint, None)
             result = _deep_merge_dicts(defaults, copy.deepcopy(raw_value))
@@ -314,6 +319,10 @@ class ConfigManager:
             saved_cfg = copy.deepcopy(provider_cfg)
             # debug_logging belongs to Text as a whole, never to one provider.
             saved_cfg.pop("debug_logging", None)
+            if service_type == "text":
+                # Never let stale callers reintroduce a second service address.
+                saved_cfg.pop("models_endpoint", None)
+                existing.pop("models_endpoint", None)
             proposed = copy.deepcopy(existing)
             proposed.update(saved_cfg)
             changed = proposed != existing or service.get("provider") != provider_name
@@ -336,7 +345,7 @@ class ConfigManager:
                 current.update(defaults)
             elif provider_name in {"llama_cpp", "vllm"}:
                 # Keep the server chosen by the user; the request adapter derives
-                # both /v1 routes from it and ignores any stale models URL.
+                # both /v1 routes from it.
                 current["model"] = defaults["model"]
                 current["temperature"] = 0.7
             else:  # Ollama
