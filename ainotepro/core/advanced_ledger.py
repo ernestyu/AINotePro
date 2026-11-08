@@ -68,10 +68,17 @@ class AdvancedBatchLedger:
 
     def apply_commit_result(self, result) -> None:
         """Apply commit outcomes and classify every not-submitted validated note."""
-        if result.fatal_status == "cancelled-before-write" and not result.outcomes:
+        if result.fatal_status in {"cancelled-before-write", "cancelled-after-undo-start"}:
+            # The latter may have an empty Anki Undo entry, but has no note
+            # update. Preserve any earlier read/conflict outcomes.
+            for note_id, status in result.outcomes:
+                if self.states.get(note_id) == "validated":
+                    self.states[note_id] = status
             for note_id, state in self.states.items():
                 if state == "validated":
                     self.states[note_id] = "cancelled"
+            if result.fatal_error:
+                self.details.append(result.fatal_error)
             return
         for note_id, status in result.outcomes:
             if note_id in self.states and self.states[note_id] == "validated":
