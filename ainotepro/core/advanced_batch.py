@@ -187,8 +187,8 @@ def generate_batches(
     non-cancel terminal stop preserves all previously accepted model outputs,
     which the caller may submit once under Anki's existing commit protocol.
     """
-    if type(batch_size) is not int or not 1 <= batch_size <= 20:
-        raise ValueError("Batch Size must be an integer from 1 to 20")
+    if type(batch_size) is not int or not 1 <= batch_size <= 99:
+        raise ValueError("Batch Size must be an integer from 1 to 99")
     requests = list(requests)
     ids = [request.snapshot.note_id for request in requests]
     if len(ids) != len(set(ids)):
