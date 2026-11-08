@@ -1418,7 +1418,7 @@ class TextTab(QWidget):
             return
         for button in (self.github_save_button, self.github_load_button,
                        self.github_settings_button):
-            button.setEnabled(True)
+            button.setEnabled(not self._advanced_active)
 
     def _on_github_sync_error(self, message):
         if not self._advanced_closing:
@@ -2103,6 +2103,9 @@ class TextTab(QWidget):
         if not busy:
             self._update_invalid_field_resolver()
             self._update_prompt_actions()
+            for button in (self.github_save_button, self.github_load_button,
+                           self.github_settings_button):
+                button.setEnabled(not self._github_busy)
 
     def _set_provider_controls_busy(self, busy: bool) -> None:
         for widget in (self.service_combo, self.base_url_edit, self.api_key_edit,
