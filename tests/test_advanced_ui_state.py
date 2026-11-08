@@ -7,16 +7,17 @@ import threading
 import unittest
 from types import SimpleNamespace
 
-from ainotepro.core.advanced_commit import AdvancedCommitResult
+from ainotepro.core.advanced_batch import BatchRunResult
 from ainotepro.core.advanced_ledger import AdvancedBatchLedger
+from ainotepro.ui.advanced_coordinator import AdvancedCommitCoordinator
 
 
 SOURCE = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
 TREE = ast.parse(SOURCE)
 TAB = next(node for node in TREE.body if isinstance(node, ast.ClassDef) and node.name == "TextTab")
 WANTED = {
-    "_on_advanced_field_selection_changed", "_collect_advanced_result",
-    "_finish_advanced_requests", "_handle_advanced_commit_result",
+    "_on_advanced_field_selection_changed", "_finish_advanced_requests",
+    "_advanced_coordinator_settled", "_update_advanced_progress",
     "_resolve_invalid_field", "_advanced_field_definition_is_current",
     "_invalid_advanced_field_entries",
 }
@@ -26,7 +27,7 @@ MODULE = ast.Module(body=[ast.ClassDef(name="StateMethods", bases=[], keywords=[
 SCOPE = {
     "Optional": __import__("typing").Optional,
     "Dict": __import__("typing").Dict,
-    "AdvancedCommitResult": AdvancedCommitResult,
+    "AdvancedCommitCoordinator": AdvancedCommitCoordinator,
     "mw": SimpleNamespace(reset=lambda: None),
 }
 exec(compile(ast.fix_missing_locations(MODULE), "<advanced state methods>", "exec"), SCOPE)
@@ -74,6 +75,11 @@ class _Tab(StateMethods):
         self._advanced_ledger = AdvancedBatchLedger.for_notes([1, 2])
         self._advanced_cancel = threading.Event()
         self._advanced_run_id = 1
+        self._advanced_phase = "GENERATING"
+        self._advanced_coordinator = None
+        self._advanced_sources = ("Text",)
+        self._advanced_destinations = ("Out",)
+        self._advanced_progress = SimpleNamespace(setLabelText=lambda *_: None, setValue=lambda *_: None)
         self._advanced_closing = False
         self.finished = []
         self.commit_calls = []
@@ -202,37 +208,46 @@ class AdvancedUiStateTests(unittest.TestCase):
         SCOPE["mw"] = SimpleNamespace(col=SimpleNamespace(get_note=lambda _note_id: Note(8, ["Text", "Out"])))
         self.assertFalse(tab._advanced_field_definition_is_current([1]))
 
-    def test_late_result_and_finish_after_cancel_cannot_schedule_commit(self):
+    def test_cancelled_batch_does_not_schedule_commit(self):
         tab = _Tab()
         tab._advanced_cancel.set()
-        result = (1, type("Snapshot", (), {"note_id": 1})(), {"Out": "value"}, None, None)
-        tab._collect_advanced_result(result)
-        tab._finish_advanced_requests((1, "Generation cancelled.", None))
-        self.assertEqual(tab._advanced_results, [])
-        self.assertEqual(tab.commit_calls, [])
+        result = BatchRunResult(
+            accepted=(), current_batch_ids=(1, 2),
+            current_batch_pending=(1, 2),
+            current_batch_requested_ids=(1, 2), not_started=(),
+            stop_reason="cancelled", safe_error="",
+            request_count=1, retry_count=0,
+        )
+        tab._finish_advanced_requests((1, result))
+        self.assertEqual(tab._advanced_phase, "SETTLED")
+        self.assertEqual(tab._advanced_ledger.states, {1: "cancelled", 2: "cancelled"})
         self.assertIn("cancelled=2", tab.finished[0])
 
-    def test_stale_worker_result_is_ignored_before_it_reaches_commit_queue(self):
+    def test_stale_worker_result_does_not_modify_ledger(self):
         tab = _Tab()
-        stale = (0, type("Snapshot", (), {"note_id": 1})(), {"Out": "value"}, None, None)
-        tab._collect_advanced_result(stale)
-        self.assertEqual(tab._advanced_results, [])
+        result = BatchRunResult(
+            accepted=(), current_batch_ids=(),
+            current_batch_pending=(), current_batch_requested_ids=(),
+            not_started=(1, 2), stop_reason="cancelled", safe_error="",
+            request_count=0, retry_count=0,
+        )
+        tab._finish_advanced_requests((0, result))
+        self.assertEqual(tab._advanced_phase, "GENERATING")
+        self.assertEqual(tab._advanced_ledger.states, {1: "pending", 2: "pending"})
 
-    def test_terminal_worker_failure_is_counted_without_scheduling_commit(self):
+    def test_noncancel_worker_stop_with_no_accepted_sets_terminal_partition(self):
         tab = _Tab()
-        tab._finish_advanced_requests((1, "worker broke", "worker-failed"))
-        self.assertEqual(tab.commit_calls, [])
-        self.assertIn("not-run=2", tab.finished[0])
-        self.assertIn("worker-failed: worker broke", tab.finished[0])
-
-    def test_provider_config_save_failure_preserves_commit_outcome_and_finishes_ui(self):
-        tab = _Tab()
-        tab._advanced_ledger.record_worker(1, None, None)
-        result = AdvancedCommitResult(SimpleNamespace(), [(1, "updated")])
-        tab._handle_advanced_commit_result(result)
-        self.assertEqual(len(tab.finished), 1)
-        self.assertIn("Updated 1 notes", tab.finished[0])
-        self.assertIn("settings-save-failed: settings disk unavailable", tab.finished[0])
+        result = BatchRunResult(
+            accepted=(), current_batch_ids=(1,),
+            current_batch_pending=(1,), current_batch_requested_ids=(1,),
+            not_started=(2,), stop_reason="no-progress",
+            safe_error="No new valid records.", request_count=3, retry_count=2,
+        )
+        tab._finish_advanced_requests((1, result))
+        self.assertEqual(tab._advanced_ledger.states,
+                         {1: "not-generated", 2: "not-started"})
+        self.assertIn("not-generated=1", tab.finished[0])
+        self.assertIn("not-started=1", tab.finished[0])
 
 
 if __name__ == "__main__":
