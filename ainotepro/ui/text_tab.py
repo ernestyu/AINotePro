@@ -42,7 +42,7 @@ from ..core.advanced_text import (
 )
 from ..core.advanced_commit import AdvancedCommitResult, commit_validated_results
 from ..core.advanced_ledger import AdvancedBatchLedger
-from ..core.advanced_batch import generate_batches
+from ..core.advanced_batch import BatchRunResult, generate_batches
 from .advanced_coordinator import AdvancedCommitCoordinator
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
@@ -165,10 +165,21 @@ class AdvancedGenerationWorker(QObject):
     def run(self):
         def progress(accepted_count, request_count):
             self.progressUpdated.emit((self.run_id, accepted_count, request_count))
-        result = generate_batches(
-            self.requests, self.parsed, self.batch_size, self.provider,
-            self.config, self.cancel_event, progress=progress,
-        )
+        try:
+            result = generate_batches(
+                self.requests, self.parsed, self.batch_size, self.provider,
+                self.config, self.cancel_event, progress=progress,
+            )
+        except Exception:
+            # Never strand the QThread after an unexpected scheduler fault.
+            result = BatchRunResult(
+                accepted=(), current_batch_ids=(), current_batch_pending=(),
+                current_batch_requested_ids=(),
+                not_started=tuple(r.snapshot.note_id for r in self.requests),
+                stop_reason="worker-failed",
+                safe_error="Advanced scheduler failed; no model results were submitted.",
+                request_count=0, retry_count=0,
+            )
         self.finished.emit((self.run_id, result))
 
 
@@ -1984,6 +1995,8 @@ class TextTab(QWidget):
                                                   len(snapshots), self)
         self._advanced_progress.setWindowModality(Qt.WindowModality.WindowModal)
         self._advanced_progress.setMinimumDuration(0)
+        self._advanced_progress.setAutoClose(False)
+        self._advanced_progress.setAutoReset(False)
         self._advanced_progress.canceled.connect(self._cancel_advanced)
         self._advanced_thread = QThread()
         self._advanced_worker = AdvancedGenerationWorker(
