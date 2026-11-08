@@ -1977,6 +1977,11 @@ class TextTab(QWidget):
             showWarning("Provider Chat Endpoint and Model are required.")
             return
         request_cfg["preserve_output"] = True
+        batch_size = int(self.batch_size_combo.currentData())
+        if batch_size > 1:
+            # One JSONL generation may take longer than a single-note call.
+            # Ollama already defaults to 300 seconds; OpenAI-compatible does not.
+            request_cfg["timeout"] = 300
         self._advanced_provider_key = self._service_map()
         self._advanced_provider_config = dict(request_cfg)
         self._advanced_cancel = threading.Event()
