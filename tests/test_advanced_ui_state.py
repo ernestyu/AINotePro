@@ -8,6 +8,7 @@ import unittest
 from types import SimpleNamespace
 
 from ainotepro.core.advanced_batch import BatchRunResult
+from ainotepro.core.advanced_text import reconcile_field_selection
 from ainotepro.core.advanced_ledger import AdvancedBatchLedger
 from ainotepro.ui.advanced_coordinator import AdvancedCommitCoordinator
 
@@ -19,7 +20,7 @@ WANTED = {
     "_on_advanced_field_selection_changed", "_finish_advanced_requests",
     "_advanced_coordinator_settled", "_update_advanced_progress",
     "_resolve_invalid_field", "_advanced_field_definition_is_current",
-    "_invalid_advanced_field_entries",
+    "_invalid_advanced_field_entries", "_load_note_fields",
 }
 METHODS = [node for node in TAB.body if isinstance(node, ast.FunctionDef) and node.name in WANTED]
 MODULE = ast.Module(body=[ast.ClassDef(name="StateMethods", bases=[], keywords=[],
@@ -28,6 +29,7 @@ SCOPE = {
     "Optional": __import__("typing").Optional,
     "Dict": __import__("typing").Dict,
     "AdvancedCommitCoordinator": AdvancedCommitCoordinator,
+    "reconcile_field_selection": reconcile_field_selection,
     "mw": SimpleNamespace(reset=lambda: None),
 }
 exec(compile(ast.fix_missing_locations(MODULE), "<advanced state methods>", "exec"), SCOPE)
@@ -192,6 +194,49 @@ class AdvancedUiStateTests(unittest.TestCase):
         self.assertEqual(tab._invalid_advanced_field_entries(), [
             ("source", "A source"), ("source", "Z source"), ("destination", "Out"),
         ])
+
+
+    def test_missing_fields_remain_checkable_in_existing_dropdowns(self):
+        class Picker:
+            def clear(self):
+                self.names = []
+            def addItems(self, names):
+                self.names = names
+            def findText(self, name):
+                return self.names.index(name) if name in self.names else -1
+            def setCurrentIndex(self, _index):
+                pass
+        class Note:
+            def note_type(self):
+                return {"id": 8, "flds": [
+                    {"name": "Text"}, {"name": "Scenario"}, {"name": "Out"}]}
+        tab = _Tab()
+        tab._active_prompt_name = "Custom"
+        tab._advanced_note_type_id = None
+        tab._easy_field_selection = ("Text", "Out")
+        tab.source_field_combo = Picker()
+        tab.destination_field_combo = Picker()
+        tab._selected_note_ids = lambda: [1]
+        tab._advanced_field_selection = (
+            ["Text", "Missing Source"], ["Out", "Missing Destination"])
+        SCOPE["mw"] = SimpleNamespace(col=SimpleNamespace(
+            get_note=lambda _id: Note()))
+        self.assertTrue(tab._load_note_fields())
+        self.assertEqual(tab.advanced_source_fields.names,
+                         ["Text", "Scenario", "Out", "Missing Source"])
+        self.assertEqual(tab.advanced_destination_fields.names,
+                         ["Text", "Scenario", "Out", "Missing Destination"])
+        self.assertEqual(tab.advanced_source_fields.selected_fields(),
+                         ["Text", "Missing Source"])
+        self.assertEqual(tab.advanced_destination_fields.selected_fields(),
+                         ["Out", "Missing Destination"])
+        tab.advanced_source_fields.selected = ["Text"]
+        tab._on_advanced_field_selection_changed()
+        self.assertEqual(tab._advanced_invalid_source_fields, set())
+        self.assertEqual(tab._advanced_invalid_destination_fields,
+                         {"Missing Destination"})
+        self.assertEqual(tab._advanced_field_selection,
+                         (["Text"], ["Out", "Missing Destination"]))
 
     def test_note_type_definition_check_detects_browser_selection_change(self):
         class Note:
