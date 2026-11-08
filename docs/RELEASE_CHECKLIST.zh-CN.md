@@ -10,7 +10,7 @@
 - 从 Browse 菜单及笔记编辑器工具栏打开 AINotePro。
 - 选择一条笔记生成 Text，确认输出写入目标字段；再验证选择多条笔记时的生成与写入。
 - 在 Advanced 中验证来源/目标字段与 `{OUT:字段名}` 声明、严格 JSON 格式以及整批预检。选中**超过 100 条有效笔记**时，不应再因固定条数限制拒绝；不合格笔记仍须在发出请求前拒绝整批。
-- **V1.2.0 真实 Anki 待验收：** 检查 Advanced Batch Size 1–20（默认 10，可保存），Easy OCR 显示及行为不变；B=1 原单 JSON、B=10 JSONL 的 10→2→下一批 10、重复/未知 ID、截断与损坏行、连续三次零进展终止、明确上下文超限弹窗，以及非取消部分成功安全提交。
+- **V1.2.0 真实 Anki 待验收：** 检查 Advanced Batch Size 可编辑下拉框（预设 1–10、默认 1、可输入 1–99，最多两位，可保存），灰色 Resolve 按钮已移除且失效字段仍可取消勾选，Easy OCR 显示及行为不变；B=1 原单 JSON、B=10 JSONL 的 10→2→下一批 10、重复/未知 ID、截断与损坏行、连续三次零进展终止、明确上下文超限弹窗，以及非取消部分成功安全提交。
 - 在 Windows/Linux 等上位 SPEC 要求的平台，用真实 Anki 检查多次请求最后只有一个 Undo、写入前快照冲突、提交前 Cancel 不写入、提交排队/运行中 Cancel 及关闭 TextTab 后后台协调对象正确结算。自动化 Mock 测试不能替代这些实机验收。
 - 核查 `.github/workflows/advanced-batch-tests.yml` 在候选 Commit 的四平台 CI；失败或未运行不得记为通过。
 - 测试提示词 New、Save、Save As、Delete、Import、Export。确认已删除的 Online 提示词按钮不再显示，Default 保护仍有效。
