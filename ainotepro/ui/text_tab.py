@@ -695,7 +695,7 @@ class TextTab(QWidget):
     def _commit_batch_size(self) -> bool:
         """Persist a committed integer; reject unfinished or out-of-range edits."""
         text = self.batch_size_combo.currentText().strip()
-        if not (text.isascii() and text.isdecimal() and 1 <= int(text) <= 99):
+        if not (1 <= len(text) <= 2 and text.isascii() and text.isdecimal() and 1 <= int(text) <= 99):
             self._restore_batch_size()
             showWarning("Batch Size must be an integer from 1 to 99.")
             return False
