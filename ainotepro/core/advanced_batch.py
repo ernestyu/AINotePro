@@ -3,14 +3,38 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import re
+import threading
 from typing import Any, Callable, Sequence
 
 from .advanced_text import AdvancedRequest, compile_prompt, parse_response
 
 MAX_RESPONSE_BYTES = 20 * 1024 * 1024
 MAX_LINE_BYTES = 1024 * 1024
-_CANONICAL_ID = re.compile(r"[1-9][0-9]*\Z")
+class BatchRequestGate:
+    """Synchronize cancellation with the logical start of an LLM request.
+
+    A granted request is in flight even if the calling thread has not yet
+    entered provider.generate(). The lock is NOT held across model inference,
+    so cancelling a running request remains prompt and its response is ignored.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._cancelled = threading.Event()
+
+    def set(self) -> None:
+        with self._lock:
+            self._cancelled.set()
+
+    def is_set(self) -> bool:
+        return self._cancelled.is_set()
+
+    def try_start(self, register_request: Callable[[], None]) -> bool:
+        with self._lock:
+            if self._cancelled.is_set():
+                return False
+            register_request()
+            return True
 
 
 @dataclass(frozen=True)
@@ -82,7 +106,8 @@ def _bad_constant(_value):
 
 
 def parse_batch_response(response: str, pending_ids: Sequence[int],
-                         destinations: Sequence[str]) -> dict[int, dict[str, str]]:
+                         destinations: Sequence[str], *,
+                         issue_codes: list[str] | None = None) -> dict[int, dict[str, str]]:
     """Accept only full, unique, independently valid JSONL records.
 
     Overlong responses have zero accepted items; overlong individual lines
@@ -93,10 +118,14 @@ def parse_batch_response(response: str, pending_ids: Sequence[int],
         return {}
     try:
         if len(response.encode("utf-8")) > MAX_RESPONSE_BYTES:
+            if issue_codes is not None:
+                issue_codes.append("response-too-large")
             return {}
     except UnicodeError:
         return {}
-    allowed = set(pending_ids)
+    # Model output is untrusted: match against canonical known IDs instead
+    # of converting arbitrary (potentially thousands-of-digits) strings.
+    allowed = {str(note_id): note_id for note_id in pending_ids}
     required = set(destinations)
     occurrences: dict[int, int] = {}
     candidates: dict[int, dict[str, str]] = {}
@@ -117,10 +146,10 @@ def parse_batch_response(response: str, pending_ids: Sequence[int],
         if not isinstance(record, dict):
             continue
         raw_id = record.get("note_id")
-        if not isinstance(raw_id, str) or not _CANONICAL_ID.fullmatch(raw_id):
+        if not isinstance(raw_id, str):
             continue
-        note_id = int(raw_id)
-        if note_id not in allowed:
+        note_id = allowed.get(raw_id)
+        if note_id is None:
             continue
         occurrences[note_id] = occurrences.get(note_id, 0) + 1
         values = record.get("fields")
@@ -192,28 +221,60 @@ def generate_batches(
                        [item for item in planned if item.snapshot.note_id not in accepted])
             if not pending:
                 break
-            if first_call:
-                current_ids = [item.snapshot.note_id for item in planned]
-                current_pending = list(current_ids)
-                current_requested = set()
-                offset += len(planned)
-                first_call = False
             call_ids = [item.snapshot.note_id for item in pending]
-            current_requested.update(call_ids)
-            requests_sent += 1
-            if attempts_in_batch:
-                retries += 1
-            attempts_in_batch += 1
-            new: dict[int, dict[str, str]] = {}
+            # Prompt compilation can be expensive. It must finish BEFORE the
+            # cancellation/dispatch gate and before counting a request.
             try:
                 if batch_size == 1:
                     item = pending[0]
-                    response = provider.generate(
-                        compile_prompt(parsed, item.snapshot.input_values), config)
+                    prompt = compile_prompt(parsed, item.snapshot.input_values)
+                else:
+                    prompt = compile_batch_prompt(parsed, pending)
+            except Exception:
+                stop_reason = "worker-failed"
+                safe_error = "Advanced batch prompt compilation failed."
+                break
+
+            def register_request():
+                nonlocal first_call, offset, requests_sent, retries, attempts_in_batch
+                if first_call:
+                    current_ids[:] = [item.snapshot.note_id for item in planned]
+                    current_pending[:] = current_ids
+                    current_requested.clear()
+                    offset += len(planned)
+                    first_call = False
+                current_requested.update(call_ids)
+                requests_sent += 1
+                if attempts_in_batch:
+                    retries += 1
+                attempts_in_batch += 1
+
+            # Production uses BatchRequestGate: cancellation and the logical
+            # request start are ordered under the same lock. The legacy Event
+            # path is only for small headless callers and compatibility tests.
+            dispatch = getattr(cancel_event, "try_start", None)
+            if callable(dispatch):
+                permitted = dispatch(register_request)
+            else:
+                permitted = not cancel_event.is_set()
+                if permitted:
+                    register_request()
+            if not permitted:
+                stop_reason = "cancelled"
+                break
+
+            new: dict[int, dict[str, str]] = {}
+            issue_codes: list[str] = []
+            safe_error = ""
+            try:
+                response = provider.generate(prompt, config)
+                if batch_size == 1:
                     new = {item.snapshot.note_id: parse_response(response, destinations)}
                 else:
-                    response = provider.generate(compile_batch_prompt(parsed, pending), config)
-                    new = parse_batch_response(response, call_ids, destinations)
+                    new = parse_batch_response(response, call_ids, destinations,
+                                               issue_codes=issue_codes)
+                if issue_codes:
+                    safe_error = issue_codes[0]
             except Exception as exc:
                 category, detail = _safe_error(exc)
                 safe_error = detail
