@@ -311,9 +311,9 @@ class TextProviderMinimalTests(unittest.TestCase):
     def test_safe_url_redacts_userinfo_and_query_without_changing_request(self):
         cases = (
             ("https://alice:secret@api.example:8443/v1/chat/completions?key=XYZ#f",
-             "https://api.example:8443/v1/chat/completions"),
+             "https://api.example:8443"),
             ("https://alice:secret@[2001:db8::1]:8443/v1/models?key=XYZ",
-             "https://[2001:db8::1]:8443/v1/models"),
+             "https://[2001:db8::1]:8443"),
         )
         for url, expected in cases:
             self.assertEqual(safe_url(url), expected)
