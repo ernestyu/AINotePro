@@ -42,6 +42,8 @@ from ..core.advanced_text import (
 )
 from ..core.advanced_commit import AdvancedCommitResult, commit_validated_results
 from ..core.advanced_ledger import AdvancedBatchLedger
+from ..core.advanced_batch import generate_batches
+from .advanced_coordinator import AdvancedCommitCoordinator
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
 # user_config.json so they survive the normal add-on settings flow.
@@ -49,6 +51,7 @@ ADDON_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 PROMPT_DIR = os.path.join(USER_FILES_DIR, "gen_text")
 PROMPT_FILE = os.path.join(PROMPT_DIR, "prompt.json")
 _GITHUB_SYNC_WORKERS = set()  # Keep QThreads alive until finished.
+_ADVANCED_THREADS = set()  # Worker/thread survive destruction of TextTab.
 USER_CONFIG_FILE = CONFIG_FILE
 DEFAULT_PROMPTS = {
     "Default": "Translate the following text to English: {Source Field}",
@@ -144,12 +147,12 @@ class CheckableFieldCombo(QComboBox):
 
 
 class AdvancedGenerationWorker(QObject):
-    """Provider-only worker. It does not hold or access Anki notes or Qt widgets."""
+    """Provider-only worker. All Anki snapshots and settings are immutable."""
     progressUpdated = pyqtSignal(object)
-    resultReady = pyqtSignal(object)
     finished = pyqtSignal(object)
 
-    def __init__(self, run_id: int, requests: list[AdvancedRequest], parsed, provider, config, cancel_event):
+    def __init__(self, run_id: int, requests: list[AdvancedRequest],
+                 parsed, provider, config, cancel_event, batch_size: int):
         super().__init__()
         self.run_id = run_id
         self.requests = requests
@@ -157,31 +160,16 @@ class AdvancedGenerationWorker(QObject):
         self.provider = provider
         self.config = config
         self.cancel_event = cancel_event
+        self.batch_size = batch_size
 
     def run(self):
-        completed = 0
-        try:
-            for request in self.requests:
-                if self.cancel_event.is_set():
-                    break
-                try:
-                    response = self.provider.generate(
-                        compile_prompt(self.parsed, request.snapshot.input_values), self.config)
-                except Exception as exc:
-                    self.resultReady.emit((self.run_id, request.snapshot, None, str(exc), "provider-failed"))
-                else:
-                    try:
-                        values = parse_response(response, [name for name, _ in self.parsed[1]])
-                        self.resultReady.emit((self.run_id, request.snapshot, values, None, None))
-                    except Exception as exc:
-                        self.resultReady.emit((self.run_id, request.snapshot, None, str(exc), "json-failed"))
-                completed += 1
-                self.progressUpdated.emit((self.run_id, completed))
-            self.finished.emit((self.run_id,
-                                'Generation cancelled.' if self.cancel_event.is_set() else 'Generation complete.',
-                                None))
-        except Exception as exc:
-            self.finished.emit((self.run_id, f'Advanced generation failed: {exc}', 'worker-failed'))
+        def progress(accepted_count, request_count):
+            self.progressUpdated.emit((self.run_id, accepted_count, request_count))
+        result = generate_batches(
+            self.requests, self.parsed, self.batch_size, self.provider,
+            self.config, self.cancel_event, progress=progress,
+        )
+        self.finished.emit((self.run_id, result))
 
 
 def _read_json_file(path: str) -> Dict[str, Any]:
@@ -369,6 +357,8 @@ class TextTab(QWidget):
         self._advanced_run_id = 0
         self._advanced_ui_finished = False
         self._advanced_ledger = AdvancedBatchLedger.for_notes([])
+        self._advanced_phase = "SETTLED"
+        self._advanced_coordinator = None
         self._github_busy = False
         self._github_worker = None
         self._discarded_dynamic_default = False
@@ -620,6 +610,17 @@ class TextTab(QWidget):
             "Remote image URLs are not supported."
         )
         fields_row.addWidget(self.image_checkbox, 0)
+        self.batch_size_label = QLabel("<b>Batch Size:</b>")
+        self.batch_size_combo = QComboBox()
+        for size in range(1, 21):
+            self.batch_size_combo.addItem(str(size), size)
+        raw_size = self.cfg.get_all().get("text", {}).get("advanced_batch_size", 10)
+        self._saved_batch_size = raw_size if type(raw_size) is int and 1 <= raw_size <= 20 else 10
+        self.batch_size_combo.setCurrentIndex(self.batch_size_combo.findData(self._saved_batch_size))
+        self.batch_size_combo.setFixedWidth(65)
+        self.batch_size_combo.currentIndexChanged.connect(self._on_batch_size_changed)
+        fields_row.addWidget(self.batch_size_label, 0)
+        fields_row.addWidget(self.batch_size_combo, 0)
         layout.addLayout(fields_row)
 
         self.setLayout(layout)
@@ -671,6 +672,20 @@ class TextTab(QWidget):
             showWarning(f"Could not save Text mode: {exc}")
         self._load_prompt_list()
 
+    def _on_batch_size_changed(self, _index: int) -> None:
+        size = self.batch_size_combo.currentData()
+        if size is None or size == self._saved_batch_size:
+            return
+        try:
+            self.cfg.update_text_fields({"advanced_batch_size": size})
+            self._saved_batch_size = size
+        except Exception:
+            self.batch_size_combo.blockSignals(True)
+            self.batch_size_combo.setCurrentIndex(
+                self.batch_size_combo.findData(self._saved_batch_size))
+            self.batch_size_combo.blockSignals(False)
+            showWarning("Could not save Advanced Batch Size.")
+
     def _update_field_mode_widgets(self) -> None:
         advanced = self._field_mode == "advanced"
         for widget in (self.easy_source_label, self.source_field_combo,
@@ -682,6 +697,8 @@ class TextTab(QWidget):
             widget.setVisible(advanced)
         self.image_checkbox.setVisible(not advanced)
         self.image_checkbox.setEnabled(not advanced)
+        self.batch_size_label.setVisible(advanced)
+        self.batch_size_combo.setVisible(advanced)
         if advanced:
             self.prompt_edit.setPlaceholderText(
                 'Use {Field} for inputs and {OUT:Field} for output declarations. '
@@ -1959,6 +1976,7 @@ class TextTab(QWidget):
         self._advanced_sources = tuple(sources)
         self._advanced_destinations = tuple(destinations)
         self._advanced_results = []
+        self._advanced_phase = "GENERATING"
         self._advanced_ledger = AdvancedBatchLedger.for_notes(snapshot.note_id for snapshot in snapshots)
         self._advanced_started_at = time.perf_counter()
         self._set_advanced_ui_busy(True)
@@ -1970,12 +1988,16 @@ class TextTab(QWidget):
         self._advanced_thread = QThread()
         self._advanced_worker = AdvancedGenerationWorker(
             run_id, [AdvancedRequest(snapshot, prompt) for snapshot in snapshots], parsed,
-            create_provider("text", self._service_map(), {}), dict(request_cfg), self._advanced_cancel)
+            create_provider("text", self._service_map(), {}), dict(request_cfg), self._advanced_cancel,
+            int(self.batch_size_combo.currentData()))
         self._advanced_worker.moveToThread(self._advanced_thread)
         self._advanced_thread.started.connect(self._advanced_worker.run)
-        self._advanced_worker.resultReady.connect(self._collect_advanced_result)
         self._advanced_worker.progressUpdated.connect(self._update_advanced_progress)
         thread = self._advanced_thread
+        worker = self._advanced_worker
+        pair = (thread, worker)
+        _ADVANCED_THREADS.add(pair)
+        thread.finished.connect(lambda _pair=pair: _ADVANCED_THREADS.discard(_pair))
         self._advanced_worker.finished.connect(lambda _payload, worker_thread=thread: worker_thread.quit())
         self._advanced_worker.finished.connect(self._advanced_worker.deleteLater)
         self._advanced_thread.finished.connect(self._advanced_thread.deleteLater)
@@ -1991,96 +2013,39 @@ class TextTab(QWidget):
         self._advanced_cancel.set()
 
     def _update_advanced_progress(self, payload) -> None:
-        run_id, value = payload
+        run_id, accepted_count, _request_count = payload
         if (run_id != self._advanced_run_id or self._advanced_closing
                 or self._advanced_cancel.is_set()):
             return
         progress = getattr(self, "_advanced_progress", None)
         if progress is not None:
-            progress.setValue(value)
-
-    def _collect_advanced_result(self, payload) -> None:
-        run_id, snapshot, values, error, category = payload
-        if (run_id == self._advanced_run_id and not self._advanced_closing
-                and not self._advanced_cancel.is_set()):
-            self._advanced_results.append((snapshot, values, error, category))
-            self._advanced_ledger.record_worker(snapshot.note_id, category, error)
+            progress.setValue(accepted_count)
 
     def _finish_advanced_requests(self, payload) -> None:
-        run_id, message, terminal_category = payload
-        if run_id != self._advanced_run_id:
+        run_id, batch_result = payload
+        if run_id != self._advanced_run_id or self._advanced_phase != "GENERATING":
             return
-        if self._advanced_cancel.is_set() or self._advanced_closing or not self.isVisible():
-            self._advanced_ledger.cancel_pending()
-            self._finish_advanced_ui(self._advanced_ledger.summary("Generation cancelled."))
+        self._advanced_phase = "FINALIZING"
+        if self._advanced_closing or not self.isVisible():
+            self._advanced_cancel.set()
+        if not self._advanced_cancel.is_set():
+            self._advanced_progress.setLabelText("Committing validated results…")
+        coordinator = AdvancedCommitCoordinator(
+            run_id, batch_result, self._advanced_ledger,
+            self._advanced_sources, self._advanced_destinations,
+            self._advanced_cancel, tab=self,
+        )
+        self._advanced_coordinator = coordinator
+        coordinator.start()
+        if coordinator.phase == "COMMITTING":
+            self._advanced_phase = "COMMITTING"
+
+    def _advanced_coordinator_settled(self, coordinator, message: str) -> None:
+        if (self._advanced_coordinator is not coordinator or
+                coordinator.run_id != self._advanced_run_id):
             return
-        if terminal_category:
-            self._advanced_ledger.mark_pending("not-run", message)
-            self._advanced_ledger.add_issue(terminal_category, message)
-            self._finish_advanced_ui(self._advanced_ledger.summary(message))
-            return
-        valid = [(snapshot, values, error) for snapshot, values, error, _category
-                 in self._advanced_results if values is not None]
-        if not valid:
-            self._advanced_ledger.mark_pending("not-run")
-            self._finish_advanced_ui(self._advanced_ledger.summary(message + " No valid responses were returned."))
-            return
-        self._advanced_progress.setLabelText("Committing validated results…")
-        self._commit_advanced_results(valid)
-
-    def _commit_advanced_results(self, valid_results) -> None:
-        """Final re-read through CollectionOp; the inner unit never yields."""
-        sources = self._advanced_sources
-        destinations = self._advanced_destinations
-        cancel_event = self._advanced_cancel
-        run_id = self._advanced_run_id
-
-        def operation(col):
-            from anki.collection import OpChanges
-            # CollectionOp serializes collection access. The helper performs
-            # final read/compare/cancel/assignment/update with no await, event
-            # loop, UI call or task dispatch between validation and submission.
-            return commit_validated_results(
-                col, valid_results, sources, destinations, cancel_event, OpChanges,
-            )
-
-        def committed(result: AdvancedCommitResult):
-            if run_id == self._advanced_run_id:
-                self._handle_advanced_commit_result(result)
-
-        def failed(exc: Exception):
-            if run_id == self._advanced_run_id and not self._advanced_closing:
-                self._advanced_ledger.mark_pending("commit-task-failed", str(exc))
-                self._finish_advanced_ui(self._advanced_ledger.summary("Advanced commit task failed."))
-
-        try:
-            from aqt.operations import CollectionOp
-            CollectionOp(parent=self, op=operation).success(committed).failure(failed).run_in_background(
-                initiator=self)
-        except Exception as exc:
-            failed(exc)
-
-    def _handle_advanced_commit_result(self, result: AdvancedCommitResult) -> None:
-        """Render a terminal commit result without changing its data outcome."""
-        if self._advanced_closing:
-            return
-        self._advanced_ledger.apply_commit_result(result)
-        updated = self._advanced_ledger.count("updated")
-        if updated:
-            # Production runs always have a launch snapshot, so completion
-            # never reads/saves whatever another provider is now displayed.
-            # The fallback only preserves compatibility with detached legacy
-            # callers that invoke this method without starting a batch.
-            if not hasattr(self, "_advanced_provider_key"):
-                try:
-                    self._save_current_provider_config()
-                except Exception as exc:
-                    self._advanced_ledger.add_issue("settings-save-failed", str(exc))
-            try:
-                mw.reset()
-            except Exception:
-                self._advanced_ledger.add_issue("ui-refresh-failed", "reopen the note to verify")
-        self._finish_advanced_ui(self._advanced_ledger.summary("Advanced generation complete."))
+        self._advanced_phase = "SETTLED"
+        self._finish_advanced_ui(message)
 
     def _finish_advanced_ui(self, message: str) -> None:
         if self._advanced_ui_finished:
@@ -2090,10 +2055,10 @@ class TextTab(QWidget):
         ledger = getattr(self, "_advanced_ledger", None)
         if ledger is not None:
             cancelled = ledger.count("cancelled")
-            unexecuted = ledger.count("not-run") + ledger.count("not-submitted")
+            unexecuted = ledger.count("not-started") + ledger.count("not-submitted")
             failed = sum(count for status, count in
                          ((status, ledger.count(status)) for status in set(ledger.states.values()))
-                         if status not in {"updated", "cancelled", "not-run", "not-submitted"})
+                         if status not in {"updated", "cancelled", "not-started", "not-submitted"})
             print(f"[AINotePro] Advanced batch complete provider={getattr(self, '_advanced_provider_key', '')} "
                   f"successful_writes={ledger.count('updated')} failed={failed} cancelled={cancelled} "
                   f"unexecuted={unexecuted} total_ms={(time.perf_counter() - getattr(self, '_advanced_started_at', time.perf_counter())) * 1000:.1f}")
@@ -2104,20 +2069,27 @@ class TextTab(QWidget):
                 self._advanced_progress.close()
             self._set_advanced_ui_busy(False)
         except RuntimeError:
-            # Qt may delete children during a close event; no late callback is
-            # allowed to revive or access them.
             return
         if not self._advanced_closing and self.isVisible():
             showInfo(message)
 
     def _set_advanced_ui_busy(self, busy: bool) -> None:
-        self.field_mode_combo.setEnabled(not busy)
-        self.advanced_source_fields.setEnabled(not busy)
-        self.advanced_destination_fields.setEnabled(not busy)
+        widgets = (self.field_mode_combo, self.advanced_source_fields,
+                   self.advanced_destination_fields, self.resolve_invalid_fields_button,
+                   self.batch_size_combo, self.prompt_edit, self.prompt_list_combo,
+                   self.prompt_search_edit, self.new_button, self.save_button,
+                   self.save_as_button, self.delete_button, self.import_button,
+                   self.export_button, self.github_save_button, self.github_load_button,
+                   self.github_settings_button)
+        for widget in widgets:
+            widget.setEnabled(not busy)
         generate = getattr(self.window(), "generate_button", None)
         if generate is not None:
             generate.setEnabled(not busy)
         self._set_provider_controls_busy(busy)
+        if not busy:
+            self._update_invalid_field_resolver()
+            self._update_prompt_actions()
 
     def _set_provider_controls_busy(self, busy: bool) -> None:
         for widget in (self.service_combo, self.base_url_edit, self.api_key_edit,
