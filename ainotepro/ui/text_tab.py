@@ -42,7 +42,7 @@ from ..core.advanced_text import (
 )
 from ..core.advanced_commit import AdvancedCommitResult, commit_validated_results
 from ..core.advanced_ledger import AdvancedBatchLedger
-from ..core.advanced_batch import BatchRunResult, generate_batches
+from ..core.advanced_batch import BatchRequestGate, BatchRunResult, generate_batches
 from .advanced_coordinator import AdvancedCommitCoordinator
 
 # Keep a prompt.json for import/export style sharing, but also mirror prompts into
@@ -362,7 +362,7 @@ class TextTab(QWidget):
         self._advanced_invalid_source_fields: set[str] = set()
         self._advanced_invalid_destination_fields: set[str] = set()
         self._advanced_results: list[tuple[Any, Optional[dict[str, str]], Optional[str], Optional[str]]] = []
-        self._advanced_cancel = threading.Event()
+        self._advanced_cancel = BatchRequestGate()
         self._advanced_active = False
         self._advanced_closing = False
         self._advanced_run_id = 0
@@ -1984,7 +1984,7 @@ class TextTab(QWidget):
             request_cfg["timeout"] = 300
         self._advanced_provider_key = self._service_map()
         self._advanced_provider_config = dict(request_cfg)
-        self._advanced_cancel = threading.Event()
+        self._advanced_cancel = BatchRequestGate()
         self._advanced_run_id += 1
         run_id = self._advanced_run_id
         self._advanced_active = True
