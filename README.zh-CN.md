@@ -7,7 +7,7 @@ AINotePro 是一款 Anki 插件，可根据笔记字段内容生成 AI 文本或
 ## 功能
 
 - **Text Easy**：从一个来源字段生成文本，写入一个目标字段；支持已保存的提示词和可选图像识别。
-- **Text Advanced**：支持多个来源和目标字段；Batch Size 1–20，多个笔记通过 JSONL 独立验证，生成前对全部选中笔记统一预检。
+- **Text Advanced**：支持多个来源和目标字段；Batch Size 1–99，多个笔记通过 JSONL 独立验证，生成前对全部选中笔记统一预检。
 - 保存、加载和删除提示词，支持受保护的 Default；Import/Export 一次处理 Easy、Advanced 提示词和全部 Audio Profile 的统一 JSON。
 - GitHub 手动 Save/Load 可同步完整 Library；通过 HTTPS API 工作，Token 保存在系统凭据库，不需要 Git、gh 或 SSH。
 - 13 个内置文本 Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。
@@ -47,7 +47,7 @@ Advanced 支持来自同一 Note Type 的多个来源字段、多个目标字段
 {OUT:Translation} Translate naturally.
 ```
 
-来源/目标选择必须与 Prompt 声明双向一致。**Batch Size** 是底部紧凑下拉框，范围 1–20，默认 10。选 1 时继续使用原 Advanced 的单笔记 JSON 对象协议；选择 2–20 时，一次请求处理多条笔记，以独立 JSONL 记录按 Note ID 关联结果。若一批 10 条只有 8 条有效，便接收这 8 条，仅重试未完成的 2 条；当前批全部完成后再开启新的 10 条。连续三次没有新有效记录则停止整个任务；服务端明确报告上下文或输出限制时立即停止并提示减小 Batch Size，不自动查询上下文。所有笔记在请求前经过统一预检：字段定义、来源文本是否为空或仅有媒体内容等；任意笔记不合格时整批拒绝。写入非空目标字段前会询问确认。
+来源/目标选择必须与 Prompt 声明双向一致。**Batch Size** 是底部紧凑的可编辑下拉框，预设选项 1–10，默认 1，可手工输入 11–99（最多两位）。原先显灰的 Resolve 独立按钮已移除，失效字段可在来源/目标字段下拉中取消勾选。选 1 时继续使用原 Advanced 的单笔记 JSON 对象协议；选择 2–99 时，一次请求处理多条笔记，以独立 JSONL 记录按 Note ID 关联结果。若一批 10 条只有 8 条有效，便接收这 8 条，仅重试未完成的 2 条；当前批全部完成后再开启新的 10 条。连续三次没有新有效记录则停止整个任务；服务端明确报告上下文或输出限制时立即停止并提示减小 Batch Size，不自动查询上下文。所有笔记在请求前经过统一预检：字段定义、来源文本是否为空或仅有媒体内容等；任意笔记不合格时整批拒绝。写入非空目标字段前会询问确认。
 
 Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中需要字面花括号时使用 `{{` 和 `}}` 转义。**不存在固定的每批 100 条笔记限制**；Batch Size 只是单次 LLM 请求包含的笔记数量，不限制整个选择集。生成阶段累计已验证结果，正常完成或非取消故障停止时通过一次 Anki CollectionOp 复查并写入，保留 Undo；提交前取消则丢弃尚未写入的结果。Easy 的 1 Worker 和 OCR 不变。
 
