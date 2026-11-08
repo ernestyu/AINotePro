@@ -2,6 +2,13 @@
 
 [English](changelog.md) | [简体中文](changelog.zh-CN.md)
 
+## v1.2.0 — Advanced 多笔记打包生成（开发候选，尚未发布）
+
+- 仅 Advanced 新增紧凑的 **Batch Size** 下拉框（1–20，默认 10）；Easy 及其 Image Recognition 不变。
+- Batch Size 1 保留现有单笔记 JSON 协议；大于 1 时按 Note ID 返回 JSONL，逐条验证、接收有效结果，仅重试未完成笔记。连续三次零新结果停止整项任务，服务端明确报告上下文限制时直接停止。
+- 生成阶段累计有效结果，最终经一次 Anki CollectionOp 复查字段并写入、保留 Undo；提交前取消不写入，窗口关闭不丢失已启动提交的结算。
+- 增加安全的 Provider 错误分类、JSONL 大小保护、针对性单元测试及四平台自动化检查。**真实 Anki/Qt、Undo 与发布验收仍需执行。**
+
 ## v1.1.1 — Library 同步与 Audio 更新（2026-11-05）
 
 ### Text Library
