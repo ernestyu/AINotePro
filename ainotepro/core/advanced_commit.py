@@ -87,6 +87,9 @@ def commit_validated_results(
     """
     changes = changes_factory()
     outcomes: list[tuple[int, str]] = []
+    # This authoritative result says no Undo entry or note update was started.
+    if cancel_event.is_set():
+        return AdvancedCommitResult(changes, outcomes, fatal_status="cancelled-before-write")
     add_undo = getattr(col, "add_custom_undo_entry", None)
     merge_undo = getattr(col, "merge_undo_entries", None)
     if not callable(add_undo) or not callable(merge_undo):
@@ -96,7 +99,7 @@ def commit_validated_results(
             "undo-unavailable",
         )
     if cancel_event.is_set():
-        return AdvancedCommitResult(changes, outcomes)
+        return AdvancedCommitResult(changes, outcomes, fatal_status="cancelled-before-write")
     try:
         undo_id = add_undo("AINotePro advanced text generation")
     except Exception as exc:
