@@ -6,7 +6,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 
 ## Features
 
-- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–20 and independently validated JSONL output for multiple notes).
+- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–99 and independently validated JSONL output for multiple notes).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, and delete prompt templates; import/export a complete library containing both Text prompt modes and saved Audio Profiles in one JSON file.
 - Manually save/load that library to GitHub using the HTTPS Contents API. GitHub tokens are kept in the operating system credential store; sync is not automatic.
@@ -61,8 +61,8 @@ Select the fields at the bottom of the Text page and use each source as
 `{Field Name}`. Declare each requested result once with `{OUT:Field Name}`.
 For example, `{Text}\n{OUT:Translation}\nTranslate naturally.` Advanced checks
 that the selected and declared source/destination sets match before it sends a
-request. **Batch Size** is a compact selector (1–20, default 10). At size 1,
-Advanced uses the original single-note JSON object protocol. At sizes 2–20,
+request. **Batch Size** is a compact editable selector with dropdown choices 1–10, default 1, and manual entry of 11–99 (two digits maximum). At size 1,
+Advanced uses the original single-note JSON object protocol. At sizes 2–99,
 Advanced sends several notes per model request and accepts independently
 validated JSONL records identified by Note ID. If 10 notes yield 8 valid
 records, only the other 2 are retried; the following fresh batch again uses
