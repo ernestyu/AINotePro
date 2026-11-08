@@ -1911,7 +1911,7 @@ class TextTab(QWidget):
         if self._advanced_active:
             showWarning("Advanced generation is already running.")
             return
-        note_ids = self._selected_note_ids()
+        note_ids = list(dict.fromkeys(self._selected_note_ids()))
         if not note_ids:
             showWarning("No notes selected.")
             return
@@ -2028,7 +2028,7 @@ class TextTab(QWidget):
     def _update_advanced_progress(self, payload) -> None:
         run_id, accepted_count, _request_count = payload
         if (run_id != self._advanced_run_id or self._advanced_closing
-                or self._advanced_cancel.is_set()):
+                or self._advanced_cancel.is_set() or self._advanced_phase != "GENERATING"):
             return
         progress = getattr(self, "_advanced_progress", None)
         if progress is not None:
