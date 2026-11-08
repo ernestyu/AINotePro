@@ -4,7 +4,8 @@
 
 ## v1.2.0 — Advanced multi-note generation (development candidate; not released)
 
-- Advanced-only **Batch Size** selector (1–20, default 10); Easy generation and image OCR remain unchanged.
+- Advanced-only editable **Batch Size** selector (1–99, default 1; dropdown choices 1–10); Easy generation and image OCR remain unchanged.
+- Removed the unused gray Resolve button; unavailable fields remain removable inside the source/destination dropdowns.
 - Batch Size 1 keeps the existing single JSON output protocol. Larger batches use per-note JSONL, strict Note ID/field validation, partial acceptance, and retry of missing records only. Three consecutive attempts with zero new valid records stop the job; confirmed context-limit rejection stops immediately.
 - One final Anki CollectionOp retains snapshot checks, multi-field write atomicity per note and Undo. Cancellation before commit discards uncommitted results. Background commit completion is tracked independently of the TextTab window.
 - Added safe structured Provider failure codes, bounded JSONL parsing, targeted tests and four-platform GitHub Actions checks. **Real Anki/Qt, Undo, and release acceptance remain pending.**
