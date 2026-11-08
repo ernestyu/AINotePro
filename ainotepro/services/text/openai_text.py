@@ -76,7 +76,8 @@ class OpenAITextProvider(TextProvider):
         started, debug = request_started(self.name, model, "POST", url, config, body)
         response = None
         try:
-            response = requests.post(url, json=body, headers=self._headers(config), timeout=90 if vision else 60)
+            response = requests.post(url, json=body, headers=self._headers(config),
+                                     timeout=int((config or {}).get("timeout", 90 if vision else 60)))
             http_elapsed = request_http_returned(started, response, debug)
             response.raise_for_status()
             data = response.json()
