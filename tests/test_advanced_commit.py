@@ -239,5 +239,20 @@ class AdvancedCommitTests(unittest.TestCase):
         self.assertEqual(col.storage[3]["A"], "")
 
 
+    def test_cancel_before_write_reports_authoritative_terminal_status(self):
+        col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""})})
+        note = col.get_note(1)
+        cancel = threading.Event()
+        cancel.set()
+        result = commit_validated_results(
+            col, [(_snapshot(note), {"A": "a", "B": "b"}, None)],
+            ("Text",), ("A", "B"), cancel, _Changes,
+        )
+        self.assertEqual(result.fatal_status, "cancelled-before-write")
+        self.assertEqual(result.outcomes, [])
+        self.assertEqual(col.undo_add_calls, [])
+        self.assertEqual(col.update_calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
