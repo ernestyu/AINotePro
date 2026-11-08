@@ -1,0 +1,41 @@
+name: AINotePro Advanced batch v1.2.0 checks
+
+on:
+  push:
+    branches:
+      - feature/advanced-batch-v1.2.0-20261108
+  pull_request:
+    paths:
+      - "ainotepro/core/advanced_*.py"
+      - "ainotepro/ui/text_tab.py"
+      - "ainotepro/ui/advanced_coordinator.py"
+      - "ainotepro/config/manager.py"
+      - "ainotepro/services/text/_diagnostics.py"
+      - "tests/test_advanced*.py"
+      - ".github/workflows/advanced-batch-tests.yml"
+
+jobs:
+  advanced:
+    name: "${{ matrix.os }} / Python ${{ matrix.python }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, python: "3.11" }
+          - { os: ubuntu-latest, python: "3.13" }
+          - { os: macos-latest, python: "3.13" }
+          - { os: windows-latest, python: "3.13" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile Python sources
+        run: python -m compileall -q ainotepro tests
+      - name: Advanced and Provider regression tests
+        run: |
+          python -m unittest discover -s tests -p "test_advanced*.py" -v
+          python -m unittest discover -s tests -p "test_text_provider_minimal.py" -v
+          python -m unittest discover -s tests -p "test_batch_note_types.py" -v
+          python -m unittest discover -s tests -p "test_text_prompt_actions.py" -v
