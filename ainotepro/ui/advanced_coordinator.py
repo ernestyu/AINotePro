@@ -125,24 +125,28 @@ class AdvancedCommitCoordinator:
             return
         self._settled = True
         self.phase = "SETTLED"
-        result = self.batch_result
-        prefix = (
-            f"{message}\nSelected {len(self.ledger.states)}; "
-            f"validated {result.accepted_count}; "
-            f"requests {result.request_count}; retries {result.retry_count}."
-        )
-        summary = self.ledger.summary(prefix)
-        print("[AINotePro] Advanced commit settled "
-              f"updated={self.ledger.count('updated')} "
-              f"validated={result.accepted_count} "
-              f"requests={result.request_count} retries={result.retry_count}")
-        tab = self._tab_ref()
-        if tab is not None and not getattr(tab, "_advanced_closing", False):
-            try:
-                if tab._advanced_run_id == self.run_id:
-                    tab._advanced_coordinator_settled(self, summary)
-            except RuntimeError:
-                # The native QWidget can have been deleted before its Python
-                # wrapper; the coordinator and the result do not depend on it.
-                pass
-        _ACTIVE_ADVANCED_COMMITS.discard(self)
+        try:
+            result = self.batch_result
+            prefix = (
+                f"{message}\nSelected {len(self.ledger.states)}; "
+                f"validated {result.accepted_count}; "
+                f"requests {result.request_count}; retries {result.retry_count}."
+            )
+            summary = self.ledger.summary(prefix)
+            print("[AINotePro] Advanced commit settled "
+                  f"updated={self.ledger.count('updated')} "
+                  f"validated={result.accepted_count} "
+                  f"requests={result.request_count} retries={result.retry_count}")
+            tab = self._tab_ref()
+            if tab is not None and not getattr(tab, "_advanced_closing", False):
+                try:
+                    if tab._advanced_run_id == self.run_id:
+                        tab._advanced_coordinator_settled(self, summary)
+                except Exception:
+                    # Any UI-only failure, not just a destroyed native QWidget,
+                    # must not affect the authoritative settled result.
+                    print("[AINotePro] Advanced UI observer notification failed.")
+        finally:
+            # The coordinator is retained by a process-global strong-ref set.
+            # A UI callback is untrusted and may never prevent its release.
+            _ACTIVE_ADVANCED_COMMITS.discard(self)
