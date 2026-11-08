@@ -212,6 +212,7 @@ class AdvancedUiStateTests(unittest.TestCase):
                     {"name": "Text"}, {"name": "Scenario"}, {"name": "Out"}]}
         tab = _Tab()
         tab._active_prompt_name = "Custom"
+        tab._discarded_dynamic_default = False
         tab._advanced_note_type_id = None
         tab._easy_field_selection = ("Text", "Out")
         tab.source_field_combo = Picker()
