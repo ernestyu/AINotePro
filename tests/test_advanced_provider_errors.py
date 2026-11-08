@@ -4,7 +4,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 
-from ainotepro.services.text._diagnostics import ProviderRequestError, request_failed
+from ainotepro.services.text._diagnostics import ProviderRequestError, request_failed, request_started, safe_url
 
 
 class Response:
@@ -53,6 +53,29 @@ class ProviderErrorsTests(unittest.TestCase):
     def test_model_code_is_specific(self):
         self.assertEqual(self.failure(400, "model_not_found").category,
                          "invalid-model-or-endpoint")
+
+
+    def test_auth_http_status_overrides_conflicting_context_code(self):
+        for status in (401, 403):
+            with self.subTest(status=status):
+                error = self.failure(status, "context_length_exceeded")
+                self.assertEqual(error.category, "auth")
+                self.assertNotIn("context-or-output-limit", error.safe_summary)
+
+    def test_custom_endpoint_path_can_never_enter_diagnostics(self):
+        private = "VERY_PRIVATE_TOKEN_IN_PATH"
+        url = "https://alice:password@server.example/" + private + "/v1/chat/completions?api_key=ABC#secret"
+        self.assertEqual(safe_url(url), "https://server.example")
+        captured = io.StringIO()
+        with redirect_stdout(captured):
+            request_started("test", "m", "POST", url, {}, {"temperature": 0.2})
+            request_failed("test", "m", url, time.perf_counter(),
+                           RuntimeError("service failed"), False,
+                           Response(400, {"code": "request_rejected"}))
+        output = captured.getvalue()
+        for secret in (private, "password", "api_key", "ABC", "/v1/chat/completions"):
+            self.assertNotIn(secret, output)
+        self.assertIn("server.example", output)
 
 
 if __name__ == "__main__":
