@@ -1,6 +1,6 @@
 # AINotePro V1.2.0 — Text Advanced 多笔记打包生成 SPEC（FROZEN）
 
-状态：**FROZEN — 设计合同已冻结，代码尚未实施**。第三方静态审计结论：PASS WITH MINOR（审计基线 `2fd2fe3f41047fc0173fc13533e3d42bfcac7f96`）；本次仅修正审计指出的外层批次激活边界，未修改其他产品决策。运行测试仍待开发阶段执行。  
+状态：**FROZEN（含 2026-11-08 用户批准的 Batch Size UI 修订）**。第三方静态审计结论：PASS WITH MINOR（审计基线 `2fd2fe3f41047fc0173fc13533e3d42bfcac7f96`）；本次仅修正审计指出的外层批次激活边界，未修改其他产品决策。运行测试仍待开发阶段执行。  
 仓库：`ernestyu/AINotePro`  
 实施基线：`feature/prompt-library-github-sync`，Commit `dbc02526d30628f0479608a558c0b628ccb17fa1`（在本实施分支上纳入冻结 SPEC）  
 范围：仅 Text Advanced 多笔记 LLM 请求与配套 UI、解析、重试、测试；不包含本 SPEC 的实现提交。  
@@ -32,12 +32,12 @@
 
 仅在 Text 页面底部**现有** `Image Recognition` 所占的 Field Mapping 行位置显示：
 
-`Batch Size: [10 ▼]`
+`Batch Size: [1 ▼]`
 
-- Advanced：显示 Label 和一个紧凑、不可编辑的 `QComboBox`，选项为连续整数 1–20，默认 10。不加加减按钮、解释文字、单独行、常驻状态卡片或滑杆；尽量保持原对话框高度。
+- Advanced：显示 Label 和紧凑的**可编辑** `QComboBox`；下拉预设 1–10，允许直接输入 1–99 的整数（最多两位），缺省值 1。选择下拉项或完成输入时保存，开始生成前再次验证已输入值。不加额外的按钮、解释文字、单独行、常驻状态卡片或滑杆；尽量保持原对话框高度。原字段行中灰色 `Resolve…` 独立控件删除；仍保留失效字段安全校验，失效条目可在各自的 Source/Destination Fields 下拉中取消勾选。
 - Easy：完全隐藏 Batch Size Label/Combo，保留并显示原有 `Image Recognition`；切换模式不重置 Easy Checkbox 的既有选择。
-- 配置字段固定为 `text.advanced_batch_size`，整型，缺失、非法、布尔、超出 1–20 的旧配置统一读取为 10；只读时不强制覆写旧文件。必须把此键加入 `ConfigManager.update_text_fields()` 的**有限白名单**；写入时只接受 `type(value) is int` 且 `1 <= value <= 20`，非法 UI/外部写入明确拒绝。使用现有锁和原子写入做 Text 叶子键局部更新，保留 Prompt CAS、Provider、Audio、未知键和凭据；UI 保存失败需提示，并将控件恢复为最后确认持久化的值，不得静默声称成功。
-- 开始生成时冻结 B；运行中禁用 Batch Size、Prompt Preview 编辑区、Prompt Name/Search、New/Save/Save As/Delete、Import/Export、GitHub Save/Load/Settings、Mode、Source/Destination、Resolve、Provider/Model/Reasoning/Endpoint/Temperature/Refresh/Check/Restore 及 Generate；保留进度窗口 Cancel。执行前冻结全部输入和设置，不允许运行中的界面更改污染快照。已有控件的启用/禁用能力状态（例如权限、默认 Prompt 保护、Provider 能力）必须在解锁后**重新计算**，不能统一 `setEnabled(True)`；关闭/取消/错误/提交完成只能由当前 run_id 对未销毁控件恢复。Easy 不受此新增锁定规则影响。
+- 配置字段固定为 `text.advanced_batch_size`，整型，缺失、非法、布尔、超出 1–99 的旧配置统一读取为 1；只读时不强制覆写旧文件。必须把此键加入 `ConfigManager.update_text_fields()` 的**有限白名单**；写入时只接受 `type(value) is int` 且 `1 <= value <= 99`，非法 UI/外部写入明确拒绝。使用现有锁和原子写入做 Text 叶子键局部更新，保留 Prompt CAS、Provider、Audio、未知键和凭据；UI 保存失败需提示，并将控件恢复为最后确认持久化的值，不得静默声称成功。
+- 开始生成时冻结 B；运行中禁用 Batch Size、Prompt Preview 编辑区、Prompt Name/Search、New/Save/Save As/Delete、Import/Export、GitHub Save/Load/Settings、Mode、Source/Destination、Provider/Model/Reasoning/Endpoint/Temperature/Refresh/Check/Restore 及 Generate；保留进度窗口 Cancel。执行前冻结全部输入和设置，不允许运行中的界面更改污染快照。已有控件的启用/禁用能力状态（例如权限、默认 Prompt 保护、Provider 能力）必须在解锁后**重新计算**，不能统一 `setEnabled(True)`；关闭/取消/错误/提交完成只能由当前 run_id 对未销毁控件恢复。Easy 不受此新增锁定规则影响。
 - Advanced 模式下 Checkbox 的隐藏状态绝不影响 OCR 后端分支；`on_generate_text()` 仍优先分派 Advanced。
 - 不增加 UI 上的上下文长度说明。明确的上下文/输出限制拒绝在最终错误弹窗里附加中文提示：**“超出模型上下文或输出限制时，请减小 Batch Size。”** 其余故障不能被错误标记为上下文溢出。
 
@@ -78,7 +78,7 @@
 
 在一次**完整收到的响应文本**上先做全量、按物理行独立解析，然后才确定这次哪些 ID 有效；不得读到第一条有效行就立即提交 Anki。解析器为纯 Python、Qt/Anki 无依赖，采用确定行为：
 
-1. **冻结限额：完整收到的响应字符串按 UTF-8 编码后总长度不得超过 20 MiB，单个物理行不得超过 1 MiB**（B≤20，每条对应原单条 1 MiB 校验量级）。先按一次完整响应计算总字节长度；若总长度 >20 MiB，**整次响应 0 条接受**、计作零进展，并报告 `response-too-large`，不得截取前缀或部分扫描。若总长度在限额内，则按原始物理行顺序扫描全部行；超过 1 MiB 的单行直接判无效，继续检查后续完整行。`==` 上限允许，`>` 上限拒绝。仅完整、通过全部规则的行可接受；不得把因为长度上限而未检查的内容声称已完成。模型自行返回的不完整尾行按普通坏行处理。
+1. **冻结限额：完整收到的响应字符串按 UTF-8 编码后总长度不得超过 20 MiB，单个物理行不得超过 1 MiB**（B≤99；总响应上限仍独立固定为 20 MiB，单行最多 1 MiB）。先按一次完整响应计算总字节长度；若总长度 >20 MiB，**整次响应 0 条接受**、计作零进展，并报告 `response-too-large`，不得截取前缀或部分扫描。若总长度在限额内，则按原始物理行顺序扫描全部行；超过 1 MiB 的单行直接判无效，继续检查后续完整行。`==` 上限允许，`>` 上限拒绝。仅完整、通过全部规则的行可接受；不得把因为长度上限而未检查的内容声称已完成。模型自行返回的不完整尾行按普通坏行处理。
 2. 对每条物理行分别 `json.loads()`；空行、模型说明、损坏行或最后一条半截 JSON 不导致整份响应失败。保留其他可验证行。可选择严格拒绝非 JSON 行，不尝试危险的跨行拼接或启发式修复。
 3. 反序列化使用 `object_pairs_hook` 拒绝重复键（包括顶层与 `fields`），拒绝 NaN/Infinity、非对象、缺少或多余固定顶层键、错误 ID 类型、非法字段集合、空白字符串与非法代理 Unicode；**允许经 JSON 正确转义的 `\n`、`\t` 等字段内容**，与基线 Advanced 多行输出兼容。非法原始 JSON 控制字符由严格 `json.loads()` 拒绝；不得笼统拒绝所有可打印性不高的合法字符串。Note ID 必须规范十进制字符串，与本次 `pending` ID 严格匹配；不接受当前批之外、未知、上批已接受或下一批 ID。
 4. **同一个 Note ID 在同一完整响应出现两次或多次时，该 ID 本次无效**，即使其中一条字段值/字段集合非法；ID 出现次数只对“在单行限额内、可完整 `json.loads` 为对象、顶层 `note_id` 是规范十进制字符串”的行统计（该行的 `fields` 可无效）。重复顶层 JSON 键导致整个对象解析失败时，该行不能用于统计 ID；损坏行、超长行、无法安全解析 ID 的行均不得通过正则或局部文本猜测 ID。先全量扫描完成 ID 次数表，再决定有效结果；绝不“取第一条”或“取最后一条”。
@@ -150,8 +150,8 @@
 | ID | 场景 | 必须验证的结果 |
 |---|---|---|
 | BAT-01 | Easy 单笔记/多笔记文本与 OCR | 现有 Worker=1、旧 Prompt 和输出/写入规则完全不变 |
-| BAT-02 | Easy/Advanced 切换 | 仅一行紧凑 Label+下拉，Advanced 1–20，Easy 保留 Image Recognition 状态 |
-| BAT-03 | 新旧配置 | 缺失、非法、越界、布尔值→默认 10；选择可持久化，不覆盖其他域 |
+| BAT-02 | Easy/Advanced 切换 | 移除灰色 Resolve 控件；Advanced 可编辑下拉预设 1–10、可输入 1–99，最多两位；Easy 保留 Image Recognition 状态；失效字段仍可在 Source/Destination 下拉取消勾选 |
+| BAT-03 | 新旧配置 | 缺失、非法、越界、布尔值→默认 1；输入 11–99 可保存并恢复；旧的有效显式设置仍可保留；不覆盖其他域 |
 | BAT-04 | B=1 | 调用现有单 JSON 协议；输入、输出、校验语义不变 |
 | BAT-05 | B=10、恰好 10 条有效 | 一次 provider.generate；Note ID、字段完全准确 |
 | BAT-06 | B=10、8 有效、1 无效、1 缺失 | 第二次仅发送剩余 2 条；成功后下一新批仍为 10 |
@@ -170,7 +170,7 @@
 | BAT-19 | 同时有完整成功、冲突、失败、未执行 | 账本每个 ID 一个终态，统计与真实写入一致 |
 | BAT-20 | 多字段/中文字段名/HTML/Cloze/Default、自定义 Prompt | 原 Advanced 预检、模板、内容边界和结果语义不变 |
 | BAT-21 | Provider 返回空/过长/损坏 JSONL | 有效行可接受、解析受界限保护、状态机有限终止 |
-| BAT-22 | B=20、N=21、B>N、N=0 或只有无效源 | 外层分批、尾批、全量预检拒绝边界正确 |
+| BAT-22 | B=99、N=100、B>N、N=0 或只有无效源 | 外层分批、尾批、全量预检拒绝边界正确 |
 | BAT-23 | 远端提供者和本地 Ollama、llama.cpp、vLLM 等模拟端点 | 共用 generate 协议，原有输出保留、失败可诊断 |
 | BAT-24 | 实际 Anki（Windows/Linux 及上位 SPEC 要求的平台） | UI、主线程/CollectionOp、取消/撤销与有效批次运行人工验收；不能以某一平台替代上位平台门槛 |
 | BAT-25 | B>1 Prompt 编译与 B=1 兼容 | B>1 不包含单 JSON 后缀；B=1 完整 Prompt 逐字符保持一致 |
