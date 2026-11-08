@@ -88,7 +88,7 @@ class CheckableFieldCombo(QComboBox):
             item.setData(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked,
                          Qt.ItemDataRole.CheckStateRole)
             item.setToolTip(name)
-            if name in disabled:
+            if name in disabled and name not in selected_set:
                 item.setEnabled(False)
                 item.setToolTip(f"{name} (selected in the other field set)")
         self._update_label()
@@ -741,10 +741,12 @@ class TextTab(QWidget):
         if self._active_prompt_name == "Default" and self._prompt_is_dirty():
             if not self._confirm_dynamic_default_regeneration():
                 old_source, old_destination = self._last_advanced_fields
-                names = [self.advanced_source_fields.itemText(i)
-                         for i in range(self.advanced_source_fields.count())]
-                self.advanced_source_fields.set_fields(names, old_source, set(old_destination))
-                self.advanced_destination_fields.set_fields(names, old_destination, set(old_source))
+                source_names = [self.advanced_source_fields.itemText(i)
+                                for i in range(self.advanced_source_fields.count())]
+                destination_names = [self.advanced_destination_fields.itemText(i)
+                                     for i in range(self.advanced_destination_fields.count())]
+                self.advanced_source_fields.set_fields(source_names, old_source, set(old_destination))
+                self.advanced_destination_fields.set_fields(destination_names, old_destination, set(old_source))
                 return
             discarded = self._discarded_dynamic_default
         # An item that is selected on the other side is disabled before it can
@@ -754,8 +756,10 @@ class TextTab(QWidget):
         self.advanced_source_fields.set_disabled_fields(set(destination))
         self.advanced_destination_fields.set_disabled_fields(set(source))
         old_source, old_destination = self._last_advanced_fields
-        names = [self.advanced_source_fields.itemText(i)
-                 for i in range(self.advanced_source_fields.count())]
+        source_names = [self.advanced_source_fields.itemText(i)
+                        for i in range(self.advanced_source_fields.count())]
+        destination_names = [self.advanced_destination_fields.itemText(i)
+                             for i in range(self.advanced_destination_fields.count())]
         source_changed = set(source).symmetric_difference(old_source)
         destination_changed = set(destination).symmetric_difference(old_destination)
         saved_source, saved_destination = self._advanced_field_selection
@@ -763,10 +767,10 @@ class TextTab(QWidget):
         # The only way to resolve a previously-invalid field that is visible
         # again is to explicitly toggle that field; changing another visible
         # field must leave its invalid status intact.
-        merged_source = ([name for name in names if name in source] +
-                         [name for name in saved_source if name not in names])
-        merged_destination = ([name for name in names if name in destination] +
-                              [name for name in saved_destination if name not in names])
+        merged_source = ([name for name in source_names if name in source] +
+                         [name for name in saved_source if name not in source_names])
+        merged_destination = ([name for name in destination_names if name in destination] +
+                              [name for name in saved_destination if name not in destination_names])
         self._advanced_invalid_source_fields.intersection_update(merged_source)
         self._advanced_invalid_destination_fields.intersection_update(merged_destination)
         self._advanced_invalid_source_fields.difference_update(source_changed)
@@ -783,23 +787,21 @@ class TextTab(QWidget):
                 [('destination', name) for name in sorted(self._advanced_invalid_destination_fields)])
 
     def _update_invalid_field_resolver(self) -> None:
-        """Expose each unresolved semantic selection as an explicit action."""
-        button = self.resolve_invalid_fields_button
-        entries = self._invalid_advanced_field_entries()
-        menu = QMenu(button)
-        for role, name in entries:
-            label = f"{role.title()}: {name} — remove selection"
-            action = menu.addAction(label)
-            action.setToolTip(label)
-            action.triggered.connect(
-                lambda _checked=False, field_role=role, field_name=name:
-                self._resolve_invalid_field(field_role, field_name))
-        button.setMenu(menu)
-        button.setEnabled(bool(entries))
-        button.setToolTip(
-            "No unavailable Advanced fields." if not entries else
-            "Remove unavailable fields: " + ", ".join(
-                f"{role.title()}: {name}" for role, name in entries))
+        """Allow users to uncheck missing names within the two existing combos.
+
+        No dedicated Resolve widget is displayed; unavailable unchecked names
+        cannot be selected until they exist in the actual Note Type again.
+        """
+        valid = set(self._advanced_field_names)
+        for combo in (self.advanced_source_fields, self.advanced_destination_fields):
+            selected = set(combo.selected_fields())
+            for index in range(combo.count()):
+                name = combo.itemText(index)
+                if name not in valid:
+                    item = combo.model().item(index)
+                    item.setEnabled(name in selected)
+                    item.setToolTip(
+                        f"{name} (unavailable in this Note Type; uncheck to remove)")
 
     def _resolve_invalid_field(self, role: str, name: str) -> None:
         """Explicitly remove one unavailable selection without touching peers."""
@@ -1059,18 +1061,20 @@ class TextTab(QWidget):
                 self.source_field_combo.setCurrentIndex(self.source_field_combo.findText(source))
             if destination in names:
                 self.destination_field_combo.setCurrentIndex(self.destination_field_combo.findText(destination))
-            source, destination = new_source, new_destination
-            self.advanced_source_fields.set_fields(names, source, set(destination))
-            self.advanced_destination_fields.set_fields(names, destination, set(source))
+            # Keep unavailable selections checked in their existing field
+            # dropdowns so that the user can uncheck each directly. There is
+            # no independent Resolve control taking space in the Fields row.
+            missing_source = [name for name in saved_source if name not in names]
+            missing_destination = [name for name in saved_destination if name not in names]
+            source = list(new_source) + missing_source
+            destination = list(new_destination) + missing_destination
+            self.advanced_source_fields.set_fields(
+                names + missing_source, source, set(destination))
+            self.advanced_destination_fields.set_fields(
+                names + missing_destination, destination, set(source))
             self._last_advanced_fields = (list(source), list(destination))
-            # Keep the old semantic selection as-is: invalid names must block
-            # Generate instead of becoming an unannounced smaller request.
-            # Previously unresolved fields stay unresolved even when a later
-            # Note Type makes them visible, until the user toggles that field.
-            self._advanced_invalid_source_fields.update(
-                name for name in saved_source if name not in names)
-            self._advanced_invalid_destination_fields.update(
-                name for name in saved_destination if name not in names)
+            self._advanced_invalid_source_fields.update(missing_source)
+            self._advanced_invalid_destination_fields.update(missing_destination)
             self._advanced_invalid_source_fields.intersection_update(saved_source)
             self._advanced_invalid_destination_fields.intersection_update(saved_destination)
             self._advanced_note_type_id = note_type_id
