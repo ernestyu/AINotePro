@@ -14,13 +14,15 @@ class AdvancedUiContractTests(unittest.TestCase):
         self.assertLess(advanced, ocr)
 
     def test_final_commit_uses_collection_op_and_single_note_update(self):
-        start = SOURCE.index("    def _commit_advanced_results")
-        end = SOURCE.index("    def _finish_advanced_ui", start)
-        body = SOURCE[start:end]
-        self.assertIn("CollectionOp", body)
+        body = (Path(__file__).resolve().parents[1] /
+                "ainotepro/ui/advanced_coordinator.py").read_text(encoding="utf-8")
+        self.assertIn("CollectionOp(parent=parent", body)
         self.assertIn("commit_validated_results", body)
+        self.assertIn("self._collection_parent or mw", body)
+        self.assertNotIn("CollectionOp(parent=self", body)
         self.assertNotIn("update_field_content", body)
         self.assertNotIn("await ", body)
+        self.assertIn("AdvancedCommitCoordinator", SOURCE)
 
     def test_advanced_selection_and_prompt_namespaces_are_separate(self):
         self.assertIn("CheckableFieldCombo", SOURCE)
