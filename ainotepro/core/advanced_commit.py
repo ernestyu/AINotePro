@@ -100,15 +100,9 @@ def commit_validated_results(
         )
     if cancel_event.is_set():
         return AdvancedCommitResult(changes, outcomes, fatal_status="cancelled-before-write")
-    try:
-        undo_id = add_undo("AINotePro advanced text generation")
-    except Exception as exc:
-        return AdvancedCommitResult(
-            changes, outcomes,
-            f"Could not create Anki undo group; no Advanced results were written: {exc}",
-            "undo-create-failed",
-        )
-
+    # Defer the Undo entry until a note has passed the fresh read and
+    # snapshot checks. A pre-write conflict or cancellation creates no Undo.
+    undo_id = None
     for snapshot, values, _error in valid_results:
         # This is the final cancellation gate before the no-yield re-read,
         # comparison, field assignment and supported Anki update call.
@@ -132,6 +126,40 @@ def commit_validated_results(
             # No update was attempted when preparing the final read/compare.
             outcomes.append((snapshot.note_id, "commit-failed"))
             continue
+
+        if undo_id is None:
+            if cancel_event.is_set():
+                outcomes.append((snapshot.note_id, "cancelled"))
+                continue
+            try:
+                undo_id = add_undo("AINotePro advanced text generation")
+            except Exception as exc:
+                return AdvancedCommitResult(
+                    changes, outcomes,
+                    f"Could not create Anki undo group; no Advanced results were written: {exc}",
+                    "undo-create-failed",
+                )
+            if cancel_event.is_set():
+                # The Undo API has already run, but update_note has never run.
+                # Do not misuse 'cancelled-before-write', which guarantees no
+                # Undo entry was created. No speculative undo() is safe here:
+                # an empty custom entry may remain, pending real Anki testing.
+                return AdvancedCommitResult(
+                    changes, outcomes,
+                    "Cancelled during Anki Undo entry creation. No note update "
+                    "was attempted; an empty Undo entry may remain.",
+                    "cancelled-after-undo-start",
+                )
+
+        # A cancel after Undo creation but before the first write is similarly
+        # distinct from the no-Undo-entry cancellation path.
+        if cancel_event.is_set():
+            return AdvancedCommitResult(
+                changes, outcomes,
+                "Cancelled after Anki Undo entry creation. No note update "
+                "was attempted; an empty Undo entry may remain.",
+                "cancelled-after-undo-start",
+            )
         try:
             _merge_changes(changes, col.update_note(note))
         except Exception as exc:
