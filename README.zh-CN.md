@@ -84,7 +84,67 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 **Import / Export** 现在一次处理完整的 AINotePro Library（`format: AINotePro.library`，`version: 1`），单个 UTF-8 JSON 同时保存 Easy、Advanced 提示词和完整 Audio Profiles（Edge/Kokoro、四个 Voice、源/目标字段等）。新功能仅接受该统一格式，不兼容开发阶段未发布的 Prompt-only 格式。不导出未保存的草稿、Text Provider 设置、API Key 或当前机器的 Audio Profile ID。若本地导出文件已存在，自动追加 `(1)`、`(2)`。导入遇到同名不同内容则重命名，内容完全相同则跳过；新的 Audio Profile 分配新 UUID，已有 Profile ID 与当前选中项不变。Easy Default 不被覆盖，Advanced 动态 Default 不导出。全部数据先校验，再一次性写入本地配置。
 
-**Save to GitHub / Load from GitHub / ⚙** 仍是手动同步入口，远端统一文件默认 `ainotepro-library.json`（可配置路径），包含全部提示词和 Audio Profiles。无需安装 Git、GitHub CLI 或配置 SSH；使用 HTTPS API。设置 Repository、Branch、JSON path 和仓库限定的 Fine-grained Token（Save 需要 Contents 读写权限）。Token 会按 Repository 分别保存在操作系统凭据库（macOS Keychain、Windows Credential Manager；Linux 需要可用的 Secret Service/secret-tool），重启 Anki 后可再次读取，不写入 user_config.json、导出文件或命令行参数。已保存 Token 时，输入框灰显并明确标注已存储；需点击 **Replace Token** 才能重新输入，或勾选删除。首次保存、替换和删除均弹窗确认；写入后从系统凭据库读回验证，并明确提示成功。凭据库不可用时显示错误，不降级为明文存储。JSON path 支持仓库内的子目录，例如 `anki/ainotepro-library.json`。公开仓库的 Load 可以不填写 Token。Save/Load 均采用非覆盖合并，遇到同名不同内容加数字后缀，不删除数据；网络请求不阻塞界面。请先保存未提交的 Text Prompt 或 Audio Profile。导入后 Audio 页刷新列表和服务可用性检测，服务不在线时保留 Profile，只提示无法生成。
+### GitHub 同步：从零开始配置（推荐 Private 仓库）
+
+此功能将**已保存**的 Easy/Advanced 提示词与 Audio Profiles 同步到 GitHub 仓库中的**一个 JSON 文件**。它不会上传整个 Anki 牌组、笔记、音频文件、LLM 设置或 API Key；也**不会自动同步**。全程在网页和插件中完成，不需要 Git、GitHub CLI、SSH 或终端命令。
+
+**第一步：在 GitHub 创建存放个人 Library 的仓库。**
+
+1. 登录 [GitHub](https://github.com)，点击右上角 **+ → New repository**，或直接打开 [新建仓库](https://github.com/new)。
+2. **Owner** 选择自己的 GitHub 账号，**Repository name** 可填 `anki-personal-library`。建议选择 **Private**，因为个人提示词及 Audio Profile 可能包含不适合公开的内容。这里创建的是**新的个人数据仓库**，不是 `ernestyu/AINotePro` 源代码仓库。
+3. 勾选 **Add a README file** 以初始化仓库，点击 **Create repository**。记录仓库页面显示的默认分支名，通常是 `main`。使用已有仓库也可以，但需要确保目标分支确实存在。
+4. 例如仓库地址是 `https://github.com/yourname/anki-personal-library`；插件中只需要填写 `yourname/anki-personal-library`。无需提前创建 `ainotepro-library.json`，第一次成功 Save 会自动创建它。
+
+**第二步：创建权限最小的 Fine-grained Personal Access Token。**
+
+1. 点击 GitHub 头像 → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**；也可以直接打开 [创建 Token](https://github.com/settings/personal-access-tokens/new)。
+2. **Token name** 填 `AINotePro Library Sync`，**Expiration** 选择合适的有效期。Token 到期后要重新生成并在插件中替换。
+3. **Resource owner** 选择上一步仓库所属的账号或组织。**Repository access** 选择 **Only select repositories**，在 **Selected repositories** 中只勾选 `anki-personal-library`；不需要授权所有仓库。
+4. 展开 **Repository permissions**，找到 **Contents**，设为 **Read and write**。GitHub 自动授予 **Metadata: Read-only** 属于正常情况；无需另开 Administration、Actions 或 Issues 权限。对 Private 仓库进行 Save 和 Load 都应使用此 Token；仅从公开仓库 Load 可以不填写 Token。
+5. 点击 **Generate token**，立即复制生成的 Token（通常以 `github_pat_` 开头）。**Token 只在创建时完整显示一次**，不要放进仓库、截图、Issue 或聊天。若 Token 丢失，需要重新生成。组织仓库如果要求管理员批准，请先取得批准。
+
+**第三步：在 AINotePro 中逐项填写设置。**
+
+1. 打开 Anki 中的 AINotePro → **Text** 页面，点击 **Save to GitHub / Load from GitHub** 旁边的 **⚙**，进入 **GitHub AINotePro Library Settings**。
+2. 按下面的示例填写（将 `yourname` 换成自己的 GitHub 用户名）：
+
+   | 字段 | 填写示例 | 注意 |
+   |---|---|---|
+   | **Repository** | `yourname/anki-personal-library` | 仅 `owner/repo`；**不要填 GitHub URL 或 `.git`** |
+   | **Branch** | `main` | 以仓库页面**已存在**的真实分支名为准，可能是 `master` |
+   | **JSON path** | `ainotepro-library.json` | 仓库内的相对 JSON 路径；也可以填 `anki/ainotepro-library.json`；不是本地文件路径 |
+   | **Access token** | 粘贴刚复制的 `github_pat_…` | 只在首次保存或需要替换时输入 |
+
+3. 填写 Repository 后，等状态显示 **Token status: Not saved for this repository**；将 Token 粘贴到 **Access token**，点击 **OK**，再在 **Confirm GitHub Token Storage** 弹窗选择 **Yes**。插件会写入操作系统凭据库并读回验证。出现保存成功提示，只说明**本机保存 Token 成功**，不是 GitHub 上传成功。
+4. 下次再打开设置，如果看到 **Token status: Saved in system credential store** 且输入框灰色，是**正常状态**，不必重新填写。更新过期 Token 时点击 **Replace Token**，填入新 Token 后 **OK → Yes**；删除本机 Token 时勾选 **Remove saved token for this repository** 并确认。
+5. Token 按 Repository 独立保存在 macOS **Keychain**、Windows **Credential Manager** 或 Linux **Secret Service**（需要可用的 `secret-tool`）中，不写入 `user_config.json` 或导出的 Library。系统凭据库不可用时插件会报错，不会改用明文存储。
+
+**第四步：首次上传（Save to GitHub）。**
+
+1. 先在插件中 **Save** 需要保存的 Text Prompt 和 Audio Profile；**未保存的草稿不会上传**。如果当前草稿有未保存更改，先完成保存或放弃修改。
+2. 点击 **Save to GitHub**。第一次成功时，会在指定的 Branch 与 JSON path 下创建文件；以后 Save 会读取远端 Library，再与本地内容进行**非覆盖合并**，无需手动编辑远端 JSON。
+3. 等待 **AINotePro library saved to GitHub** 或 **GitHub AINotePro library is already up to date** 提示。随后打开 GitHub 仓库，确认在所选 Branch 的目标位置看到 JSON 文件。这一步才证明数据已上传。
+
+**第五步：在另一台电脑导入（Load from GitHub）。**
+
+1. 在另一台电脑安装 AINotePro，打开同一个 **⚙** 设置窗口，填写**完全相同**的 Repository、Branch 与 JSON path。
+2. Private 仓库的 Token 需要在新电脑**另外保存一次**（可使用仍有效、权限正确的同一个 Token）；Token 不随 Library 同步。公开仓库的 Load 可以不填写 Token。
+3. 点击 **Load from GitHub**。插件将远端内容**合并进本机**，不会删除现有 Prompt 或 Audio Profile；同名但不同内容会增加编号副本。完成后在 Prompt Name 与 Audio Profiles 中核对。
+4. 以后在电脑 A 修改后，先 **Save to GitHub**，在电脑 B 再 **Load from GitHub**；B 也有新数据时同理反向操作。这不是自动双向同步。
+
+**常见故障及解决方法。**
+
+| 错误/现象 | 应该检查什么 |
+|---|---|
+| `check_repository` / HTTP 404 | Repository 必须是 `owner/repo` 而非 URL；确认仓库存在，Token 的 **Resource owner** 正确，并且 **Only select repositories** 中包含该仓库；组织 Token 可能还需批准 |
+| `check_branch` / HTTP 404 | Branch 必须已存在；检查是不是 `main` / `master` 填反 |
+| HTTP 401 / 403 | Token 可能过期、撤销或权限不足；确认 **Contents: Read and write**，必要时新建 Token 并点 **Replace Token** |
+| `read_file` / HTTP 404 | 如果仓库与分支检查已经通过，**首次 Save 时文件不存在属于正常情况**；Load 则必须先有一次成功的 Save，确认 JSON path 完全一致 |
+| `create_or_update_file` / HTTP 409 / 422 | 检查并发修改、目标分支保护、写入权限、目标 JSON path 是否冲突；然后重试 |
+| 凭据库错误 | macOS 检查 Keychain、Windows 检查 Credential Manager、Linux 检查 Secret Service 会话和 `secret-tool`；不要把 Token 改存为明文 |
+| 同名条目出现 `(1)`、`(2)` | 本地与远端存在同名不同内容的版本；这是非覆盖合并的预期结果 |
+
+**诊断与安全：** 同步错误会显示失败阶段（`check_repository`、`check_branch`、`read_file`、`create_or_update_file`）、HTTP 状态和 GitHub Request ID。日志保存于 `user_files/logs/github_sync.log`，也输出到启动 Anki 的终端。日志包含仓库、分支和路径信息，但不包含 Token、Authorization 请求头或 Library 正文。建议使用独立 Private 仓库、有有效期的最小权限 Token；需要撤销时访问 [GitHub Fine-grained tokens](https://github.com/settings/personal-access-tokens)。公开反馈问题时，请先检查日志中的仓库名称等隐私信息，不要分享 Token。
 
 **V1 冲突合同：** 同步只保证已保存内容的非覆盖合并及同一编号名称系列的重复导入幂等性，**不要求不同电脑的“名称→内容”映射完全一致**。同名不同内容追加数字后缀；不同名称即使提示词文本相同，也允许作为有意保留的别名。Easy/Advanced Prompt 和 Audio Profile 统一使用 Unicode NFC 规范化及大小写无关名称判断。Audio 导出仅包含 V1 允许的 Profile/Provider/Voice 字段；未知字段（包括可能误存的凭据）不会上传或导出。Text Provider 设置和 API Key 不参与同步。
 
