@@ -88,7 +88,7 @@ def _get_default_config() -> Dict[str, Any]:
             "advanced_prompts": {},
             "advanced_last_used_prompt": "Default",
             "field_mode": "easy",
-            "advanced_batch_size": 10,
+            "advanced_batch_size": 1,
         },
         "audio": {
             "provider": "edge_tts",
@@ -520,8 +520,8 @@ class ConfigManager:
             raise ValueError("Unsupported Text field update")
         if "advanced_batch_size" in fields:
             size = fields["advanced_batch_size"]
-            if type(size) is not int or not 1 <= size <= 20:
-                raise ValueError("Advanced Batch Size must be an integer from 1 to 20")
+            if type(size) is not int or not 1 <= size <= 99:
+                raise ValueError("Advanced Batch Size must be an integer from 1 to 99")
         def update(raw):
             text = raw.setdefault("text", {})
             for key, value in fields.items():
