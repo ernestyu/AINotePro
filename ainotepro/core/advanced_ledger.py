@@ -40,8 +40,39 @@ class AdvancedBatchLedger:
         if detail:
             self.details.append(detail)
 
+    def stage_batch_result(self, result, *, cancelled: bool = False) -> None:
+        """Classify the complete generation partition, without asserting writes."""
+        accepted = {snapshot.note_id for snapshot, _values in result.accepted}
+        pending = set(result.current_batch_pending)
+        not_started = set(result.not_started)
+        if not (accepted.isdisjoint(pending) and accepted.isdisjoint(not_started)
+                and pending.isdisjoint(not_started)
+                and accepted | pending | not_started == set(self.states)):
+            raise ValueError("Batch result is not a complete disjoint Note ID partition")
+        for note_id in self.states:
+            if cancelled:
+                self.states[note_id] = "cancelled"
+            elif note_id in accepted:
+                self.states[note_id] = "validated"
+            elif note_id in pending:
+                self.states[note_id] = "not-generated"
+            else:
+                self.states[note_id] = "not-started"
+
+    def mark_commit_failure(self, *, submission_possible: bool) -> None:
+        """Never claim a queued CollectionOp definitely wrote nothing."""
+        state = "commit-uncertain" if submission_possible else "commit-failed-before-start"
+        for note_id, current in self.states.items():
+            if current == "validated":
+                self.states[note_id] = state
+
     def apply_commit_result(self, result) -> None:
         """Apply commit outcomes and classify every not-submitted validated note."""
+        if result.fatal_status == "cancelled-before-write" and not result.outcomes:
+            for note_id, state in self.states.items():
+                if state == "validated":
+                    self.states[note_id] = "cancelled"
+            return
         for note_id, status in result.outcomes:
             if note_id in self.states and self.states[note_id] == "validated":
                 self.states[note_id] = status
