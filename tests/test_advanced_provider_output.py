@@ -43,6 +43,15 @@ class AdvancedProviderOutputTests(unittest.TestCase):
         self.assertNotIn("\n", provider.generate("p", cfg))
         self.assertIn("\n", provider.generate("p", {**cfg, "preserve_output": True}))
 
+    @patch("ainotepro.services.text.openai_text.requests.post", return_value=_Response())
+    def test_advanced_can_extend_request_timeout_without_changing_easy_default(self, post):
+        provider = OpenAITextProvider()
+        base = {"base_url": "https://example.test", "model": "x"}
+        provider.generate("one", base)
+        self.assertEqual(post.call_args.kwargs["timeout"], 60)
+        provider.generate("batch", {**base, "timeout": 300, "preserve_output": True})
+        self.assertEqual(post.call_args.kwargs["timeout"], 300)
+
 
 if __name__ == "__main__":
     unittest.main()
