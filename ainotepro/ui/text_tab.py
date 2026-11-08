@@ -13,7 +13,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QEvent, QMenu, QDialog
+    QIcon, QStyle, QEvent, QMenu, QDialog, QIntValidator
 )
 from aqt.utils import showInfo, showWarning
 
@@ -609,12 +609,6 @@ class TextTab(QWidget):
         fields_row.addWidget(self.advanced_source_fields, 1)
         fields_row.addWidget(self.advanced_destination_label)
         fields_row.addWidget(self.advanced_destination_fields, 1)
-        self.resolve_invalid_fields_button = QToolButton()
-        self.resolve_invalid_fields_button.setText("Resolve…")
-        self.resolve_invalid_fields_button.setToolTip(
-            "Remove an unavailable Advanced Source or Destination selection.")
-        self.resolve_invalid_fields_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        fields_row.addWidget(self.resolve_invalid_fields_button, 0)
         self.image_checkbox = QCheckBox("Image Recognition")
         self.image_checkbox.setToolTip(
             "Read images from the source field and send them to a vision-capable model. "
@@ -623,13 +617,18 @@ class TextTab(QWidget):
         fields_row.addWidget(self.image_checkbox, 0)
         self.batch_size_label = QLabel("<b>Batch Size:</b>")
         self.batch_size_combo = QComboBox()
-        for size in range(1, 21):
+        self.batch_size_combo.setEditable(True)
+        self.batch_size_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        for size in range(1, 11):
             self.batch_size_combo.addItem(str(size), size)
-        raw_size = self.cfg.get_all().get("text", {}).get("advanced_batch_size", 10)
-        self._saved_batch_size = raw_size if type(raw_size) is int and 1 <= raw_size <= 20 else 10
-        self.batch_size_combo.setCurrentIndex(self.batch_size_combo.findData(self._saved_batch_size))
+        raw_size = self.cfg.get_all().get("text", {}).get("advanced_batch_size", 1)
+        self._saved_batch_size = raw_size if type(raw_size) is int and 1 <= raw_size <= 99 else 1
+        self.batch_size_combo.setCurrentText(str(self._saved_batch_size))
+        self.batch_size_combo.lineEdit().setMaxLength(2)
+        self.batch_size_combo.lineEdit().setValidator(QIntValidator(1, 99, self.batch_size_combo))
         self.batch_size_combo.setFixedWidth(65)
-        self.batch_size_combo.currentIndexChanged.connect(self._on_batch_size_changed)
+        self.batch_size_combo.activated.connect(self._on_batch_size_activated)
+        self.batch_size_combo.lineEdit().editingFinished.connect(self._commit_batch_size)
         fields_row.addWidget(self.batch_size_label, 0)
         fields_row.addWidget(self.batch_size_combo, 0)
         layout.addLayout(fields_row)
@@ -683,19 +682,34 @@ class TextTab(QWidget):
             showWarning(f"Could not save Text mode: {exc}")
         self._load_prompt_list()
 
-    def _on_batch_size_changed(self, _index: int) -> None:
-        size = self.batch_size_combo.currentData()
-        if size is None or size == self._saved_batch_size:
-            return
-        try:
-            self.cfg.update_text_fields({"advanced_batch_size": size})
+    def _on_batch_size_activated(self, _index: int) -> None:
+        self._commit_batch_size()
+
+    def _restore_batch_size(self) -> None:
+        self.batch_size_combo.blockSignals(True)
+        self.batch_size_combo.lineEdit().blockSignals(True)
+        self.batch_size_combo.setCurrentText(str(self._saved_batch_size))
+        self.batch_size_combo.lineEdit().blockSignals(False)
+        self.batch_size_combo.blockSignals(False)
+
+    def _commit_batch_size(self) -> bool:
+        """Persist a committed integer; reject unfinished or out-of-range edits."""
+        text = self.batch_size_combo.currentText().strip()
+        if not (text.isascii() and text.isdecimal() and 1 <= int(text) <= 99):
+            self._restore_batch_size()
+            showWarning("Batch Size must be an integer from 1 to 99.")
+            return False
+        size = int(text)
+        if size != self._saved_batch_size:
+            try:
+                self.cfg.update_text_fields({"advanced_batch_size": size})
+            except Exception:
+                self._restore_batch_size()
+                showWarning("Could not save Advanced Batch Size.")
+                return False
             self._saved_batch_size = size
-        except Exception:
-            self.batch_size_combo.blockSignals(True)
-            self.batch_size_combo.setCurrentIndex(
-                self.batch_size_combo.findData(self._saved_batch_size))
-            self.batch_size_combo.blockSignals(False)
-            showWarning("Could not save Advanced Batch Size.")
+        self._restore_batch_size()
+        return True
 
     def _update_field_mode_widgets(self) -> None:
         advanced = self._field_mode == "advanced"
@@ -703,8 +717,7 @@ class TextTab(QWidget):
                        self.easy_destination_label, self.destination_field_combo):
             widget.setVisible(not advanced)
         for widget in (self.advanced_source_label, self.advanced_source_fields,
-                       self.advanced_destination_label, self.advanced_destination_fields,
-                       self.resolve_invalid_fields_button):
+                       self.advanced_destination_label, self.advanced_destination_fields):
             widget.setVisible(advanced)
         self.image_checkbox.setVisible(not advanced)
         self.image_checkbox.setEnabled(not advanced)
@@ -1932,8 +1945,11 @@ class TextTab(QWidget):
         if invalid_fields:
             showWarning("Selected Advanced fields remain unresolved: "
                         + ", ".join(invalid_fields)
-                        + ". Re-select or deselect each listed field before generating.")
+                        + ". Uncheck unavailable items in Source/Destination Fields before generating.")
             return
+        if not self._commit_batch_size():
+            return
+        batch_size = self._saved_batch_size
         if not prompt.strip():
             showWarning("Prompt Preview is empty.")
             return
@@ -1977,7 +1993,6 @@ class TextTab(QWidget):
             showWarning("Provider Chat Endpoint and Model are required.")
             return
         request_cfg["preserve_output"] = True
-        batch_size = int(self.batch_size_combo.currentData())
         if batch_size > 1:
             # One JSONL generation may take longer than a single-note call.
             # Ollama already defaults to 300 seconds; OpenAI-compatible does not.
@@ -2007,7 +2022,7 @@ class TextTab(QWidget):
         self._advanced_worker = AdvancedGenerationWorker(
             run_id, [AdvancedRequest(snapshot, prompt) for snapshot in snapshots], parsed,
             create_provider("text", self._service_map(), {}), dict(request_cfg), self._advanced_cancel,
-            int(self.batch_size_combo.currentData()))
+            batch_size)
         self._advanced_worker.moveToThread(self._advanced_thread)
         self._advanced_thread.started.connect(self._advanced_worker.run)
         self._advanced_worker.progressUpdated.connect(self._update_advanced_progress)
@@ -2093,8 +2108,7 @@ class TextTab(QWidget):
 
     def _set_advanced_ui_busy(self, busy: bool) -> None:
         widgets = (self.field_mode_combo, self.advanced_source_fields,
-                   self.advanced_destination_fields, self.resolve_invalid_fields_button,
-                   self.batch_size_combo, self.prompt_edit, self.prompt_list_combo,
+                   self.advanced_destination_fields, self.batch_size_combo, self.prompt_edit, self.prompt_list_combo,
                    self.prompt_search_edit, self.new_button, self.save_button,
                    self.save_as_button, self.delete_button, self.import_button,
                    self.export_button, self.github_save_button, self.github_load_button,
