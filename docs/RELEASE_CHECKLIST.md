@@ -13,7 +13,7 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Generate text into a destination field for one note.
 - Generate text into destination fields for two or more selected notes.
 - Test Advanced source/destination declarations and strict JSON output, including more than 100 selected valid notes without an arbitrary batch-size rejection. Confirm invalid notes still reject the entire batch before requests.
-- **v1.2.0 (pending real Anki acceptance):** Test Batch Size 1–20 and its persisted default 10, Easy OCR visibility, B=1 original JSON, B=10 JSONL 10→2→next 10, duplicate/unknown IDs, truncated or malformed lines, three zero-progress stops, explicit context-limit popup, and non-cancel partial commit.
+- **v1.2.0 (pending real Anki acceptance):** Test editable Batch Size (dropdown 1–10, default 1, manual range 1–99, two digits), persistence and removed Resolve button with invalid fields still removable, Easy OCR visibility, B=1 original JSON, B=10 JSONL 10→2→next 10, duplicate/unknown IDs, truncated or malformed lines, three zero-progress stops, explicit context-limit popup, and non-cancel partial commit.
 - Verify one Anki Undo group and snapshot-conflict skips across multiple requests; cancel before commit must not write, cancel after scheduling must report actual per-note outcomes. Close the TextTab during queued/active commit and confirm the background coordinator still settles without accessing deleted widgets; perform real UI/Undo tests on Windows and Linux (plus the platforms required by the Advanced SPEC).
 - Check `.github/workflows/advanced-batch-tests.yml` on the exact V1.2.0 candidate commit. Four-platform headless tests do not count as real Anki acceptance.
 - Save, load, delete, import, and export a prompt.
