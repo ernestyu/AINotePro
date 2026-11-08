@@ -112,7 +112,7 @@ def parse_batch_response(response: str, pending_ids: Sequence[int],
         try:
             record = json.loads(line, object_pairs_hook=_pairs_unique,
                                 parse_constant=_bad_constant)
-        except (ValueError, TypeError, OverflowError):
+        except (ValueError, TypeError, OverflowError, RecursionError):
             continue
         if not isinstance(record, dict):
             continue
@@ -183,6 +183,7 @@ def generate_batches(
         # the call is actually about to be sent.
         no_progress = 0
         first_call = True
+        attempts_in_batch = 0
         while True:
             if cancel_event.is_set():
                 stop_reason = "cancelled"
@@ -200,10 +201,9 @@ def generate_batches(
             call_ids = [item.snapshot.note_id for item in pending]
             current_requested.update(call_ids)
             requests_sent += 1
-            if requests_sent > 1 and len(current_requested) != 0:
-                # A retry is an additional call within the same outer batch.
-                if call_ids != current_ids:
-                    retries += 1
+            if attempts_in_batch:
+                retries += 1
+            attempts_in_batch += 1
             new: dict[int, dict[str, str]] = {}
             try:
                 if batch_size == 1:
@@ -234,6 +234,7 @@ def generate_batches(
                 progress(len(accepted), requests_sent)
             if valid_new:
                 no_progress = 0
+                safe_error = ""
             else:
                 no_progress += 1
                 if not safe_error:
