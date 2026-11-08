@@ -277,6 +277,26 @@ class AdvancedBatchTests(unittest.TestCase):
         self.assertEqual(result.request_count, 3)
         self.assertEqual(result.accepted_count, 0)
 
+    def test_batch_size_99_and_one_note_tail(self):
+        class Echo:
+            def __init__(self):
+                self.groups = []
+            def generate(self, prompt, _cfg):
+                records = json.loads(prompt.split("Notes as JSON data:\n")[1])
+                self.groups.append([int(item["note_id"]) for item in records])
+                return "\n".join(record(note_id) for note_id in self.groups[-1])
+        provider = Echo()
+        result = generate_batches(requests_for(100), PARSED, 99,
+                                  provider, {}, threading.Event())
+        self.assertEqual(result.accepted_count, 100)
+        self.assertEqual(result.request_count, 2)
+        self.assertEqual(result.retry_count, 0)
+        self.assertEqual(provider.groups[0], list(range(1, 100)))
+        self.assertEqual(provider.groups[1], [100])
+        with self.assertRaises(ValueError):
+            generate_batches(requests_for(1), PARSED, 100,
+                             provider, {}, threading.Event())
+
 
 if __name__ == "__main__":
     unittest.main()
