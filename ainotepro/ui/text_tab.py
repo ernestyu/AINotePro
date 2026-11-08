@@ -20,6 +20,10 @@ from aqt.utils import showInfo, showWarning
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
 from ..provider_presets import PROVIDER_PRESETS, NO_MODELS_ENDPOINT_PROVIDERS
+from ..core.endpoint_urls import (
+    legacy_chat_endpoint, local_chat_endpoint, models_endpoint_from_chat,
+    normalize_local_server_address,
+)
 from ..core.utils import create_undo_checkpoint, update_field_content
 from ..core.batch_note_types import validate_batch_note_types
 from ..core.async_task import AsyncTask
@@ -1486,7 +1490,7 @@ class TextTab(QWidget):
         }
         if key in {"llama_cpp", "vllm"}:
             server = self._local_server_address(displayed_chat)
-            config.update({"base_url": server, "chat_endpoint": server + "/v1/chat/completions"})
+            config.update({"base_url": server, "chat_endpoint": local_chat_endpoint(server)})
         elif key == "ollama":
             config["base_url"] = self._local_server_address(displayed_chat)
         elif self._stored_chat_endpoint or displayed_chat != self._shown_chat_endpoint:
@@ -1595,9 +1599,7 @@ class TextTab(QWidget):
 
     @staticmethod
     def _legacy_chat_endpoint(base: str) -> str:
-        base = (base or "").rstrip("/")
-        if not base: return ""
-        return base + ("/chat/completions" if base.endswith("/v1") or base.endswith("/v1beta/openai") else "/v1/chat/completions")
+        return legacy_chat_endpoint(base)
 
     def _restore_provider_selection(self, provider: str) -> None:
         self._provider_switching = True
@@ -1610,14 +1612,7 @@ class TextTab(QWidget):
 
     @staticmethod
     def _local_server_address(value: str) -> str:
-        value = (value or "").strip().rstrip("/")
-        for suffix in ("/v1/chat/completions", "/chat/completions", "/v1/models", "/models", "/api/chat", "/api/tags"):
-            if value.endswith(suffix):
-                value = value[:-len(suffix)].rstrip("/")
-                break
-        if value.endswith("/v1"):
-            value = value[:-len("/v1")]
-        return value.rstrip("/")
+        return normalize_local_server_address(value)
 
     def restore_current_provider_defaults(self) -> bool:
         pv = self._service_map()
@@ -1640,13 +1635,25 @@ class TextTab(QWidget):
         """Restore per-provider UI restrictions after load or a batch finishes."""
         pv = provider_key or self._active_provider or self._service_map()
         provider_cfg = self.cfg.get_provider_config("text", pv) if pv else {}
-        # The models route is derived from the configured service. Providers
-        # without a compatible model enumeration API use manual model IDs.
         endpoint = provider_cfg.get("chat_endpoint") or provider_cfg.get("base_url") or ""
-        models_ready = bool(endpoint.strip()) and pv not in NO_MODELS_ENDPOINT_PROVIDERS
+        if pv == "ollama":
+            models_ready = bool(endpoint.strip())
+        elif pv in NO_MODELS_ENDPOINT_PROVIDERS:
+            models_ready = False
+        else:
+            if pv in {"llama_cpp", "vllm"}:
+                chat = local_chat_endpoint(endpoint)
+            elif "chat_endpoint" in provider_cfg:
+                chat = provider_cfg["chat_endpoint"]
+            else:
+                chat = legacy_chat_endpoint(provider_cfg.get("base_url", ""))
+            models_ready = bool(models_endpoint_from_chat(chat))
         self.reasoning_combo.setEnabled(True)
         self.refresh_button.setEnabled(models_ready)
-        self.refresh_button.setToolTip("This provider has no model list; type a model manually." if not models_ready else "")
+        self.refresh_button.setToolTip(
+            "Model list is unavailable or its URL is ambiguous; enter a model manually."
+            if not models_ready else ""
+        )
         self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
         if not self.image_checkbox.isEnabled():
             self.image_checkbox.setChecked(False)
@@ -1679,6 +1686,9 @@ class TextTab(QWidget):
             if not models:
                 showWarning("The Models Endpoint returned no models. Your manual Model was kept.")
             self._save_current_provider_config()
+        except ValueError:
+            print("[AINotePro] Refresh models URL is ambiguous; use manual model ID.")
+            showWarning("Cannot safely derive Models from this Chat Endpoint; enter the model manually.")
         except Exception:
             print("[AINotePro] Refresh models failed; see terminal diagnostics.")
             showWarning("Failed to fetch models; see terminal diagnostics.")

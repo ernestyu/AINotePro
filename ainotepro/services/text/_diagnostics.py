@@ -9,11 +9,18 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 def safe_url(url: str) -> str:
-    """Return a log-only URL with its entire query (and fragment) removed."""
+    """Log host, port and path without URL userinfo, query or fragment."""
     try:
         parts = urlsplit(str(url))
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
-    except Exception:
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            return "<invalid-url>"
+        host = parts.hostname
+        if ":" in host:  # IPv6 authorities need brackets.
+            host = "[" + host + "]"
+        port = parts.port  # Raises ValueError for invalid or ambiguous ports.
+        authority = host + (f":{port}" if port is not None else "")
+        return urlunsplit((parts.scheme, authority, parts.path, "", ""))
+    except (TypeError, ValueError):
         return "<invalid-url>"
 
 

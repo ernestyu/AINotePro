@@ -24,6 +24,11 @@ if "requests" not in sys.modules:
 from ainotepro.config import manager
 from ainotepro.config.audio_profiles import migrate_audio
 from ainotepro.provider_presets import PROVIDER_PRESETS, NO_MODELS_ENDPOINT_PROVIDERS
+from ainotepro.core.endpoint_urls import (
+    normalize_local_server_address, local_chat_endpoint,
+    legacy_chat_endpoint, models_endpoint_from_chat,
+)
+from ainotepro.services.text._diagnostics import safe_url
 from ainotepro.services.provider_factory import OPENAI_COMPATIBLE_TEXT_PROVIDERS, create_provider
 from ainotepro.services.text.ollama_text import OllamaTextProvider
 from ainotepro.services.text.openai_text import OpenAITextProvider
@@ -140,6 +145,9 @@ class TextProviderMinimalTests(unittest.TestCase):
         warnings = []
         namespace = {"Optional": Optional, "create_provider": create_provider,
                      "NO_MODELS_ENDPOINT_PROVIDERS": NO_MODELS_ENDPOINT_PROVIDERS,
+                     "local_chat_endpoint": local_chat_endpoint,
+                     "legacy_chat_endpoint": legacy_chat_endpoint,
+                     "models_endpoint_from_chat": models_endpoint_from_chat,
                      "showWarning": lambda message: warnings.append(message)}
         module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[], body=methods,
                                                 decorator_list=[])], type_ignores=[])
@@ -255,13 +263,140 @@ class TextProviderMinimalTests(unittest.TestCase):
                       and n.name == "_local_server_address")
         module = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[],
                                                body=[method], decorator_list=[])], type_ignores=[])
-        namespace = {}
+        namespace = {"normalize_local_server_address": normalize_local_server_address}
         exec(compile(ast.fix_missing_locations(module), "<server address>", "exec"), namespace)
         normalize = namespace["Tab"]._local_server_address
         for address in ("http://host:8799", "http://host:8799/v1",
                         "http://host:8799/v1/chat/completions",
                         "http://host:8799/v1/models"):
             self.assertEqual(normalize(address), "http://host:8799")
+
+    def test_query_fragment_and_trailing_slash_routes(self):
+        # A query is preserved for Chat, but cannot safely be copied to Models.
+        for address in (
+            "http://server:8799/v1?token=abc",
+            "http://server:8799/v1/chat/completions?token=abc",
+            "http://server:8799/v1/chat/completions/?token=abc",
+        ):
+            with self.subTest(address=address):
+                config = {"provider_key": "vllm", "chat_endpoint": address, "model": "m"}
+                provider = OpenAITextProvider("vllm")
+                with patch("ainotepro.services.text.openai_text.requests.post",
+                           return_value=Response({"choices": [{"message": {"content": "ok"}}]})) as post:
+                    provider.generate("hi", config)
+                self.assertEqual(post.call_args.args[0],
+                                 "http://server:8799/v1/chat/completions?token=abc")
+                with patch("ainotepro.services.text.openai_text.requests.get") as get:
+                    with self.assertRaisesRegex(ValueError, "enter the model manually"):
+                        provider.list_models(config)
+                    get.assert_not_called()
+        for address in (
+            "https://proxy.example/v1/chat/completions/?chat_only=1",
+            "https://proxy.example/v1/chat/completions#client-note",
+        ):
+            with self.subTest(address=address):
+                config = {"provider_key": "openai", "chat_endpoint": address}
+                with patch("ainotepro.services.text.openai_text.requests.get") as get:
+                    with self.assertRaises(ValueError):
+                        OpenAITextProvider("openai").list_models(config)
+                    get.assert_not_called()
+        for chat, models in (
+            ("https://proxy.example/v1/chat/completions/", "https://proxy.example/v1/models"),
+            ("https://proxy.example/api/v1/chat/completions///", "https://proxy.example/api/v1/models"),
+        ):
+            self.assertEqual(models_endpoint_from_chat(chat), models)
+        self.assertEqual(legacy_chat_endpoint("https://proxy.example/v1?token=abc"),
+                         "https://proxy.example/v1/chat/completions?token=abc")
+
+    def test_safe_url_redacts_userinfo_and_query_without_changing_request(self):
+        cases = (
+            ("https://alice:secret@api.example:8443/v1/chat/completions?key=XYZ#f",
+             "https://api.example:8443/v1/chat/completions"),
+            ("https://alice:secret@[2001:db8::1]:8443/v1/models?key=XYZ",
+             "https://[2001:db8::1]:8443/v1/models"),
+        )
+        for url, expected in cases:
+            self.assertEqual(safe_url(url), expected)
+            config = {"provider_key": "openai", "chat_endpoint": url,
+                      "model": "m", "debug_logging": True}
+            out = io.StringIO()
+            with redirect_stdout(out), patch(
+                "ainotepro.services.text.openai_text.requests.post",
+                return_value=Response({"choices": [{"message": {"content": "ok"}}]})
+            ) as post:
+                OpenAITextProvider("openai").generate("hi", config)
+            self.assertEqual(post.call_args.args[0], url)
+            self.assertNotIn("alice", out.getvalue())
+            self.assertNotIn("secret", out.getvalue())
+            self.assertNotIn("XYZ", out.getvalue())
+        for invalid in ("https://alice:password@server:bad/v1/models",
+                        "https://alice:password@[broken/v1/models"):
+            self.assertEqual(safe_url(invalid), "<invalid-url>")
+
+    def test_existing_config_edit_save_and_reopen_routes_to_new_server(self):
+        # Execute real ConfigManager storage and the real TextTab methods
+        # without instantiating Anki/Qt; test the persisted UI contract.
+        source = (Path(__file__).resolve().parents[1] / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
+        tab = next(n for n in ast.parse(source).body if isinstance(n, ast.ClassDef) and n.name == "TextTab")
+        names = {"_current_provider_config", "_save_current_provider_config",
+                 "_local_server_address", "_temperature_value"}
+        methods = [n for n in tab.body if isinstance(n, ast.FunctionDef) and n.name in names]
+        mod = ast.Module(body=[ast.ClassDef(name="Tab", bases=[], keywords=[],
+                                            body=methods, decorator_list=[])], type_ignores=[])
+        from typing import Any, Dict
+        warnings = []
+        ns = {"Optional": Optional, "Dict": Dict, "Any": Any, "ConfigManager": manager.ConfigManager,
+              "local_chat_endpoint": local_chat_endpoint,
+              "normalize_local_server_address": normalize_local_server_address,
+              "showWarning": lambda msg: warnings.append(msg)}
+        exec(compile(ast.fix_missing_locations(mod), "<ui persistence>", "exec"), ns)
+
+        class Field:
+            def __init__(self, value): self.value = value
+            def text(self): return self.value
+            def currentText(self): return self.value
+            def currentData(self): return "default"
+
+        for provider_name, old_url, edited, expected_chat, expected_models in (
+            ("openai", "https://api.openai.com/v1/chat/completions",
+             "http://server:8799/v1/chat/completions",
+             "http://server:8799/v1/chat/completions", "http://server:8799/v1/models"),
+            ("vllm", "http://server:8799/v1",
+             "http://server:8799/prefix/v1",
+             "http://server:8799/prefix/v1/chat/completions", "http://server:8799/prefix/v1/models"),
+        ):
+            with self.subTest(provider=provider_name):
+                cfg = manager.ConfigManager()
+                cfg.set_provider_config("text", provider_name,
+                                        {"base_url": old_url, "chat_endpoint": old_url,
+                                         "api_key": "keep", "model": "model-1",
+                                         "models_endpoint": "https://stale.example/v1/models"})
+                class Editor(ns["Tab"]):
+                    def _service_map(self): return provider_name
+
+                editor = Editor()
+                editor.cfg = manager.ConfigManager()
+                editor._active_provider = provider_name
+                editor._legacy_base_url = old_url
+                editor._stored_chat_endpoint = old_url
+                editor._shown_chat_endpoint = old_url
+                editor._reasoning_by_model = {}
+                editor.base_url_edit = Field(edited)
+                editor.api_key_edit = Field("keep")
+                editor.model_combo = Field("model-1")
+                editor.reasoning_combo = Field("default")
+                editor.temperature_edit = Field("0.70")
+                self.assertTrue(editor._save_current_provider_config())
+                reloaded = manager.ConfigManager().get_provider_config("text", provider_name)
+                self.assertNotIn("models_endpoint", reloaded)
+                self.assertEqual(reloaded["api_key"], "keep")
+                provider = OpenAITextProvider(provider_name)
+                self.assertEqual(provider._chat_endpoint(reloaded), expected_chat)
+                with patch("ainotepro.services.text.openai_text.requests.get",
+                           return_value=Response({"data": []})) as get:
+                    provider.list_models(reloaded)
+                self.assertEqual(get.call_args.args[0], expected_models)
+        self.assertEqual(warnings, [])
 
     def test_ollama_uses_native_routes_from_current_server(self):
         provider = OllamaTextProvider()
