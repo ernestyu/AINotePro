@@ -7,7 +7,7 @@ AINotePro 为 Anki 浏览器和笔记编辑器提供 AI 文本与语音生成工
 ## 功能
 
 - **Text Easy：** 根据一个来源字段生成文本，并写入一个目标字段；支持复用 Prompt 和可选的视觉识别/OCR 输入。
-- **Text Advanced（v1.2.0 开发候选，尚未发布）：** 支持多个来源及目标字段，通过 `{OUT:字段名}` 定义输出。Batch Size 下拉框（1–20，默认 10）允许一次请求处理多条笔记，按 Note ID 验证独立 JSONL 记录，保留有效结果、仅重试缺失项；Batch Size 1 仍使用原单笔记 JSON 协议。生成前统一预检全部笔记；不存在固定的 100 条选择上限。
+- **Text Advanced（v1.2.0 开发候选，尚未发布）：** 支持多个来源及目标字段，通过 `{OUT:字段名}` 定义输出。Batch Size 可编辑下拉框（预设 1–10，默认 1，最大可输入 99）允许一次请求处理多条笔记，按 Note ID 验证独立 JSONL 记录，保留有效结果、仅重试缺失项；Batch Size 1 仍使用原单笔记 JSON 协议。生成前统一预检全部笔记；不存在固定的 100 条选择上限。
 - 保存、复用提示词；内置 Default 提示词受到保护。
 - **统一 Library 导入/导出：** 单个 JSON 文件包含 Easy、Advanced 提示词及完整 Audio Profiles；导入时保留已有本地数据。
 - **GitHub 手动同步：** 可通过 GitHub Contents API Save/Load 完整 Library，支持仓库子目录；Fine-grained Token 保存在操作系统凭据库中，不需要 Git、gh 或 SSH，也不启用自动同步。
