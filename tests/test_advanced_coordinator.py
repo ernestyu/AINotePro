@@ -185,5 +185,27 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(len(_ACTIVE_ADVANCED_COMMITS), 0)
 
 
+    def test_ui_observer_failure_still_releases_global_owner(self):
+        _, result = fixture()
+        ledger = AdvancedBatchLedger.for_notes([1])
+        cancel = threading.Event()
+        cancel.set()
+        tab = Tab()
+        callbacks = []
+        def broken_observer(_coordinator, _summary):
+            callbacks.append(1)
+            raise ValueError("an observer must never strand the coordinator")
+        tab._advanced_coordinator_settled = broken_observer
+        coordinator = AdvancedCommitCoordinator(
+            10, result, ledger, ("Text",), ("Out",), cancel, tab=tab)
+        coordinator.start()
+        self.assertEqual(coordinator.phase, "SETTLED")
+        self.assertEqual(ledger.states[1], "cancelled")
+        self.assertEqual(len(callbacks), 1)
+        self.assertNotIn(coordinator, _ACTIVE_ADVANCED_COMMITS)
+        coordinator._settle("duplicate completion")
+        self.assertEqual(len(callbacks), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
