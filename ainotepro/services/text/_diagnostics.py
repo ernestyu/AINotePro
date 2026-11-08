@@ -10,7 +10,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 def safe_url(url: str) -> str:
-    """Log host, port and path without URL userinfo, query or fragment."""
+    """Log only scheme/host/port; custom paths may contain credentials."""
     try:
         parts = urlsplit(str(url))
         if parts.scheme not in ("http", "https") or not parts.hostname:
@@ -20,7 +20,7 @@ def safe_url(url: str) -> str:
             host = "[" + host + "]"
         port = parts.port  # Raises ValueError for invalid or ambiguous ports.
         authority = host + (f":{port}" if port is not None else "")
-        return urlunsplit((parts.scheme, authority, parts.path, "", ""))
+        return urlunsplit((parts.scheme, authority, "", "", ""))
     except (TypeError, ValueError):
         return "<invalid-url>"
 
@@ -130,10 +130,12 @@ def _structured_error_code(response: Any) -> str:
 
 
 def _failure_category(exc: Exception, status: int | None, code: str) -> str:
-    if code in _LIMIT_CODES:
-        return "context-or-output-limit"
+    # Authentication HTTP statuses are authoritative even when a proxy sends
+    # a contradictory service code in its error JSON.
     if status in (401, 403):
         return "auth"
+    if code in _LIMIT_CODES:
+        return "context-or-output-limit"
     if code in _MODEL_CODES or status == 404:
         return "invalid-model-or-endpoint"
     if status in (408, 425, 429) or (status is not None and 500 <= status < 600):
