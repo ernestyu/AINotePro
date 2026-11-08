@@ -2,10 +2,11 @@
 import json
 import threading
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from ainotepro.core.advanced_batch import (
-    MAX_LINE_BYTES, MAX_RESPONSE_BYTES, compile_batch_instruction,
+    BatchRequestGate, MAX_LINE_BYTES, MAX_RESPONSE_BYTES, compile_batch_instruction,
     compile_batch_prompt, generate_batches, parse_batch_response,
 )
 from ainotepro.core.advanced_text import (
@@ -189,6 +190,92 @@ class AdvancedBatchTests(unittest.TestCase):
         data = json.loads(prompt.split("Notes as JSON data:\n")[1])
         self.assertEqual(data[0]["note_id"], "1")
         self.assertIn("999", data[0]["instruction"])
+
+
+    def test_cancel_while_compiling_prevents_dispatch_and_activation(self):
+        gate = BatchRequestGate()
+        provider = Provider([])
+        def compile_and_cancel(_parsed, _requests):
+            gate.set()
+            return "ready but forbidden"
+        with patch("ainotepro.core.advanced_batch.compile_batch_prompt",
+                   side_effect=compile_and_cancel):
+            result = generate_batches(requests_for(11), PARSED, 10, provider, {}, gate)
+        self.assertEqual(provider.prompts, [])
+        self.assertEqual(result.stop_reason, "cancelled")
+        self.assertEqual(result.request_count, 0)
+        self.assertEqual(result.retry_count, 0)
+        self.assertEqual(result.current_batch_ids, ())
+        self.assertEqual(result.current_batch_requested_ids, ())
+        self.assertEqual(result.not_started, tuple(range(1, 12)))
+
+    def test_cancel_before_subsequent_batch_does_not_activate_it(self):
+        gate = BatchRequestGate()
+        provider = Provider(["\n".join(record(i) for i in range(1, 11))])
+        def cancel_after_first(accepted_count, _request_count):
+            if accepted_count == 10:
+                gate.set()
+        result = generate_batches(requests_for(25), PARSED, 10, provider, {},
+                                  gate, progress=cancel_after_first)
+        self.assertEqual(result.accepted_count, 10)
+        self.assertEqual(result.request_count, 1)
+        self.assertEqual(result.stop_reason, "cancelled")
+        self.assertEqual(result.current_batch_ids, ())
+        self.assertEqual(result.not_started, tuple(range(11, 26)))
+
+    def test_dispatch_gate_orders_cancel_and_request_registration(self):
+        gate = BatchRequestGate()
+        seen = []
+        self.assertTrue(gate.try_start(lambda: seen.append("started")))
+        gate.set()
+        self.assertFalse(gate.try_start(lambda: seen.append("incorrect")))
+        self.assertEqual(seen, ["started"])
+
+    def test_very_long_invalid_id_does_not_abort_other_jsonl_records(self):
+        giant_id = "9" * 5000
+        bad = '{"note_id":"' + giant_id + '","fields":{"Out":"bad"}}'
+        response = record(1) + "\n" + bad + "\n" + record(2)
+        self.assertEqual(set(parse_batch_response(response, [1, 2], ["Out"])),
+                         {1, 2})
+
+    def test_known_id_with_invalid_fields_invalidates_duplicate(self):
+        response = (record(1) + "\n"
+                    + '{"note_id":"1","fields":{"Other":"bad"}}'
+                    + "\n" + record(2))
+        self.assertEqual(parse_batch_response(response, [1, 2], ["Out"]),
+                         {2: {"Out": "translation 2"}})
+
+    def test_exact_and_exceeded_response_limits_report_reason(self):
+        first = record(1)
+        exact = first + "\n" + ("!" * (MAX_RESPONSE_BYTES - len(first) - 1))
+        self.assertEqual(len(exact.encode("utf-8")), MAX_RESPONSE_BYTES)
+        issues = []
+        self.assertEqual(parse_batch_response(exact, [1], ["Out"],
+                                              issue_codes=issues),
+                         {1: {"Out": "translation 1"}})
+        self.assertEqual(issues, [])
+        oversized = exact + "!"
+        self.assertEqual(parse_batch_response(oversized, [1], ["Out"],
+                                              issue_codes=issues), {})
+        self.assertEqual(issues, ["response-too-large"])
+
+    def test_exact_single_line_limit_is_accepted(self):
+        header = record(1, "x")
+        field = "x" * (MAX_LINE_BYTES - len(header.encode("utf-8")) + 1)
+        one_line = record(1, field)
+        self.assertEqual(len(one_line.encode("utf-8")), MAX_LINE_BYTES)
+        self.assertEqual(parse_batch_response(one_line, [1], ["Out"]),
+                         {1: {"Out": field}})
+
+    def test_oversized_provider_response_retains_reason_after_three_attempts(self):
+        oversize = "x" * (MAX_RESPONSE_BYTES + 1)
+        provider = Provider([oversize] * 3)
+        result = generate_batches(requests_for(2), PARSED, 2, provider, {},
+                                  BatchRequestGate())
+        self.assertEqual(result.stop_reason, "no-progress")
+        self.assertEqual(result.safe_error, "response-too-large")
+        self.assertEqual(result.request_count, 3)
+        self.assertEqual(result.accepted_count, 0)
 
 
 if __name__ == "__main__":
