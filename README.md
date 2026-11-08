@@ -6,7 +6,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 
 ## Features
 
-- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields with strict JSON output).
+- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–20 and independently validated JSONL output for multiple notes).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, and delete prompt templates; import/export a complete library containing both Text prompt modes and saved Audio Profiles in one JSON file.
 - Manually save/load that library to GitHub using the HTTPS Contents API. GitHub tokens are kept in the operating system credential store; sync is not automatic.
@@ -61,14 +61,24 @@ Select the fields at the bottom of the Text page and use each source as
 `{Field Name}`. Declare each requested result once with `{OUT:Field Name}`.
 For example, `{Text}\n{OUT:Translation}\nTranslate naturally.` Advanced checks
 that the selected and declared source/destination sets match before it sends a
-request. It accepts only a JSON object containing exactly the selected target
-field names.
+request. **Batch Size** is a compact selector (1–20, default 10). At size 1,
+Advanced uses the original single-note JSON object protocol. At sizes 2–20,
+Advanced sends several notes per model request and accepts independently
+validated JSONL records identified by Note ID. If 10 notes yield 8 valid
+records, only the other 2 are retried; the following fresh batch again uses
+the selected size. Three consecutive requests with no new valid record stop
+the entire task. A confirmed context/output limit error stops immediately
+and suggests lowering Batch Size. There is no automatic context detection.
 
 Advanced never runs Image Recognition or OCR. It converts existing readable
 field HTML to text, rejects empty or media-only sources for the whole batch,
 and asks before replacing non-empty targets. There is no fixed 100-note limit;
-all selected notes still undergo the same batch-wide preflight before requests. Easy prompts, OCR behavior, and
-saved Easy prompts remain separate from Advanced prompts. Literal prompt braces
+all selected notes still undergo the same batch-wide preflight before requests.
+Valid model outputs are held until one final Anki CollectionOp checks note
+snapshots and writes fields under the existing Undo protocol. Cancel before
+commit discards uncommitted outputs; a non-cancel generation failure commits
+only validated outputs. Easy prompts, OCR behavior, and saved Easy prompts
+remain separate from Advanced prompts. Literal prompt braces
 must be escaped as `{{` and `}}`.
 
 Before Text Easy or Audio generation, all selected notes are checked for a single **Note Type** and valid Source/Destination fields. A mixed selection is rejected before any model or TTS request or note write. Different card templates of the same Note Type are allowed; Text Advanced already performs its own full-batch validation.
