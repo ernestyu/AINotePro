@@ -86,5 +86,26 @@ class AdvancedLedgerTests(unittest.TestCase):
             ledger.stage_batch_result(result)
 
 
+    def test_cancel_after_undo_start_preserves_prior_conflict_and_reports_empty_undo(self):
+        from ainotepro.core.advanced_batch import BatchRunResult
+        ledger = AdvancedBatchLedger.for_notes([1, 2])
+        run = BatchRunResult(
+            accepted=((SimpleNamespace(note_id=1), {"Out": "x"}),
+                      (SimpleNamespace(note_id=2), {"Out": "y"})),
+            current_batch_ids=(), current_batch_pending=(),
+            current_batch_requested_ids=(), not_started=(),
+            stop_reason="complete", safe_error="", request_count=1,
+            retry_count=0,
+        )
+        ledger.stage_batch_result(run)
+        ledger.apply_commit_result(SimpleNamespace(
+            outcomes=[(1, "conflict")],
+            fatal_error="An empty Undo entry may remain.",
+            fatal_status="cancelled-after-undo-start",
+        ))
+        self.assertEqual(ledger.states, {1: "conflict", 2: "cancelled"})
+        self.assertIn("empty Undo", ledger.summary("Done"))
+
+
 if __name__ == "__main__":
     unittest.main()
