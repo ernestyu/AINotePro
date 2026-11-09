@@ -47,7 +47,7 @@ Advanced 支持来自同一 Note Type 的多个来源字段、多个目标字段
 {OUT:Translation} Translate naturally.
 ```
 
-来源/目标选择必须与 Prompt 声明双向一致。**Batch Size** 是底部紧凑的可编辑下拉框，预设选项 1–10，默认 1，可手工输入 11–99（最多两位）。原先显灰的 Resolve 独立按钮已移除，失效字段可在来源/目标字段下拉中取消勾选。选 1 时继续使用原 Advanced 的单笔记 JSON 对象协议；选择 2–99 时，一次请求处理多条笔记，以独立 JSONL 记录按 Note ID 关联结果。若一批 10 条只有 8 条有效，便接收这 8 条，仅重试未完成的 2 条；当前批全部完成后再开启新的 10 条。连续三次没有新有效记录则停止整个任务；服务端明确报告上下文或输出限制时立即停止并提示减小 Batch Size，不自动查询上下文。所有笔记在请求前经过统一预检：字段定义、来源文本是否为空或仅有媒体内容等；任意笔记不合格时整批拒绝。写入非空目标字段前会询问确认。
+来源/目标选择必须与 Prompt 声明双向一致。**Batch Size** 是底部紧凑的可编辑下拉框，预设选项 1–10，默认 1，可手工输入 1–99（最多两位）。原先显灰的 Resolve 独立按钮已移除，失效字段可在来源/目标字段下拉中取消勾选。选 1 时继续使用原 Advanced 的单笔记 JSON 对象协议；选择 2–99 时，一次请求处理多条笔记，以独立 JSONL 记录按 Note ID 关联结果。若一批 10 条只有 8 条有效，便接收这 8 条，仅重试未完成的 2 条；当前批全部完成后再开启新的 10 条。连续三次没有新有效记录则停止整个任务；服务端明确报告上下文或输出限制时立即停止并提示减小 Batch Size，不自动查询上下文。所有笔记在请求前经过统一预检：字段定义、来源文本是否为空或仅有媒体内容等；任意笔记不合格时整批拒绝。写入非空目标字段前会询问确认。
 
 Advanced 不进行 OCR；Easy 和 Advanced 的提示词分别保存。Prompt 中需要字面花括号时使用 `{{` 和 `}}` 转义。**不存在固定的每批 100 条笔记限制**；Batch Size 只是单次 LLM 请求包含的笔记数量，不限制整个选择集。生成阶段累计已验证结果，正常完成或非取消故障停止时通过一次 Anki CollectionOp 复查并写入，保留 Undo；提交前取消则丢弃尚未写入的结果。Easy 的 1 Worker 和 OCR 不变。
 
@@ -144,11 +144,9 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 | 凭据库错误 | macOS 检查 Keychain、Windows 检查 Credential Manager、Linux 检查 Secret Service 会话和 `secret-tool`；不要把 Token 改存为明文 |
 | 同名条目出现 `(1)`、`(2)` | 本地与远端存在同名不同内容的版本；这是非覆盖合并的预期结果 |
 
-**诊断与安全：** 同步错误会显示失败阶段（`check_repository`、`check_branch`、`read_file`、`create_or_update_file`）、HTTP 状态和 GitHub Request ID。日志保存于 `user_files/logs/github_sync.log`，也输出到启动 Anki 的终端。日志包含仓库、分支和路径信息，但不包含 Token、Authorization 请求头或 Library 正文。建议使用独立 Private 仓库、有有效期的最小权限 Token；需要撤销时访问 [GitHub Fine-grained tokens](https://github.com/settings/personal-access-tokens)。公开反馈问题时，请先检查日志中的仓库名称等隐私信息，不要分享 Token。
-
 **V1 冲突合同：** 同步只保证已保存内容的非覆盖合并及同一编号名称系列的重复导入幂等性，**不要求不同电脑的“名称→内容”映射完全一致**。同名不同内容追加数字后缀；不同名称即使提示词文本相同，也允许作为有意保留的别名。Easy/Advanced Prompt 和 Audio Profile 统一使用 Unicode NFC 规范化及大小写无关名称判断。Audio 导出仅包含 V1 允许的 Profile/Provider/Voice 字段；未知字段（包括可能误存的凭据）不会上传或导出。Text Provider 设置和 API Key 不参与同步。
 
-**GitHub 同步诊断：** 程序会先检查 Token 是否能访问仓库与分支，确认后才将目标文件 404 解释为尚未创建。出错弹窗会显示失败阶段（`check_repository`、`check_branch`、`read_file`、`create_or_update_file`）、HTTP 状态码和 GitHub Request ID。轮转日志位于 `user_files/logs/github_sync.log`，**请求结果也会同步输出到启动 Anki 的终端**；内容包括阶段、HTTP 状态、GitHub Request ID、仓库/分支/路径和是否提供 Token，绝不记录 Token 本身、Authorization 请求头或 Library 内容。若日志文件写入失败，弹窗将明确显示日志写入失败的原因，不再误报日志路径。Keychain 显示已保存 Token 不代表其已获得私有仓库权限；请检查 Fine-grained Token 的 Resource owner、Selected repositories、Contents 权限和有效期。反馈问题时提供错误阶段及脱敏日志即可，不要提供 Token。
+**GitHub 同步诊断与安全：** 程序会先检查 Token 是否能访问仓库与分支，确认后才将目标文件 404 解释为尚未创建。出错弹窗会显示失败阶段（`check_repository`、`check_branch`、`read_file`、`create_or_update_file`）、HTTP 状态码和 GitHub Request ID。轮转日志位于 `user_files/logs/github_sync.log`，**请求结果也会同步输出到启动 Anki 的终端**；内容包括阶段、HTTP 状态、GitHub Request ID、仓库/分支/路径和是否提供 Token，绝不记录 Token 本身、Authorization 请求头或 Library 内容。若日志文件写入失败，弹窗将明确显示日志写入失败的原因，不再误报日志路径。Keychain 显示已保存 Token 不代表其已获得私有仓库权限；请检查 Fine-grained Token 的 Resource owner、Selected repositories、Contents 权限和有效期。反馈问题时提供错误阶段及脱敏日志即可，不要提供 Token。
 
 
 ## Audio 使用方法
