@@ -1715,7 +1715,7 @@ class TextTab(QWidget):
             "Model list is unavailable or its URL is ambiguous; enter a model manually."
             if not models_ready else ""
         )
-        self.image_checkbox.setEnabled(self._field_mode == "easy" and pv in {"openai", "gemini", "ollama"})
+        self.image_checkbox.setEnabled(getattr(self, "_field_mode", "easy") == "easy" and pv in {"openai", "gemini", "ollama"})
         if not self.image_checkbox.isEnabled():
             self.image_checkbox.setChecked(False)
 
