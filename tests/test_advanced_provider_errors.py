@@ -50,6 +50,47 @@ class ProviderErrorsTests(unittest.TestCase):
         self.assertNotIn("evil", exc.safe_summary)
         self.assertEqual(exc.service_code, "")
 
+    def test_explicit_vision_rejection_is_classified_only_for_image_calls(self):
+        cases = [
+            ("image_not_supported", "opaque"),
+            ("invalid_request_error", "This model does not support image input"),
+            ("invalid_request_error", "Image input is not supported by this model"),
+            ("invalid_request_error", "Vision is not available"),
+        ]
+        for code, message in cases:
+            with self.subTest(code=code, message=message):
+                response = Response(400, {"code": code, "message": message})
+                log = io.StringIO()
+                with redirect_stdout(log):
+                    failure = request_failed(
+                        "test", "m", "https://server.example/v1/chat/completions",
+                        time.perf_counter(), RuntimeError(message), False,
+                        response, vision=True)
+                self.assertEqual(failure.category, "vision-unsupported")
+                self.assertNotIn(message, str(failure))
+                self.assertNotIn(message, log.getvalue())
+                with redirect_stdout(io.StringIO()):
+                    text_failure = request_failed(
+                        "test", "m", "https://server.example/v1/chat/completions",
+                        time.perf_counter(), RuntimeError(message), False,
+                        response)
+                self.assertNotEqual(text_failure.category, "vision-unsupported")
+
+    def test_vision_error_not_assumed_for_generic_rejections_or_auth(self):
+        for status, code, message, expected in (
+            (400, "invalid_request_error", "Input is not valid", "unknown"),
+            (400, "context_length_exceeded", "Too many tokens", "context-or-output-limit"),
+            (401, "image_not_supported", "Images not supported", "auth"),
+        ):
+            with self.subTest(status=status, code=code):
+                with redirect_stdout(io.StringIO()):
+                    failure = request_failed(
+                        "test", "m", "https://server.example/v1/chat/completions",
+                        time.perf_counter(), RuntimeError(message), False,
+                        Response(status, {"code": code, "message": message}),
+                        vision=True)
+                self.assertEqual(failure.category, expected)
+
     def test_model_code_is_specific(self):
         self.assertEqual(self.failure(400, "model_not_found").category,
                          "invalid-model-or-endpoint")
