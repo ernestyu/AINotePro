@@ -13,13 +13,10 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-try:
-    from PyQt6.QtCore import QObject, Qt, QEvent, pyqtSignal
-    from PyQt6.QtGui import QIntValidator, QFocusEvent
-    from PyQt6.QtWidgets import QApplication, QComboBox
-    from PyQt6.QtTest import QTest
-except ImportError:
-    QObject = None
+from PyQt6.QtCore import QObject, Qt, QEvent, pyqtSignal
+from PyQt6.QtGui import QIntValidator, QFocusEvent
+from PyQt6.QtWidgets import QApplication, QComboBox, QCheckBox, QWidget
+from PyQt6.QtTest import QTest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / "ainotepro/ui/text_tab.py").read_text(encoding="utf-8-sig")
@@ -53,7 +50,6 @@ class Config:
         self.saved.append(value)
 
 
-@unittest.skipIf(QObject is None, "PyQt6 is not available in this environment")
 class ActualQtControlsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -104,6 +100,15 @@ class ActualQtControlsTests(unittest.TestCase):
         self.assertNotEqual(self.combo.lineEdit().validator().validate("100", 3)[0],
                             QIntValidator.State.Acceptable)
         self.assertTrue(self.warnings)
+        # Clipboard paste and an illegal 3-digit string must not reach storage.
+        clipboard = QApplication.clipboard()
+        clipboard.setText("100")
+        self.combo.lineEdit().clear()
+        QTest.keyClick(self.combo.lineEdit(), Qt.Key.Key_V,
+                       Qt.KeyboardModifier.ControlModifier)
+        QTest.keyClick(self.combo.lineEdit(), Qt.Key.Key_Return)
+        self.assertEqual(self.combo.currentText(), "1")
+        self.assertEqual(self.owner.cfg.saved, [])
 
     def test_valid_manual_sizes_and_idempotent_activated(self):
         for size in (11, 20, 50, 99):
@@ -118,6 +123,53 @@ class ActualQtControlsTests(unittest.TestCase):
         self.combo.setCurrentIndex(4)
         self.owner._on_batch_size_activated(4)
         self.assertEqual(self.owner._saved_batch_size, 5)
+
+    def test_dropdown_activated_signal_commits_only_once(self):
+        activations = []
+        self.combo.activated.connect(activations.append)
+        self.combo.show()
+        self.combo.showPopup()
+        self.app.processEvents()
+        viewport = self.combo.view().viewport()
+        index = self.combo.model().index(6, 0)
+        rect = self.combo.view().visualRect(index)
+        QTest.mouseClick(viewport, Qt.MouseButton.LeftButton, pos=rect.center())
+        self.app.processEvents()
+        self.assertEqual(activations, [6])
+        self.assertEqual(self.owner._saved_batch_size, 7)
+        self.assertEqual(self.owner.cfg.saved, [{"advanced_batch_size": 7}])
+        self.combo.hidePopup()
+
+    def test_real_checkbox_keeps_state_when_advanced_disables_it(self):
+        # Execute the production OCR state assignments on a real QCheckBox.
+        tree = ast.parse(SOURCE)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "TextTab")
+        mode = next(n for n in tab.body if isinstance(n, ast.FunctionDef)
+                    and n.name == "_update_field_mode_widgets")
+        capabilities = next(n for n in tab.body if isinstance(n, ast.FunctionDef)
+                            and n.name == "_apply_provider_capabilities")
+        mode_lines = SOURCE.splitlines()
+        mode_source = ast.get_source_segment(SOURCE, mode)
+        cap_source = ast.get_source_segment(SOURCE, capabilities)
+        self.assertIn("self.image_checkbox.setVisible(not advanced)", mode_source)
+        self.assertIn("self.image_checkbox.setEnabled(not advanced", mode_source)
+        self.assertIn("if not vision_supported:", cap_source)
+        self.assertNotIn("if not self.image_checkbox.isEnabled()", cap_source)
+        check = QCheckBox("Image Recognition")
+        try:
+            check.setChecked(True)
+            for provider in ("openai", "gemini", "ollama"):
+                check.setChecked(True)
+                check.setEnabled(False)  # Advanced mode, provider is capable
+                self.assertTrue(check.isChecked())
+                check.setEnabled(True)  # Easy restored
+                self.assertTrue(check.isChecked())
+            check.setEnabled(False)  # Unsupported provider in Easy
+            check.setChecked(False)
+            self.assertFalse(check.isChecked())
+        finally:
+            check.deleteLater()
 
     def test_real_field_combo_unavailable_item_can_be_unchecked(self):
         combo = self.CheckableFieldCombo()
