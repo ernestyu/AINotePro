@@ -17,7 +17,7 @@ class OllamaTextProvider(TextProvider):
                 return raw[:-len(suffix)].rstrip("/")
         return raw
 
-    def _request(self, url: str, body: Dict, config: Dict) -> str:
+    def _request(self, url: str, body: Dict, config: Dict, *, vision: bool = False) -> str:
         model = body["model"]
         started, debug = request_started("ollama", model, "POST", url, config, body)
         response = None
@@ -31,7 +31,7 @@ class OllamaTextProvider(TextProvider):
             cleaned = remove_think_tags(content)
             return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
         except Exception as exc:
-            raise request_failed("ollama", model, url, started, exc, debug, response) from None
+            raise request_failed("ollama", model, url, started, exc, debug, response, vision=vision) from None
 
     def generate(self, prompt: str, config: Dict) -> str:
         body = {"model": (config or {}).get("model") or "llama3",
@@ -75,7 +75,7 @@ class OllamaTextProvider(TextProvider):
                                   "images": [image_url.split(";base64,", 1)[1]]}],
                     "stream": False, "options": {"temperature": (config or {}).get("temperature", 0.7)}}
             self._apply_reasoning(body, config)
-            return self._request(f"{base}/api/chat", body, config)
+            return self._request(f"{base}/api/chat", body, config, vision=True)
 
         # Keep the historical OpenAI-compatible vision fallback for servers
         # that advertise Ollama but only accept that payload format.
@@ -98,4 +98,4 @@ class OllamaTextProvider(TextProvider):
             request_finished("ollama", model, url, response, started, http_elapsed, content, data, debug)
             return clean_html_output(remove_think_tags(content))
         except Exception as exc:
-            raise request_failed("ollama", model, url, started, exc, debug, response) from None
+            raise request_failed("ollama", model, url, started, exc, debug, response, vision=True) from None
