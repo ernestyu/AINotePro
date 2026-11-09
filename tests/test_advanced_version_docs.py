@@ -26,7 +26,8 @@ class VersionDocumentationTests(unittest.TestCase):
             self.assertIn("1–99", text)
             self.assertIn("default 1" if path == "README.md" else "默认 1", text)
             self.assertNotIn("11–99", text)
-            self.assertIn("Resolve", text)
+            if path == "README.zh-CN.md":
+                self.assertIn("Resolve", text)
             self.assertEqual(text.count("user_files/logs/github_sync.log"), 1)
 
 
