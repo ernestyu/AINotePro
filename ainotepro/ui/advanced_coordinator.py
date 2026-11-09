@@ -158,7 +158,7 @@ class AdvancedCommitCoordinator:
             except Exception:
                 # Keep the unknown persistence outcome visible even if ledger
                 # presentation fails. The authoritative commit is never retried.
-                summary = prefix + "\\nCommit accounting unavailable; inspect Anki before retrying."
+                summary = prefix + "\nCommit accounting unavailable; inspect Anki before retrying."
                 updated = "unknown"
             print("[AINotePro] Advanced commit settled "
                   f"updated={updated} "
