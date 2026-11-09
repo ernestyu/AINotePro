@@ -85,10 +85,10 @@ class AdvancedBatchTests(unittest.TestCase):
                         self.groups = []
 
                     def generate(self, prompt, _config):
-                        payload = json.loads(prompt.split("Notes as JSON data:\\n", 1)[1])
+                        payload = json.loads(prompt.split("Notes as JSON data:\n", 1)[1])
                         ids = [int(item["note_id"]) for item in payload]
                         self.groups.append(ids)
-                        return "\\n".join(record(note_id) for note_id in ids)
+                        return "\n".join(record(note_id) for note_id in ids)
 
                 provider = EchoProvider()
                 result = generate_batches(requests_for(count), PARSED, batch_size,
