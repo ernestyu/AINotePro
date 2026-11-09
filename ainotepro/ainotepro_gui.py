@@ -120,7 +120,7 @@ class AiNoteProConfigDialog(QDialog):
         return text.prepare_close(confirmed=True)
 
     def on_help(self):
-        openLink("https://github.com/ernestyu/AINotePro/wiki")
+        openLink("https://github.com/ernestyu/AINotePro/blob/main/README.md")
 
 
 def show_ainotepro_dialog(browser=None, note_ids=None, editor=None):
