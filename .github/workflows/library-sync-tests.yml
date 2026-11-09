@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/prompt-library-github-sync
+      - main
   pull_request:
     paths:
       - "ainotepro/**"
