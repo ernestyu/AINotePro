@@ -262,7 +262,11 @@ class CoordinatorTests(unittest.TestCase):
         modules, store = fake_modules()
         store.append(col)
         tab = Tab()
-        tab._advanced_closing = True
+        def close_after_submission():
+            # Only a tab destroyed after queueing can have committed writes.
+            tab._advanced_closing = True
+        modules, store = fake_modules(operation_hook=close_after_submission)
+        store.append(col)
         ledger = AdvancedBatchLedger.for_notes([1])
         with patch.dict(sys.modules, modules):
             coordinator = AdvancedCommitCoordinator(
