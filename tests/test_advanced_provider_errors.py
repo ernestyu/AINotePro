@@ -76,6 +76,21 @@ class ProviderErrorsTests(unittest.TestCase):
                         response)
                 self.assertNotEqual(text_failure.category, "vision-unsupported")
 
+    def test_ollama_string_error_identifies_unsupported_vision(self):
+        class OllamaResponse:
+            status_code = 400
+
+            def json(self):
+                return {"error": "the model does not support images"}
+
+        with redirect_stdout(io.StringIO()):
+            error = request_failed(
+                "ollama", "text-model", "http://localhost:11434/api/chat",
+                time.perf_counter(), RuntimeError("request rejected"), False,
+                OllamaResponse(), vision=True)
+        self.assertEqual(error.category, "vision-unsupported")
+        self.assertNotIn("the model does not support images", str(error))
+
     def test_vision_error_not_assumed_for_generic_rejections_or_auth(self):
         for status, code, message, expected in (
             (400, "invalid_request_error", "Input is not valid", "unknown"),
