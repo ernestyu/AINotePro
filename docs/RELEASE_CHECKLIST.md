@@ -13,6 +13,9 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - Generate text into a destination field for one note.
 - Generate text into destination fields for two or more selected notes.
 - Test Advanced source/destination declarations and strict JSON output, including more than 100 selected valid notes without an arbitrary batch-size rejection. Confirm invalid notes still reject the entire batch before requests.
+- **v1.2.0 (pending real Anki acceptance):** Test editable Batch Size (dropdown 1–10, default 1, manual range 1–99, two digits), persistence and removed Resolve button with invalid fields still removable, Easy OCR visibility, B=1 original JSON, B=10 JSONL 10→2→next 10, duplicate/unknown IDs, truncated or malformed lines, three zero-progress stops, explicit context-limit popup, and non-cancel partial commit.
+- Verify one Anki Undo group and snapshot-conflict skips across multiple requests; cancel before commit must not write, cancel after scheduling must report actual per-note outcomes. Close the TextTab during queued/active commit and confirm the background coordinator still settles without accessing deleted widgets; perform real UI/Undo tests on Windows and Linux (plus the platforms required by the Advanced SPEC).
+- Check `.github/workflows/advanced-batch-tests.yml` on the exact V1.2.0 candidate commit. Four-platform headless tests do not count as real Anki acceptance.
 - Save, load, delete, import, and export a prompt.
 - Confirm the obsolete `Online` prompt button is absent, and New/Save/Save As/Delete plus Import/Export remain functional.
 - Use `Check` for at least one remote provider.
@@ -27,7 +30,7 @@ Use this checklist before publishing a new AINotePro build to AnkiWeb.
 - **v1.1.1 Audio and batch preflight:** Verify four Voice blocks, migration of saved three-slot Profiles, and Edge/Kokoro generation. Mixed Note Types must be rejected before Text Easy or Audio requests and note writes, while multiple card templates of one Note Type remain supported.
 - Verify the V1.1.1 GitHub-synchronization acceptance items in `docs/testing/library-github-sync-v1-acceptance.md` on each supported OS. GitHub Actions tests mock native credentials and do not replace real Keychain/Credential Manager/Secret Service testing.
 - Check the four-platform matrix in `.github/workflows/library-sync-tests.yml` for the exact commit being released. If any required CI job is queued or fails, do not record CI as passed.
-- Confirm `manifest.json` and `__init__.py` both report version 1.1.1, and back up `user_files` before upgrade. Older single-prompt export JSON is not accepted by the new unified Library Import.
+- **Source version is now 1.2.0:** `manifest.json` is the single authoritative version; `ainotepro/version.py` reads it for the dialog title (`AINotePro — v1.2.0`), while `__init__.py` intentionally does not duplicate a numeric version. Verify the version in the packaged add-on. This source merge is **not** an AnkiWeb release; finish the user's real Anki/Qt and Undo checks, back up `user_files`, and explicitly authorize packaging/publication. Older single-prompt export JSON is not accepted by the unified Library Import.
 - Test image OCR with a known vision-capable endpoint if advertising image-source support in the release notes.
 - Confirm `user_files/user_config.json` and prompt files survive an add-on upgrade.
 - Confirm failed text generation does not write `[Error]` into destination fields.

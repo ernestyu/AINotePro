@@ -5,6 +5,7 @@ from aqt.utils import openLink
 
 from .ui.text_tab import TextTab
 from .ui.tts_tab import TTSTab
+from .version import addon_version
 
 
 class AiNoteProConfigDialog(QDialog):
@@ -13,7 +14,7 @@ class AiNoteProConfigDialog(QDialog):
         self.browser = browser
         self.note_ids = list(note_ids or [])
         self.editor = editor
-        self.setWindowTitle("AINotePro — v1.0.0")
+        self.setWindowTitle(f"AINotePro — v{addon_version()}")
         # Four compact voices fit at the original dialog height; spare
         # space is shared between groups, keeping fields and footer visible.
         self.resize(1000, 700)

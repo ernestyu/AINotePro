@@ -4,9 +4,11 @@
 
 AINotePro is an Anki add-on for adding AI-generated text and audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
+**Source version: 1.2.0.** The AINotePro window title reads the version from `manifest.json`, rather than a hard-coded string. The `Model` selector chooses the LLM; the `Mode` selector chooses Easy or Advanced. GitHub source integration does not itself publish a new AnkiWeb package; real Anki/Qt acceptance and the AnkiWeb release are separate steps.
+
 ## Features
 
-- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields with strict JSON output).
+- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–99 and independently validated JSONL output for multiple notes).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, and delete prompt templates; import/export a complete library containing both Text prompt modes and saved Audio Profiles in one JSON file.
 - Manually save/load that library to GitHub using the HTTPS Contents API. GitHub tokens are kept in the operating system credential store; sync is not automatic.
@@ -61,14 +63,24 @@ Select the fields at the bottom of the Text page and use each source as
 `{Field Name}`. Declare each requested result once with `{OUT:Field Name}`.
 For example, `{Text}\n{OUT:Translation}\nTranslate naturally.` Advanced checks
 that the selected and declared source/destination sets match before it sends a
-request. It accepts only a JSON object containing exactly the selected target
-field names.
+request. **Batch Size** is a compact editable selector with dropdown choices 1–10, default 1, and manual entry of 1–99 (two digits maximum). At size 1,
+Advanced uses the original single-note JSON object protocol. At sizes 2–99,
+Advanced sends several notes per model request and accepts independently
+validated JSONL records identified by Note ID. If 10 notes yield 8 valid
+records, only the other 2 are retried; the following fresh batch again uses
+the selected size. Three consecutive requests with no new valid record stop
+the entire task. A confirmed context/output limit error stops immediately
+and suggests lowering Batch Size. There is no automatic context detection.
 
 Advanced never runs Image Recognition or OCR. It converts existing readable
 field HTML to text, rejects empty or media-only sources for the whole batch,
 and asks before replacing non-empty targets. There is no fixed 100-note limit;
-all selected notes still undergo the same batch-wide preflight before requests. Easy prompts, OCR behavior, and
-saved Easy prompts remain separate from Advanced prompts. Literal prompt braces
+all selected notes still undergo the same batch-wide preflight before requests.
+Valid model outputs are held until one final Anki CollectionOp checks note
+snapshots and writes fields under the existing Undo protocol. Cancel before
+commit discards uncommitted outputs; a non-cancel generation failure commits
+only validated outputs. Easy prompts, OCR behavior, and saved Easy prompts
+remain separate from Advanced prompts. Literal prompt braces
 must be escaped as `{{` and `}}`.
 
 Before Text Easy or Audio generation, all selected notes are checked for a single **Note Type** and valid Source/Destination fields. A mixed selection is rejected before any model or TTS request or note write. Different card templates of the same Note Type are allowed; Text Advanced already performs its own full-batch validation.
@@ -92,11 +104,69 @@ Select a saved prompt from **Prompt Name** to load it immediately. **New** asks 
 
 **Import** and **Export** operate on one complete **AINotePro library** JSON (`format: AINotePro.library`, `version: 1`), containing saved Easy prompts, Advanced prompts, and all Audio Profiles with their Edge/Kokoro Voice configurations, source and destination fields. Only this unified format is supported by the new library feature. Export never includes unsaved drafts, Text Provider settings, API keys, or the machine's selected Audio Profile ID. Export to an existing filename creates a `(1)`, `(2)` copy. Import does not overwrite existing entries: the same name and contents are skipped, while name conflicts with different contents create `Name (1)`, `Name (2)` copies. New Audio Profiles receive new internal UUIDs; existing Profile IDs and the active selection are unchanged. Easy's protected Default is never overwritten, and Advanced's dynamic Default is excluded. All three domains are validated before one atomic local configuration write.
 
-**Save to GitHub**, **Load from GitHub**, and the adjacent **⚙ settings** control use the same complete library in one `ainotepro-library.json` (configurable path). Configure `owner/repo`, existing branch (default `main`), and JSON path. GitHub connection uses the HTTPS Contents API; **git**, **gh**, and SSH are not required. A fine-grained token scoped to the repository with **Contents: Read and write** is required for Save; public Load may work without a token. The token persists per repository in the operating system credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service with `secret-tool`). It survives Anki restarts but is never written to `user_config.json`, exported libraries, or process arguments. A saved token is shown by a disabled input and an explicit saved-status label; use **Replace Token** to unlock editing or the removal checkbox to delete it. Saving/replacing/removing requires a confirmation dialog. A successful save is verified by reading it back from the system credential store and acknowledged with a message. When secure storage is unavailable, the plugin reports an error rather than saving plaintext. JSON paths may include repository subdirectories, for example `anki/ainotepro-library.json`. Save merges local items into the remote library, Load merges remote items locally, and neither deletes saved data. Both preserve differently configured Audio Profiles under numbered names. Network requests run off the UI thread. Save any unsaved Text prompt or Audio Profile before transfers. After import, the Audio tab refreshes its Profile list and provider availability checks; an unavailable Edge voice or Kokoro server does not erase the saved Profile. No automatic sync is enabled.
+### GitHub library sync: complete setup guide (private repository recommended)
+
+This feature stores your **saved** Easy/Advanced prompts and Audio Profiles in **one JSON file** in your GitHub repository. It does **not** upload Anki decks, notes, generated audio files, LLM settings, or API keys. Synchronization is **manual**, not automatic. You do not need to install Git, GitHub CLI, configure SSH, or use a terminal.
+
+**Step 1 — Create a repository for your personal library.**
+
+1. Sign in to [GitHub](https://github.com), click **+ → New repository**, or open [github.com/new](https://github.com/new).
+2. Choose your account under **Owner**. For **Repository name**, you can use `anki-personal-library`. Select **Private** (recommended), since prompts or Audio Profiles may contain personal information. This must be **your own data repository**, not the `ernestyu/AINotePro` add-on source repository.
+3. Select **Add a README file** to initialize the repository, then click **Create repository**. Check the actual default branch shown on GitHub (usually `main`). Existing repositories are also supported, but the selected branch must already exist.
+4. For a repository URL such as `https://github.com/yourname/anki-personal-library`, AINotePro needs **only** `yourname/anki-personal-library`. Do **not** manually create `ainotepro-library.json` on GitHub; the first successful Save creates it.
+
+**Step 2 — Create a fine-grained Personal Access Token with limited permissions.**
+
+1. On GitHub, select your avatar → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**, or go directly to [Create a fine-grained token](https://github.com/settings/personal-access-tokens/new).
+2. Enter a **Token name**, such as `AINotePro Library Sync`, and choose an **Expiration**. Once expired, you will need to generate and save a replacement token.
+3. Set **Resource owner** to the account or organization that owns the repository created in Step 1. Under **Repository access**, choose **Only select repositories**, then select **only** `anki-personal-library`. Do not grant access to all repositories.
+4. Under **Repository permissions**, locate **Contents** and choose **Read and write**. GitHub may add **Metadata: Read-only** automatically; this is expected. No Administration, Actions, Issues, or other write permissions are needed. To Save/Load from a private repository, use this token. Anonymous Load may work for a public repository.
+5. Click **Generate token** and copy it immediately (fine-grained tokens typically start with `github_pat_`). GitHub does not display the complete token again. Do not put it into a repository, issue, screenshot, or chat. If lost, generate a replacement. An organization may require administrator approval of the token.
+
+**Step 3 — Enter the exact settings in AINotePro.**
+
+1. In Anki, open AINotePro → **Text**. Click the **⚙** next to **Save to GitHub** and **Load from GitHub**, opening **GitHub AINotePro Library Settings**.
+2. Fill out the form (replace `yourname` with your GitHub login):
+
+   | Field | Example | What it means |
+   |---|---|---|
+   | **Repository** | `yourname/anki-personal-library` | Enter `owner/repo`, **not** the full URL or a `.git` suffix |
+   | **Branch** | `main` | Must be an **existing** branch; use the actual name shown on GitHub (sometimes `master`) |
+   | **JSON path** | `ainotepro-library.json` | Relative path **inside the repository**, not a local file path; for example `anki/ainotepro-library.json` also works |
+   | **Access token** | Paste the new `github_pat_…` token | Only required when no token is saved for this repository or when replacing it |
+
+3. After entering Repository, allow the status to update to **Token status: Not saved for this repository**. Paste the token into **Access token**, click **OK**, then choose **Yes** in **Confirm GitHub Token Storage**. The add-on writes the token to the OS credential store and reads it back to verify. The resulting success message confirms **local token storage only**; it is **not** proof of remote GitHub access or successful upload.
+4. On later visits, **Token status: Saved in system credential store** and a disabled token input are **normal**. Do not paste the token again. To rotate an expired token, click **Replace Token**, enter the new value, and confirm **OK → Yes**. To remove the saved token from this computer, check **Remove saved token for this repository** and confirm. Tokens are stored separately for each repository.
+5. Secure storage uses **macOS Keychain**, **Windows Credential Manager**, or **Linux Secret Service** (with a working `secret-tool`). Tokens are not written to `user_config.json` or exported libraries. If the OS credential store is unavailable, AINotePro reports an error rather than saving plaintext.
+
+**Step 4 — Upload the first library (Save to GitHub).**
+
+1. First **Save** any Text prompts and Audio Profiles you intend to keep. **Unsaved drafts are not transferred**; save or discard outstanding prompt edits before syncing.
+2. Click **Save to GitHub**. A successful first Save creates the JSON file at the selected Branch/JSON path. Later saves fetch the remote library first and **merge** saved local entries without overwriting existing remote entries. You do not need to edit the JSON manually.
+3. Wait for **AINotePro library saved to GitHub** or **GitHub AINotePro library is already up to date**. Open the repository on GitHub, select the configured branch, and verify that the file exists at the expected path. **This is the upload verification**, not the earlier token-storage message.
+
+**Step 5 — Restore the library on another computer (Load from GitHub).**
+
+1. Install AINotePro in Anki on the second computer. Open the same **⚙** window and enter the **same Repository, Branch, and JSON path**.
+2. For a private repository, you must **save a token on this computer as well** (the same still-valid repository-scoped token is acceptable). Tokens are **not** synchronized through the library. A public repository may allow Load without a token.
+3. Click **Load from GitHub**. AINotePro **merges** remote entries into the current computer without deleting existing prompts or Audio Profiles. Same-name, different-content entries receive numbered names. Review **Prompt Name** and the **Audio Profiles** list after import.
+4. Later, after changing something on computer A, use **Save to GitHub** on A and **Load from GitHub** on B. Repeat in the other direction if B also added content. This is **not real-time two-way automatic sync**.
+
+**Troubleshooting by error stage.**
+
+| Error / symptom | What to check |
+|---|---|
+| `check_repository` / HTTP 404 | Repository must be `owner/repo` rather than a URL. Confirm it exists, the token's **Resource owner** is correct, **Only select repositories** includes it, and any organization token approval is complete |
+| `check_branch` / HTTP 404 | The selected branch does not exist or cannot be accessed; verify `main` versus `master` on GitHub |
+| HTTP 401 / 403 | Token expired, was revoked, or lacks permissions; verify **Contents: Read and write**; use **Replace Token** if needed |
+| `read_file` / HTTP 404 | After repository and branch checks pass, a missing JSON file is **normal for the first Save**; Load requires an earlier successful Save and the same JSON path |
+| `create_or_update_file` / HTTP 409 / 422 | Check concurrent edits, branch protection, write access, and target file/path conflicts, then retry |
+| Credential store unavailable | Check macOS Keychain, Windows Credential Manager, or the Linux Secret Service session and `secret-tool`. Do not copy the token into plaintext configuration |
+| Prompt names get `(1)`, `(2)` | Same name, different content existed on different devices; numbered copies are intentional non-overwriting merge behavior |
 
 **V1 conflict contract:** synchronization preserves the *union of saved content* without overwriting existing local names, but does **not** force the same name-to-content mapping on different devices. Identically named, different-content entries gain numeric suffixes; repeated Save/Load must not create additional copies of that content in the same numbered-name family. Different names with identical text are deliberate aliases and are retained. Easy/Advanced prompts and Audio Profiles use case-insensitive, NFC-normalized name identity. Audio exports use a fixed V1 field allowlist and silently omit unknown Profile/provider/Voice properties, including accidental credential fields. Existing Text provider settings and API keys are never synchronized. These decisions are intentional and are not cross-device canonical naming guarantees.
 
-**GitHub synchronization diagnostics:** GitHub requests check repository and branch visibility before treating a 404 on the library file as a first-time upload. The error dialog reports the failing stage (check_repository, check_branch, read_file, create_or_update_file), HTTP status, and GitHub Request ID. A bounded rotating log is stored under `user_files/logs/github_sync.log`, **and every request result is also printed in the Anki launch terminal**. Both include stage, status, GitHub Request ID, repository/branch/path and whether a token was supplied, but never the token, Authorization headers or library contents. If the log file cannot be written, the error dialog reports the logging failure instead of claiming the file was saved. For a private repository, a saved Keychain token alone does not prove that GitHub granted access: verify the fine-grained token's resource owner, selected repository, Contents permissions, and expiry. For support, share the error stage and a redacted diagnostic log, not your token.
+**GitHub synchronization diagnostics and security:** GitHub requests check repository and branch visibility before treating a 404 on the library file as a first-time upload. The error dialog reports the failing stage (check_repository, check_branch, read_file, create_or_update_file), HTTP status, and GitHub Request ID. A bounded rotating log is stored under `user_files/logs/github_sync.log`, **and every request result is also printed in the Anki launch terminal**. Both include stage, status, GitHub Request ID, repository/branch/path and whether a token was supplied, but never the token, Authorization headers or library contents. If the log file cannot be written, the error dialog reports the logging failure instead of claiming the file was saved. For a private repository, a saved Keychain token alone does not prove that GitHub granted access: verify the fine-grained token's resource owner, selected repository, Contents permissions, and expiry. For support, share the error stage and a redacted diagnostic log, not your token.
 
 
 The built-in **Default** is protected from Save, Delete and Import overwrites. You can edit it temporarily and use Save As to keep a copy. Existing customized Default text is retained; this update does not reset it. When switching away from unsaved changes, the editor offers Save / Discard / Cancel (or Discard / Cancel for Default). The Prompt Name selector is read-only; naming is handled by New and Save As.

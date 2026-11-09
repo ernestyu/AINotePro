@@ -115,6 +115,34 @@ class AdvancedCommitTests(unittest.TestCase):
         self.assertEqual(col.storage[2]["A"], "")
         self.assertEqual(col.storage[2]["B"], "")
 
+    def test_cancel_after_prior_success_never_claims_all_writes_absent(self):
+        class CancelAtSecondFinalGate:
+            def __init__(self):
+                self.calls = 0
+
+            def is_set(self):
+                self.calls += 1
+                # After the first update/Undo merge, when the second note is
+                # past re-read but has not called update_note.
+                return self.calls >= 10
+
+        cancel = CancelAtSecondFinalGate()
+        col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""}),
+                           2: _Note(2, {"Text": "two", "A": "", "B": ""})})
+        first, second = col.get_note(1), col.get_note(2)
+        result = commit_validated_results(
+            col,
+            [(_snapshot(first), {"A": "a", "B": "b"}, None),
+             (_snapshot(second), {"A": "c", "B": "d"}, None)],
+            ("Text",), ("A", "B"), cancel, _Changes,
+        )
+        self.assertEqual(col.update_calls, [1])
+        self.assertEqual(col.undo_merge_calls, [42])
+        self.assertEqual(result.outcomes, [(1, "updated")])
+        self.assertEqual(result.fatal_status, "cancelled-after-undo-start")
+        self.assertIn("Earlier notes were updated", result.fatal_error)
+        self.assertNotIn("No note update was attempted;", result.fatal_error)
+
     def test_undo_api_absence_has_zero_note_updates(self):
         col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""})})
         note = col.get_note(1)
@@ -237,6 +265,56 @@ class AdvancedCommitTests(unittest.TestCase):
         self.assertEqual(col.storage[1]["A"], "a1")
         self.assertEqual(col.storage[2]["A"], "a2")
         self.assertEqual(col.storage[3]["A"], "")
+
+
+    def test_cancel_before_write_reports_authoritative_terminal_status(self):
+        col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""})})
+        note = col.get_note(1)
+        cancel = threading.Event()
+        cancel.set()
+        result = commit_validated_results(
+            col, [(_snapshot(note), {"A": "a", "B": "b"}, None)],
+            ("Text",), ("A", "B"), cancel, _Changes,
+        )
+        self.assertEqual(result.fatal_status, "cancelled-before-write")
+        self.assertEqual(result.outcomes, [])
+        self.assertEqual(col.undo_add_calls, [])
+        self.assertEqual(col.update_calls, [])
+
+
+    def test_cancel_during_undo_creation_has_zero_writes_and_distinct_status(self):
+        col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""}),
+                           2: _Note(2, {"Text": "two", "A": "", "B": ""})})
+        snapshots = [_snapshot(col.get_note(note_id)) for note_id in (1, 2)]
+        cancel = threading.Event()
+        add_undo = col.add_custom_undo_entry
+        def add_then_cancel(label):
+            undo_id = add_undo(label)
+            cancel.set()
+            return undo_id
+        col.add_custom_undo_entry = add_then_cancel
+        result = commit_validated_results(
+            col, [(snapshots[0], {"A": "a", "B": "b"}, None),
+                  (snapshots[1], {"A": "c", "B": "d"}, None)],
+            ("Text",), ("A", "B"), cancel, _Changes,
+        )
+        self.assertEqual(result.fatal_status, "cancelled-after-undo-start")
+        self.assertIn("empty Undo entry may remain", result.fatal_error)
+        self.assertEqual(result.outcomes, [])
+        self.assertEqual(len(col.undo_add_calls), 1)
+        self.assertEqual(col.update_calls, [])
+
+    def test_conflict_before_first_write_creates_no_undo_entry(self):
+        col = _Collection({1: _Note(1, {"Text": "original", "A": "", "B": ""})})
+        snapshot = _snapshot(col.get_note(1))
+        col.storage[1]["Text"] = "externally changed"
+        result = commit_validated_results(
+            col, [(snapshot, {"A": "a", "B": "b"}, None)],
+            ("Text",), ("A", "B"), threading.Event(), _Changes,
+        )
+        self.assertEqual(result.outcomes, [(1, "conflict")])
+        self.assertEqual(col.undo_add_calls, [])
+        self.assertEqual(col.update_calls, [])
 
 
 if __name__ == "__main__":
