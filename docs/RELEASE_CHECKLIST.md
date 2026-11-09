@@ -68,13 +68,13 @@ Remove generated and local-only files from the package:
 
 ## 4. Release source and distributable branches
 
-The authoritative source release is **main**, tagged \`v1.2.0\`. Keep all source code,
+The authoritative source release is **main**, tagged `v1.2.0`. Keep all source code,
 tests, documentation, and CI workflows on main.
 
 The **addon/v1.2.0** branch is a distribution-only snapshot of the plugin code.
-Its root contains \`__init__.py\`, \`manifest.json\`, \`ainotepro/\`, \`libs/\`,
-\`user_files/README.txt\`, and the required license/privacy notices. It excludes
-\`docs/\`, \`tests/\`, \`scripts/\`, \`.github/\`, generated logs, caches and backups.
+Its root contains `__init__.py`, `manifest.json`, `ainotepro/`, `libs/`,
+`user_files/README.txt`, and the required license/privacy notices. It excludes
+`docs/`, `tests/`, `scripts/`, `.github/`, generated logs, caches and backups.
 
 Build the package *from the addon branch* without having to check it out:
 
@@ -87,10 +87,10 @@ shasum -a 256 AINotePro-v1.2.0.ankiaddon
 ~~~
 
 The archive's top level must contain the add-on entrypoint directly, not a
-wrapping directory. Do not export \`main\` as the installable archive, since
+wrapping directory. Do not export `main` as the installable archive, since
 that would include development files. GitHub releases and tags refer to the
-source commit on \`main\`; the \`.ankiaddon\` release asset is built from
-\`addon/v1.2.0\`. Before replacing an existing published tag or release asset,
+source commit on `main`; the `.ankiaddon` release asset is built from
+`addon/v1.2.0`. Before replacing an existing published tag or release asset,
 confirm that you are updating the intended version and record its checksum.
 The source release does not by itself publish to AnkiWeb.
 
