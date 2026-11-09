@@ -67,7 +67,6 @@ class ActualQtControlsTests(unittest.TestCase):
         for value in range(1, 11):
             self.combo.addItem(str(value), value)
         self.combo.setCurrentText("1")
-        self.combo.lineEdit().setMaxLength(2)
         self.combo.lineEdit().setValidator(QIntValidator(1, 99, self.combo))
         self.owner.batch_size_combo = self.combo
         self.combo.lineEdit().installEventFilter(self.owner)
@@ -96,7 +95,7 @@ class ActualQtControlsTests(unittest.TestCase):
                 QTest.keyClick(self.combo.lineEdit(), Qt.Key.Key_Return)
                 self.assertEqual(self.combo.currentText(), "1")
                 self.assertEqual(self.owner.cfg.saved, [])
-        # The editor's maxLength prevents a three-digit value from being typed.
+        # The validator rejects 3-digit values without silently truncating.
         self.assertNotEqual(self.combo.lineEdit().validator().validate("100", 3)[0],
                             QIntValidator.State.Acceptable)
         self.assertTrue(self.warnings)
