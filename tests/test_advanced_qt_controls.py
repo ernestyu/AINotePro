@@ -185,6 +185,7 @@ class ActualQtControlsTests(unittest.TestCase):
             "NO_MODELS_ENDPOINT_PROVIDERS": set(),
             "models_endpoint_from_chat": lambda _value: "",
             "legacy_chat_endpoint": lambda value: value,
+            "local_chat_endpoint": lambda value: value,
         }
         exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
                      "<OCR methods>", "exec"), scope)
