@@ -40,7 +40,7 @@ class AdvancedBatchConfigTests(unittest.TestCase):
         self.assertIn("self.batch_size_label.setVisible(advanced)", body)
         self.assertIn('range(1, 11)', SOURCE)
         self.assertIn('self.batch_size_combo.setEditable(True)', SOURCE)
-        self.assertIn('self.batch_size_combo.lineEdit().setMaxLength(2)', SOURCE)
+        self.assertNotIn('self.batch_size_combo.lineEdit().setMaxLength(2)', SOURCE)
         self.assertIn('QIntValidator(1, 99', SOURCE)
         self.assertIn('self.batch_size_combo.setFixedWidth(65)', SOURCE)
         self.assertNotIn('resolve_invalid_fields_button', SOURCE)
