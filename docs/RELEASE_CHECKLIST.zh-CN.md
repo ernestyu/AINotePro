@@ -25,7 +25,7 @@
 - **V1.1.1 Audio 与批量预检：** 检查四个 Voice 区块、已有三槽 Profile 的迁移，以及 Edge/Kokoro 生成；Text Easy 和 Audio 遇到混合 Note Type 时必须在请求或写入前拒绝整批，同一 Note Type 不同 Card Template 可一起处理。
 - 按 `docs/testing/library-github-sync-v1-acceptance.md` 在支持的桌面系统执行真实 Anki/Qt 和凭据库验收。GitHub Actions 使用 Mock 代替系统凭据服务，不能视为真实平台测试完成。
 - 确认 `.github/workflows/library-sync-tests.yml` 对待发布 Commit 的四平台矩阵全部通过；排队或失败不得记录为通过。
-- 只有在 V1.2.0 代码审计和真实 Anki 验收通过、取得发布授权后，才将 `manifest.json` 与 `__init__.py` 一起升级到 1.2.0。本开发分支暂保留 1.1.1；升级前备份 `user_files`。此前单 Prompt 导出 JSON 不能直接作为新版统一 Library 导入。
+- **当前源码版本已升为 1.2.0：** `manifest.json` 是唯一权威版本号，`ainotepro/version.py` 负责读取，窗口标题显示 `AINotePro — v1.2.0`；`__init__.py` 不重复硬编码数值。此处仅表示源码版本与合并，不等于已发布 AnkiWeb。发布前仍须完成用户负责的真实 Anki/Qt 与 Undo 验收、备份 `user_files` 并单独确认打包发布。此前单 Prompt 导出 JSON 不能直接作为新版统一 Library 导入。
 - 视本次发布的功能声明，测试真实视觉模型的 OCR。
 - 确认 `user_files/user_config.json` 及提示词跨版本升级仍保留，失败请求不将 `[Error]` 写入字段。
 - 确认 OCR 拒绝 Anki 媒体目录外的 `file://` 文件，以及远程 `http(s)://` 图像 URL。
