@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/advanced-batch-v1.2.0-20261108
+      - main
   pull_request:
     paths:
       - "ainotepro/core/advanced_*.py"
