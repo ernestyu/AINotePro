@@ -129,9 +129,13 @@ def _vision_input_rejected(response: Any, code: str) -> bool:
         if not isinstance(body, dict):
             return False
         error = body.get("error", body)
-        if not isinstance(error, dict):
+        # Ollama native APIs may return {"error": "model does not support images"}.
+        if isinstance(error, str):
+            message = error
+        elif isinstance(error, dict):
+            message = error.get("message")
+        else:
             return False
-        message = error.get("message")
         if not isinstance(message, str) or len(message) > 2048:
             return False
         normalized = " ".join(message.lower().split())
