@@ -135,10 +135,10 @@ def _vision_input_rejected(response: Any, code: str) -> bool:
         if not isinstance(message, str) or len(message) > 2048:
             return False
         normalized = " ".join(message.lower().split())
-        image_term = re.search(r"\\b(image|images|vision|multimodal|image_url)\\b", normalized)
+        image_term = re.search(r"\b(image|images|vision|multimodal|image_url)\b", normalized)
         unsupported_term = re.search(
-            r"\\b(not supported|unsupported|does not support|doesn't support|cannot process|"
-            r"can't process|not capable|not available|not a vision|text.only|only supports text)\\b",
+            r"\b(not supported|unsupported|does not support|doesn't support|cannot process|"
+            r"can't process|not capable|not available|not a vision|text.only|only supports text)\b",
             normalized,
         )
         return bool(image_term and unsupported_term)
