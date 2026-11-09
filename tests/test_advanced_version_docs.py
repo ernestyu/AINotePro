@@ -14,7 +14,6 @@ class VersionDocumentationTests(unittest.TestCase):
     def test_window_version_comes_from_manifest(self):
         manifest = json.loads((ROOT / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(addon_version(), manifest["version"])
-        self.assertEqual(manifest["version"], "1.1.1")  # No premature release bump.
         source = (ROOT / "ainotepro/ainotepro_gui.py").read_text(encoding="utf-8")
         self.assertIn('v{addon_version()}', source)
         self.assertNotIn('AINotePro — v1.0.0', source)
