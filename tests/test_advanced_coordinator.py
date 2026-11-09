@@ -207,5 +207,75 @@ class CoordinatorTests(unittest.TestCase):
         self.assertEqual(len(callbacks), 1)
 
 
+    def test_success_result_ledger_exception_settles_conservatively(self):
+        note, result = fixture()
+        col = Collection(note)
+        modules, store = fake_modules()
+        store.append(col)
+        ledger = AdvancedBatchLedger.for_notes([1])
+        tab = Tab()
+        with patch.object(ledger, "apply_commit_result", side_effect=ValueError("bad outcome")):
+            with patch.dict(sys.modules, modules):
+                coordinator = AdvancedCommitCoordinator(
+                    10, result, ledger, ("Text",), ("Out",), threading.Event(), tab=tab)
+                coordinator.start()
+        self.assertEqual(col.writes, 1)
+        self.assertEqual(ledger.states[1], "commit-uncertain")
+        self.assertEqual(coordinator.phase, "SETTLED")
+        self.assertNotIn(coordinator, _ACTIVE_ADVANCED_COMMITS)
+        self.assertIn("could not be verified", tab.finished[0])
+        coordinator._succeeded(object())
+        self.assertEqual(len(tab.finished), 1)
+        self.assertEqual(col.writes, 1)
+
+    def test_malformed_success_callback_result_does_not_leak_owner(self):
+        _, result = fixture()
+        ledger = AdvancedBatchLedger.for_notes([1])
+        ledger.stage_batch_result(result)
+        coordinator = AdvancedCommitCoordinator(
+            10, result, ledger, ("Text",), ("Out",), threading.Event())
+        _ACTIVE_ADVANCED_COMMITS.add(coordinator)
+        coordinator._submission_possible = True
+        coordinator.phase = "COMMITTING"
+        coordinator._succeeded(object())
+        self.assertEqual(coordinator.phase, "SETTLED")
+        self.assertEqual(ledger.states[1], "commit-uncertain")
+        self.assertNotIn(coordinator, _ACTIVE_ADVANCED_COMMITS)
+
+    def test_ledger_summary_exception_still_releases_owner(self):
+        _, result = fixture()
+        ledger = AdvancedBatchLedger.for_notes([1])
+        cancel = threading.Event()
+        cancel.set()
+        tab = Tab()
+        with patch.object(ledger, "summary", side_effect=ValueError("bad ledger")):
+            coordinator = AdvancedCommitCoordinator(
+                10, result, ledger, ("Text",), ("Out",), cancel, tab=tab)
+            coordinator.start()
+        self.assertEqual(coordinator.phase, "SETTLED")
+        self.assertNotIn(coordinator, _ACTIVE_ADVANCED_COMMITS)
+        self.assertIn("Commit accounting unavailable", tab.finished[0])
+
+    def test_success_callback_with_destroyed_tab_only_settles_once(self):
+        note, result = fixture()
+        col = Collection(note)
+        modules, store = fake_modules()
+        store.append(col)
+        tab = Tab()
+        tab._advanced_closing = True
+        ledger = AdvancedBatchLedger.for_notes([1])
+        with patch.dict(sys.modules, modules):
+            coordinator = AdvancedCommitCoordinator(
+                10, result, ledger, ("Text",), ("Out",), threading.Event(), tab=tab)
+            coordinator.start()
+        self.assertEqual(coordinator.phase, "SETTLED")
+        self.assertEqual(col.writes, 1)
+        self.assertEqual(tab.finished, [])
+        coordinator._failed(RuntimeError("late callback"))
+        self.assertEqual(ledger.states[1], "updated")
+        self.assertEqual(col.writes, 1)
+        self.assertNotIn(coordinator, _ACTIVE_ADVANCED_COMMITS)
+
+
 if __name__ == "__main__":
     unittest.main()
