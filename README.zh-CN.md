@@ -8,7 +8,7 @@ AINotePro 是一款 Anki 插件，可根据笔记字段内容生成 AI 文本或
 
 ## 功能
 
-- **Text Easy**：从一个来源字段生成文本，写入一个目标字段；支持已保存的提示词和可选图像识别。
+- **Text Easy**：从一个来源字段生成文本，写入一个目标字段；支持已保存的提示词和可选图像识别。Image Recognition 不再受 Provider 名称白名单限制；用户可针对实际支持视觉输入的模型与自定义接口主动勾选。如果模型或接口明确拒绝图像输入，插件弹窗提示并停止后续 OCR 笔记请求；Advanced 仍不支持图像识别。
 - **Text Advanced**：支持多个来源和目标字段；Batch Size 1–99，多个笔记通过 JSONL 独立验证，生成前对全部选中笔记统一预检。
 - 保存、加载和删除提示词，支持受保护的 Default；Import/Export 一次处理 Easy、Advanced 提示词和全部 Audio Profile 的统一 JSON。
 - GitHub 手动 Save/Load 可同步完整 Library；通过 HTTPS API 工作，Token 保存在系统凭据库，不需要 Git、gh 或 SSH。
