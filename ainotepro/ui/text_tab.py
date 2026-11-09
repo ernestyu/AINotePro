@@ -624,7 +624,7 @@ class TextTab(QWidget):
         raw_size = self.cfg.get_all().get("text", {}).get("advanced_batch_size", 1)
         self._saved_batch_size = raw_size if type(raw_size) is int and 1 <= raw_size <= 99 else 1
         self.batch_size_combo.setCurrentText(str(self._saved_batch_size))
-        self.batch_size_combo.lineEdit().setMaxLength(2)
+        # Do not truncate pasted 100 to valid 10; QIntValidator rejects it.
         self.batch_size_combo.lineEdit().setValidator(QIntValidator(1, 99, self.batch_size_combo))
         self.batch_size_combo.setFixedWidth(65)
         self.batch_size_combo.activated.connect(self._on_batch_size_activated)
