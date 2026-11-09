@@ -19,6 +19,7 @@ from aqt.utils import showInfo, showWarning
 
 from ..config.manager import ConfigManager, CONFIG_FILE, USER_FILES_DIR, migrate_legacy_user_data
 from ..services.provider_factory import create_provider
+from ..services.text._diagnostics import ProviderRequestError
 from ..provider_presets import PROVIDER_PRESETS, NO_MODELS_ENDPOINT_PROVIDERS
 from ..core.endpoint_urls import (
     legacy_chat_endpoint, local_chat_endpoint, models_endpoint_from_chat,
@@ -736,7 +737,7 @@ class TextTab(QWidget):
             widget.setVisible(advanced)
         self.image_checkbox.setVisible(not advanced)
         # Mode owns visibility; provider capabilities own OCR availability.
-        self.image_checkbox.setEnabled(not advanced and self._service_map() in {"openai", "gemini", "ollama"})
+        self.image_checkbox.setEnabled(not advanced)
         self.batch_size_label.setVisible(advanced)
         self.batch_size_combo.setVisible(advanced)
         if advanced:
@@ -1715,13 +1716,10 @@ class TextTab(QWidget):
             "Model list is unavailable or its URL is ambiguous; enter a model manually."
             if not models_ready else ""
         )
-        vision_supported = pv in {"openai", "gemini", "ollama"}
-        self.image_checkbox.setEnabled(
-            getattr(self, "_field_mode", "easy") == "easy" and vision_supported)
-        # Advanced hides OCR; it must not clear Easy's remembered selection.
-        # Clear only when the selected provider cannot perform vision.
-        if not vision_supported:
-            self.image_checkbox.setChecked(False)
+        # Provider presets do not prove vision capability; let Easy users select
+        # image input for their configured model and report explicit API errors.
+        # Advanced hides OCR without discarding the Easy checkbox selection.
+        self.image_checkbox.setEnabled(getattr(self, "_field_mode", "easy") == "easy")
 
     def _refresh_models(self) -> None:
         # Commit a manually entered model before replacing the combo's items.
@@ -1815,6 +1813,7 @@ class TextTab(QWidget):
         if self.image_checkbox and self.image_checkbox.isChecked():
             updated = 0
             failures: list[str] = []
+            vision_unsupported = False
             try:
                 mw.progress.start(label="Generating responses...", max=len(note_ids))
             except Exception:
@@ -1834,6 +1833,13 @@ class TextTab(QWidget):
                         final_prompt = prompt_tpl.replace("{Source Field}", image_prompt_text).replace("{Source}", image_prompt_text)
                         content = provider.generate_with_image(image_ref, final_prompt, cfg)
                     except Exception as e:
+                        if (isinstance(e, NotImplementedError) or
+                                isinstance(e, ProviderRequestError) and
+                                e.category == "vision-unsupported"):
+                            vision_unsupported = True
+                            failures.append(f"Note {nid}: model or endpoint does not support image input")
+                            print(f"[AINotePro] Image input rejected by model or endpoint; note={nid}")
+                            break
                         msg = f"Note {nid}: vision request failed: {e}"
                         failures.append(msg)
                         print(f"[AINotePro] {msg}")
@@ -1856,7 +1862,14 @@ class TextTab(QWidget):
                 mw.progress.finish()
             except Exception:
                 pass
-            if updated:
+            if vision_unsupported:
+                showWarning(
+                    "Image Recognition is not supported by the selected model or endpoint.\n\n"
+                    "Choose a vision-capable model and an image-compatible API endpoint, "
+                    "or uncheck Image Recognition to generate text only.\n\n"
+                    f"Updated {updated} notes before this error; remaining notes were not processed."
+                )
+            elif updated:
                 summary = f"Generation complete. Updated {updated} notes."
                 if failures:
                     summary += f"\n\nSkipped/failed: {len(failures)}\n" + "\n".join(failures[:5])
