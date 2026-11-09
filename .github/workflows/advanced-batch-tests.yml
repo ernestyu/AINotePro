@@ -31,6 +31,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Install Qt test dependency
+        run: python -m pip install PyQt6
       - name: Compile Python sources
         run: python -m compileall -q ainotepro tests
       - name: Advanced and Provider regression tests
