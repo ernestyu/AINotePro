@@ -76,6 +76,34 @@ class AdvancedBatchTests(unittest.TestCase):
         self.assertNotIn("Return only one JSON object", compile_batch_instruction(
             PARSED, requests[0].snapshot.input_values))
 
+    def test_batch_size_larger_than_note_count_and_tail_batches(self):
+        for count, batch_size in ((1, 10), (5, 10), (9, 10), (10, 10),
+                                  (11, 10), (15, 10), (99, 99), (100, 99)):
+            with self.subTest(count=count, batch_size=batch_size):
+                class EchoProvider:
+                    def __init__(self):
+                        self.groups = []
+
+                    def generate(self, prompt, _config):
+                        payload = json.loads(prompt.split("Notes as JSON data:\\n", 1)[1])
+                        ids = [int(item["note_id"]) for item in payload]
+                        self.groups.append(ids)
+                        return "\\n".join(record(note_id) for note_id in ids)
+
+                provider = EchoProvider()
+                result = generate_batches(requests_for(count), PARSED, batch_size,
+                                          provider, {}, threading.Event())
+                expected = [list(range(start, min(start + batch_size, count + 1)))
+                            for start in range(1, count + 1, batch_size)]
+                self.assertEqual(provider.groups, expected)
+                self.assertEqual(result.accepted_count, count)
+                self.assertEqual(result.request_count, len(expected))
+                self.assertEqual(result.stop_reason, "complete")
+                self.assertEqual(sorted(n for group in provider.groups for n in group),
+                                 list(range(1, count + 1)))
+                self.assertTrue(all(group and len(group) <= batch_size
+                                    for group in provider.groups))
+
     def test_ten_to_two_then_new_ten(self):
         responses = [
             "\n".join(record(i) for i in range(1, 9)) + '\n{"note_id":"9","fields":{"Out":"partial',
