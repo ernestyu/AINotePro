@@ -51,20 +51,31 @@
 
 `meta.json` 是 Anki 安装插件后生成的元数据，不是发布源文件。
 
-## 4. 构建 .ankiaddon
+## 4. 源码版本与插件分发分支
 
-在仓库根目录执行：
+正式源码发布以 **main** 为准，\`v1.2.0\` Git Tag 应指向 main 的发布 Commit。
+main 保留完整代码、\`docs/\`、\`tests/\`、\`.github/\` 与开发文档。
 
-```bash
-find . -name "__pycache__" -type d -prune -exec rm -rf {} +
-rm -f ../AINotePro.ankiaddon
-zip -r ../AINotePro.ankiaddon * \
-  -x "user_data/*" "user_files/*" "ainotepro/logs/*" "*.pyc" "*.pyo" ".git/*" "*.DS_Store" "*.bak" "meta.json"
-zip -ur ../AINotePro.ankiaddon user_files/README.txt
-zipinfo -1 ../AINotePro.ankiaddon | head
-```
+**addon/v1.2.0** 只包含可安装插件运行所需内容：\`__init__.py\`、
+\`manifest.json\`、\`ainotepro/\`、\`libs/\`、\`user_files/README.txt\`、
+许可证与隐私说明；不包含 \`docs/\`、\`tests/\`、\`scripts/\`、\`.github/\`、
+生成日志、缓存或备份。
 
-压缩包顶层应直接包含 `__init__.py`、`ainotepro/`、`libs/`、`manifest.json`、`README.md`、`user_files/README.txt` 等，不能再嵌套一层 `AINotePro/`。
+在 Mac 本地仓库中，无须切换到 addon 分支就可构建安装包：
+
+~~~bash
+git fetch origin --prune --tags
+git archive --format=zip --output=AINotePro-v1.2.0.ankiaddon origin/addon/v1.2.0
+unzip -t AINotePro-v1.2.0.ankiaddon
+unzip -p AINotePro-v1.2.0.ankiaddon manifest.json
+shasum -a 256 AINotePro-v1.2.0.ankiaddon
+~~~
+
+安装包根目录必须直接是 Anki 插件入口文件，不能额外包含 \`AINotePro/\`
+外层目录。不要直接将 main 打包为可安装插件，否则会包含测试和开发文件。
+GitHub Release 和 Git Tag 对应 **main 的源码版本**，其 \`.ankiaddon\`
+附件来自 **addon/v1.2.0**。更新已发布的 Tag 或附件前，应核对对应版本及校验值。
+发布 GitHub 源码版本并不等于同步上传 AnkiWeb。
 
 ## 5. 上传 AnkiWeb
 
