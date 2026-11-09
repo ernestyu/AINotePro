@@ -9,6 +9,7 @@
 - Batch Size 1 keeps the existing single JSON output protocol. Larger batches use per-note JSONL, strict Note ID/field validation, partial acceptance, and retry of missing records only. Three consecutive attempts with zero new valid records stop the job; confirmed context-limit rejection stops immediately.
 - One final Anki CollectionOp retains snapshot checks, multi-field write atomicity per note and Undo. Cancellation before commit discards uncommitted results. Background commit completion is tracked independently of the TextTab window.
 - Added safe structured Provider failure codes, bounded JSONL parsing, targeted tests and four-platform GitHub Actions checks.
+- Easy Image Recognition no longer depends on a fixed provider-name whitelist; explicit image-unsupported API errors produce a warning dialog and stop further OCR requests. Advanced remains text-only.
 - The application title now reads the version directly from `manifest.json`, avoiding the old hard-coded `v1.0.0` title. The Model field selects the LLM; Mode selects Easy or Advanced. **Real Anki/Qt and Undo acceptance remains a separate manual release gate; merging source code does not mean AnkiWeb publication.**
 
 ## v1.1.1 — Library synchronization and Audio updates (2026-11-05)
