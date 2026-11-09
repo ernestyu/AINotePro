@@ -152,21 +152,18 @@ class ActualQtControlsTests(unittest.TestCase):
         mode_source = ast.get_source_segment(SOURCE, mode)
         cap_source = ast.get_source_segment(SOURCE, capabilities)
         self.assertIn("self.image_checkbox.setVisible(not advanced)", mode_source)
-        self.assertIn("self.image_checkbox.setEnabled(not advanced", mode_source)
-        self.assertIn("if not vision_supported:", cap_source)
+        self.assertIn("self.image_checkbox.setEnabled(not advanced)", mode_source)
+        self.assertNotIn("vision_supported", cap_source)
         self.assertNotIn("if not self.image_checkbox.isEnabled()", cap_source)
         check = QCheckBox("Image Recognition")
         try:
             check.setChecked(True)
-            for provider in ("openai", "gemini", "ollama"):
+            for provider in ("openai", "gemini", "ollama", "vllm", "deepseek"):
                 check.setChecked(True)
-                check.setEnabled(False)  # Advanced mode, provider is capable
+                check.setEnabled(False)  # Advanced mode hides OCR.
                 self.assertTrue(check.isChecked())
-                check.setEnabled(True)  # Easy restored
+                check.setEnabled(True)  # Easy mode permits user-controlled vision.
                 self.assertTrue(check.isChecked())
-            check.setEnabled(False)  # Unsupported provider in Easy
-            check.setChecked(False)
-            self.assertFalse(check.isChecked())
         finally:
             check.deleteLater()
 
@@ -225,10 +222,15 @@ class ActualQtControlsTests(unittest.TestCase):
             owner._apply_provider_capabilities()
             self.assertTrue(owner.image_checkbox.isEnabled())
             self.assertTrue(owner.image_checkbox.isChecked())
-            owner._active_provider = "unsupported"
+            owner._active_provider = "vllm"
+            owner._apply_provider_capabilities()
+            self.assertTrue(owner.image_checkbox.isEnabled())
+            self.assertTrue(owner.image_checkbox.isChecked())
+            owner._field_mode = "advanced"
+            owner._update_field_mode_widgets()
             owner._apply_provider_capabilities()
             self.assertFalse(owner.image_checkbox.isEnabled())
-            self.assertFalse(owner.image_checkbox.isChecked())
+            self.assertTrue(owner.image_checkbox.isChecked())
         finally:
             owner.deleteLater()
 
