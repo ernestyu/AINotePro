@@ -15,7 +15,7 @@ AINotePro is an Anki add-on for adding AI-generated text and audio to note field
 - Use the 13 built-in chat providers: OpenAI, Anthropic, DeepSeek, OpenRouter, DashScope/Qwen, Moonshot/Kimi, Zhipu GLM, SiliconFlow, Groq, Gemini, llama.cpp, vLLM, and Ollama.
 - Refresh available models when the provider exposes a models endpoint. Chat Endpoint remains editable; model discovery uses its own built-in endpoint or the local server address.
 - Remember settings and model selections for each provider, including per-model Reasoning preferences. All 13 providers expose the Reasoning selector; **Model Default** sends no reasoning override.
-- Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model.
+- Optionally send images from a source field as Base64 image data to a vision-capable OpenAI-compatible model. In Easy mode, **Image Recognition** is user-selectable for any Text provider preset, including custom endpoints; if the model/API explicitly rejects images, the add-on shows an error dialog and stops the remaining OCR batch. Advanced mode does not support image input.
 - Audio: Edge TTS plus optional local Kokoro MLX (English only); Edge voice names include region codes (for example, `US-AriaNeural`, `GB-SoniaNeural`); four independent voice blocks, uniform per-note random selection, named Audio Profiles, asynchronous synthesis, conservative Skip/Replace and Anki media references.
 - Process one selected note or multiple selected notes from the Browser; Advanced has no arbitrary 100-note batch cap (preflight validation still applies).
 
