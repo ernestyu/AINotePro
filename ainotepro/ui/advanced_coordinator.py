@@ -86,21 +86,41 @@ class AdvancedCommitCoordinator:
     def _succeeded(self, result):
         if self._settled:
             return
-        self.ledger.apply_commit_result(result)
-        if self.ledger.count("updated"):
+        try:
+            # A delivered CollectionOp result may itself be malformed or the
+            # ledger may raise while applying it. The operation has already
+            # run: all not-yet-classified accepted notes remain uncertain.
+            self.ledger.apply_commit_result(result)
+        except Exception:
             try:
-                from aqt import mw
-                mw.reset()
+                self.ledger.mark_commit_failure(submission_possible=True)
+                self.ledger.add_issue(
+                    "commit-result", "Could not interpret Anki commit result; "
+                    "unclassified writes may already be persisted.")
             except Exception:
-                self.ledger.add_issue("ui-refresh-failed", "Reopen the note to verify.")
-        self._settle(self._generation_message())
+                # Even a broken ledger must not retain the coordinator forever.
+                print("[AINotePro] Advanced commit ledger recovery failed.")
+            self._settle("Advanced commit result could not be verified.")
+            return
+        try:
+            if self.ledger.count("updated"):
+                try:
+                    from aqt import mw
+                    mw.reset()
+                except Exception:
+                    self.ledger.add_issue("ui-refresh-failed", "Reopen the note to verify.")
+        finally:
+            # No UI/ledger diagnostic exception may prevent terminal cleanup.
+            self._settle(self._generation_message())
 
     def _failed(self, _exc):
         if self._settled:
             return
-        self.ledger.mark_commit_failure(submission_possible=self._submission_possible)
-        self.ledger.add_issue("commit", "Anki commit callback failed; persistence may be uncertain.")
-        self._settle("Advanced commit failed.")
+        try:
+            self.ledger.mark_commit_failure(submission_possible=self._submission_possible)
+            self.ledger.add_issue("commit", "Anki commit callback failed; persistence may be uncertain.")
+        finally:
+            self._settle("Advanced commit failed.")
 
     def _generation_message(self):
         result = self.batch_result
@@ -132,9 +152,16 @@ class AdvancedCommitCoordinator:
                 f"validated {result.accepted_count}; "
                 f"requests {result.request_count}; retries {result.retry_count}."
             )
-            summary = self.ledger.summary(prefix)
+            try:
+                summary = self.ledger.summary(prefix)
+                updated = self.ledger.count("updated")
+            except Exception:
+                # Keep the unknown persistence outcome visible even if ledger
+                # presentation fails. The authoritative commit is never retried.
+                summary = prefix + "\\nCommit accounting unavailable; inspect Anki before retrying."
+                updated = "unknown"
             print("[AINotePro] Advanced commit settled "
-                  f"updated={self.ledger.count('updated')} "
+                  f"updated={updated} "
                   f"validated={result.accepted_count} "
                   f"requests={result.request_count} retries={result.retry_count}")
             tab = self._tab_ref()
