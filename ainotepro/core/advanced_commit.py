@@ -144,20 +144,26 @@ def commit_validated_results(
                 # Do not misuse 'cancelled-before-write', which guarantees no
                 # Undo entry was created. No speculative undo() is safe here:
                 # an empty custom entry may remain, pending real Anki testing.
+                prior_updates = any(status == "updated" for _id, status in outcomes)
                 return AdvancedCommitResult(
                     changes, outcomes,
-                    "Cancelled during Anki Undo entry creation. No note update "
-                    "was attempted; an empty Undo entry may remain.",
+                    "Cancelled during Anki Undo entry creation. "
+                    + ("Earlier notes were updated; no update was attempted for this note. "
+                       if prior_updates else "No note update was attempted. ")
+                    + "An empty Undo entry may remain.",
                     "cancelled-after-undo-start",
                 )
 
         # A cancel after Undo creation but before the first write is similarly
         # distinct from the no-Undo-entry cancellation path.
         if cancel_event.is_set():
+            prior_updates = any(status == "updated" for _id, status in outcomes)
             return AdvancedCommitResult(
                 changes, outcomes,
-                "Cancelled after Anki Undo entry creation. No note update "
-                "was attempted; an empty Undo entry may remain.",
+                "Cancelled after Anki Undo entry creation. "
+                + ("Earlier notes were updated; no update was attempted for this note. "
+                   if prior_updates else "No note update was attempted. ")
+                + "An empty Undo entry may remain.",
                 "cancelled-after-undo-start",
             )
         try:
