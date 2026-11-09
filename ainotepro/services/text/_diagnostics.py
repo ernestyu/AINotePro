@@ -109,6 +109,43 @@ _LIMIT_CODES = frozenset({
 _MODEL_CODES = frozenset({"model_not_found", "model_not_available",
                           "invalid_model", "unknown_model", "endpoint_not_found"})
 
+_VISION_UNSUPPORTED_CODES = frozenset({
+    "vision_not_supported", "vision_unsupported", "image_not_supported",
+    "image_unsupported", "image_input_not_supported",
+    "image_input_unsupported", "unsupported_image_input",
+    "unsupported_image", "multimodal_not_supported",
+    "multimodal_unsupported", "model_does_not_support_images",
+})
+
+
+def _vision_input_rejected(response: Any, code: str) -> bool:
+    """Classify explicit server vision errors; never expose untrusted messages."""
+    if code in _VISION_UNSUPPORTED_CODES:
+        return True
+    if response is None:
+        return False
+    try:
+        body = response.json()
+        if not isinstance(body, dict):
+            return False
+        error = body.get("error", body)
+        if not isinstance(error, dict):
+            return False
+        message = error.get("message")
+        if not isinstance(message, str) or len(message) > 2048:
+            return False
+        normalized = " ".join(message.lower().split())
+        image_term = re.search(r"\\b(image|images|vision|multimodal|image_url)\\b", normalized)
+        unsupported_term = re.search(
+            r"\\b(not supported|unsupported|does not support|doesn't support|cannot process|"
+            r"can't process|not capable|not available|not a vision|text.only|only supports text)\\b",
+            normalized,
+        )
+        return bool(image_term and unsupported_term)
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 
 def _structured_error_code(response: Any) -> str:
     """Only bounded, syntactically safe structured codes are admissible."""
@@ -147,7 +184,8 @@ def _failure_category(exc: Exception, status: int | None, code: str) -> str:
 
 
 def request_failed(provider: str, model: str, url: str, started: float,
-                   exc: Exception, debug: bool, response: Any = None) -> ProviderRequestError:
+                   exc: Exception, debug: bool, response: Any = None,
+                   *, vision: bool = False) -> ProviderRequestError:
     elapsed = time.perf_counter() - started
     status = getattr(response, "status_code", None)
     if not isinstance(status, int):
@@ -156,6 +194,8 @@ def request_failed(provider: str, model: str, url: str, started: float,
         status = None
     code = _structured_error_code(response)
     category = _failure_category(exc, status, code)
+    if vision and category != "auth" and _vision_input_rejected(response, code):
+        category = "vision-unsupported"
     status_part = f"HTTP {status}" if status is not None else type(exc).__name__
     code_part = f", code={code}" if code else ""
     # Never interpolate an untrusted service message, endpoint query,
