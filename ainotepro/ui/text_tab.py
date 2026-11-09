@@ -629,6 +629,9 @@ class TextTab(QWidget):
         self.batch_size_combo.setFixedWidth(65)
         self.batch_size_combo.activated.connect(self._on_batch_size_activated)
         self.batch_size_combo.lineEdit().editingFinished.connect(self._commit_batch_size)
+        # QLineEdit suppresses editingFinished for Intermediate validator input.
+        # Catch Return/Enter and focus loss directly so invalid text is restored.
+        self.batch_size_combo.lineEdit().installEventFilter(self)
         fields_row.addWidget(self.batch_size_label, 0)
         fields_row.addWidget(self.batch_size_combo, 0)
         layout.addLayout(fields_row)
@@ -682,6 +685,18 @@ class TextTab(QWidget):
             showWarning(f"Could not save Text mode: {exc}")
         self._load_prompt_list()
 
+    def eventFilter(self, watched, event):
+        combo = getattr(self, "batch_size_combo", None)
+        if combo is not None and watched is combo.lineEdit():
+            if event.type() == QEvent.Type.FocusOut:
+                self._commit_batch_size()
+            elif (event.type() == QEvent.Type.KeyPress and
+                  event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)):
+                self._commit_batch_size()
+                # Consuming Return prevents an extra editingFinished callback.
+                return True
+        return super().eventFilter(watched, event)
+
     def _on_batch_size_activated(self, _index: int) -> None:
         self._commit_batch_size()
 
@@ -720,7 +735,8 @@ class TextTab(QWidget):
                        self.advanced_destination_label, self.advanced_destination_fields):
             widget.setVisible(advanced)
         self.image_checkbox.setVisible(not advanced)
-        self.image_checkbox.setEnabled(not advanced)
+        # Mode owns visibility; provider capabilities own OCR availability.
+        self.image_checkbox.setEnabled(not advanced and self._service_map() in {"openai", "gemini", "ollama"})
         self.batch_size_label.setVisible(advanced)
         self.batch_size_combo.setVisible(advanced)
         if advanced:
@@ -1699,7 +1715,7 @@ class TextTab(QWidget):
             "Model list is unavailable or its URL is ambiguous; enter a model manually."
             if not models_ready else ""
         )
-        self.image_checkbox.setEnabled(pv in {"openai", "gemini", "ollama"})
+        self.image_checkbox.setEnabled(self._field_mode == "easy" and pv in {"openai", "gemini", "ollama"})
         if not self.image_checkbox.isEnabled():
             self.image_checkbox.setChecked(False)
 
