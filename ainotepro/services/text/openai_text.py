@@ -89,7 +89,7 @@ class OpenAITextProvider(TextProvider):
             cleaned = remove_think_tags(content)
             return cleaned if (config or {}).get("preserve_output") else clean_html_output(cleaned)
         except Exception as exc:
-            raise request_failed(self.name, model, url, started, exc, debug, response) from None
+            raise request_failed(self.name, model, url, started, exc, debug, response, vision=vision) from None
 
     def generate(self, prompt: str, config: Dict) -> str:
         body = {"model": (config or {}).get("model") or "gpt-4o-mini",
