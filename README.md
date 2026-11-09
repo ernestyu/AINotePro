@@ -4,6 +4,8 @@
 
 AINotePro is an Anki add-on for adding AI-generated text and audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
+**Source version: 1.2.0.** The AINotePro window title reads the version from `manifest.json`, rather than a hard-coded string. The `Model` selector chooses the LLM; the `Mode` selector chooses Easy or Advanced. GitHub source integration does not itself publish a new AnkiWeb package; real Anki/Qt acceptance and the AnkiWeb release are separate steps.
+
 ## Features
 
 - Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–99 and independently validated JSONL output for multiple notes).
