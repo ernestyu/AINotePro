@@ -115,6 +115,34 @@ class AdvancedCommitTests(unittest.TestCase):
         self.assertEqual(col.storage[2]["A"], "")
         self.assertEqual(col.storage[2]["B"], "")
 
+    def test_cancel_after_prior_success_never_claims_all_writes_absent(self):
+        class CancelAtSecondFinalGate:
+            def __init__(self):
+                self.calls = 0
+
+            def is_set(self):
+                self.calls += 1
+                # After the first update/Undo merge, when the second note is
+                # past re-read but has not called update_note.
+                return self.calls >= 10
+
+        cancel = CancelAtSecondFinalGate()
+        col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""}),
+                           2: _Note(2, {"Text": "two", "A": "", "B": ""})})
+        first, second = col.get_note(1), col.get_note(2)
+        result = commit_validated_results(
+            col,
+            [(_snapshot(first), {"A": "a", "B": "b"}, None),
+             (_snapshot(second), {"A": "c", "B": "d"}, None)],
+            ("Text",), ("A", "B"), cancel, _Changes,
+        )
+        self.assertEqual(col.update_calls, [1])
+        self.assertEqual(col.undo_merge_calls, [42])
+        self.assertEqual(result.outcomes, [(1, "updated")])
+        self.assertEqual(result.fatal_status, "cancelled-after-undo-start")
+        self.assertIn("Earlier notes were updated", result.fatal_error)
+        self.assertNotIn("No note update was attempted;", result.fatal_error)
+
     def test_undo_api_absence_has_zero_note_updates(self):
         col = _Collection({1: _Note(1, {"Text": "one", "A": "", "B": ""})})
         note = col.get_note(1)
