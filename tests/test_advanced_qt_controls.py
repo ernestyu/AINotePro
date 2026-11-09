@@ -170,6 +170,68 @@ class ActualQtControlsTests(unittest.TestCase):
         finally:
             check.deleteLater()
 
+    def test_real_checkbox_full_production_mode_and_provider_lifecycle(self):
+        # Bind the actual TextTab methods to a lightweight QObject with real
+        # Qt controls, avoiding Anki startup while executing the real branches.
+        tree = ast.parse(SOURCE)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "TextTab")
+        names = {"_update_field_mode_widgets", "_apply_provider_capabilities"}
+        methods = [n for n in tab.body if isinstance(n, ast.FunctionDef)
+                   and n.name in names]
+        cls = ast.ClassDef(name="OCRModeOwner",
+                           bases=[ast.Name(id="QObject", ctx=ast.Load())],
+                           keywords=[], body=methods, decorator_list=[])
+        scope = {
+            "QObject": QObject,
+            "Optional": __import__("typing").Optional,
+            "NO_MODELS_ENDPOINT_PROVIDERS": set(),
+            "models_endpoint_from_chat": lambda _value: "",
+            "legacy_chat_endpoint": lambda value: value,
+        }
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
+                     "<OCR methods>", "exec"), scope)
+        owner = scope["OCRModeOwner"]()
+        owner._field_mode = "easy"
+        owner._active_provider = "openai"
+        owner._service_map = lambda: owner._active_provider
+        owner.cfg = type("Config", (), {
+            "get_provider_config": lambda self, _domain, _provider: {"chat_endpoint": "https://example.test/v1/chat/completions"}
+        })()
+        owner.image_checkbox = QCheckBox("Image Recognition")
+        owner.image_checkbox.setChecked(True)
+        owner.batch_size_label = QWidget()
+        owner.batch_size_combo = QComboBox()
+        owner.reasoning_combo = QComboBox()
+        owner.refresh_button = QWidget()
+        owner.prompt_edit = QComboBox()
+        owner._update_invalid_field_resolver = lambda: None
+        for name in ("easy_source_label", "source_field_combo",
+                     "easy_destination_label", "destination_field_combo",
+                     "advanced_source_label", "advanced_source_fields",
+                     "advanced_destination_label", "advanced_destination_fields"):
+            setattr(owner, name, QWidget())
+        try:
+            owner._update_field_mode_widgets()
+            owner._apply_provider_capabilities()
+            self.assertTrue(owner.image_checkbox.isChecked())
+            owner._field_mode = "advanced"
+            owner._update_field_mode_widgets()
+            owner._apply_provider_capabilities()  # Advanced batch finished.
+            self.assertFalse(owner.image_checkbox.isEnabled())
+            self.assertTrue(owner.image_checkbox.isChecked())
+            owner._field_mode = "easy"
+            owner._update_field_mode_widgets()
+            owner._apply_provider_capabilities()
+            self.assertTrue(owner.image_checkbox.isEnabled())
+            self.assertTrue(owner.image_checkbox.isChecked())
+            owner._active_provider = "unsupported"
+            owner._apply_provider_capabilities()
+            self.assertFalse(owner.image_checkbox.isEnabled())
+            self.assertFalse(owner.image_checkbox.isChecked())
+        finally:
+            owner.deleteLater()
+
     def test_real_field_combo_unavailable_item_can_be_unchecked(self):
         combo = self.CheckableFieldCombo()
         try:
