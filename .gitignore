@@ -28,3 +28,6 @@ meta.json
 libs.backup-*/
 libs-backup-*/
 libs.bak/
+
+# Generated release checksums
+/SHA256SUMS.txt
