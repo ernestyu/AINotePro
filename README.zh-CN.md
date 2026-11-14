@@ -4,12 +4,12 @@
 
 AINotePro 是一款 Anki 插件，可根据笔记字段内容生成 AI 文本或语音，并写入指定字段。可从浏览器（Browse）菜单或笔记编辑器工具栏打开。
 
-**当前源码版本为 1.2.0。** 插件窗口标题从 `manifest.json` 读取版本号，不再硬编码。顶部 `Model` 用于选择大模型，底部 `Mode` 用于选择 Easy 或 Advanced 工作模式。源码合并到 GitHub 不等于 AnkiWeb 已发布新版；真实 Anki/Qt 验收与 AnkiWeb 发布仍是独立步骤。
+**当前源码版本为 1.2.1（候选版本，尚未发布）。** 插件窗口标题从 `manifest.json` 读取版本号，不再硬编码。顶部 `Model` 用于选择大模型，底部 `Mode` 用于选择 Easy 或 Advanced 工作模式。源码合并到 GitHub 不等于 AnkiWeb 已发布新版；真实 Anki/Qt 验收与 AnkiWeb 发布仍是独立步骤。
 
 ## 功能
 
 - **Text Easy**：从一个来源字段生成文本，写入一个目标字段；支持已保存的提示词和可选图像识别。Image Recognition 不再受 Provider 名称白名单限制；用户可针对实际支持视觉输入的模型与自定义接口主动勾选。如果模型或接口明确拒绝图像输入，插件弹窗提示并停止后续 OCR 笔记请求；Advanced 仍不支持图像识别。
-- **Text Advanced**：支持多个来源和目标字段；Batch Size 1–99，多个笔记通过 JSONL 独立验证，生成前对全部选中笔记统一预检。
+- **Text Advanced**：支持带复选框的来源/目标字段多选；Batch Size 1–99，多个笔记通过 JSONL 独立验证，生成前对全部选中笔记统一预检。
 - 保存、加载和删除提示词，支持受保护的 Default；Import/Export 一次处理 Easy、Advanced 提示词和全部 Audio Profile 的统一 JSON。
 - GitHub 手动 Save/Load 可同步完整 Library；通过 HTTPS API 工作，Token 保存在系统凭据库，不需要 Git、gh 或 SSH。
 - 13 个内置文本 Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。
@@ -107,7 +107,7 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 **第三步：在 AINotePro 中逐项填写设置。**
 
-1. 打开 Anki 中的 AINotePro → **Text** 页面，点击 **Save to GitHub / Load from GitHub** 旁边的 **⚙**，进入 **GitHub AINotePro Library Settings**。
+1. 打开 Anki 中的 AINotePro → **Text** 页面，点击 **Save to GitHub / Load from GitHub** 旁边的 **Settings**，进入 **GitHub AINotePro Library Settings**。
 2. 按下面的示例填写（将 `yourname` 换成自己的 GitHub 用户名）：
 
    | 字段 | 填写示例 | 注意 |
