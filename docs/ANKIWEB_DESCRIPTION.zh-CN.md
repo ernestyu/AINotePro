@@ -6,11 +6,11 @@ AINotePro 为 Anki 浏览器和笔记编辑器提供 AI 文本与语音生成工
 
 ## 功能
 
-- **Text Easy：** 根据一个来源字段生成文本，并写入一个目标字段；支持复用 Prompt 和可选的视觉识别/OCR 输入。
-- **Text Advanced（源码版本 v1.2.0，AnkiWeb 尚未发布）：** 支持多个来源及目标字段，通过 `{OUT:字段名}` 定义输出。Batch Size 可编辑下拉框（预设 1–10，默认 1，最大可输入 99）允许一次请求处理多条笔记，按 Note ID 验证独立 JSONL 记录，保留有效结果、仅重试缺失项；Batch Size 1 仍使用原单笔记 JSON 协议。生成前统一预检全部笔记；不存在固定的 100 条选择上限。
+- **Text Easy：** 根据一个来源字段生成文本并写入目标字段，支持复用 Prompt。Image Recognition 不受 Provider 名称白名单限制；模型或接口明确不支持图像输入时，弹窗提示并停止剩余 OCR 请求。
+- **Text Advanced（v1.2.1 源码候选版）：** 支持通过复选框选择多个来源及目标字段，通过 `{OUT:字段名}` 定义输出。Batch Size 可编辑下拉框（预设 1–10，默认 1，最大可输入 99）允许一次请求处理多条笔记，按 Note ID 验证独立 JSONL 记录，保留有效结果、仅重试缺失项；Batch Size 1 仍使用原单笔记 JSON 协议。生成前统一预检全部笔记；不存在固定的 100 条选择上限。
 - 保存、复用提示词；内置 Default 提示词受到保护。
 - **统一 Library 导入/导出：** 单个 JSON 文件包含 Easy、Advanced 提示词及完整 Audio Profiles；导入时保留已有本地数据。
-- **GitHub 手动同步：** 可通过 GitHub Contents API Save/Load 完整 Library，支持仓库子目录；Fine-grained Token 保存在操作系统凭据库中，不需要 Git、gh 或 SSH，也不启用自动同步。
+- **GitHub 手动同步：** 通过 Save/Load 旁的 **Settings** 设置按钮管理配置，可通过 GitHub Contents API Save/Load 完整 Library，支持仓库子目录；Fine-grained Token 保存在操作系统凭据库中，不需要 Git、gh 或 SSH，也不启用自动同步。
 - 支持 13 个内置 Text Provider：OpenAI、Anthropic、DeepSeek、OpenRouter、DashScope/Qwen、Moonshot/Kimi、Zhipu GLM、SiliconFlow、Groq、Gemini、llama.cpp、vLLM 和 Ollama。云端 Chat Endpoint 或本地 Server Address 可编辑。
 - 全部 13 个预设均可设置 **Temperature** 与按模型保存的 **Reasoning**（Off、Low、Medium、High、Model Default）。Model Default 不发送推理覆盖参数；其他档位是否有效取决于服务端接口。原生 Ollama 只保证 Think 开关，不保证三级推理强度。
 - 支持模型列表 Refresh 或手动输入模型；Models Endpoint 保留为内部设置，界面不提供单独的地址编辑框。
