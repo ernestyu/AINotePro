@@ -10,7 +10,8 @@
 - 从 Browse 菜单及笔记编辑器工具栏打开 AINotePro。
 - 选择一条笔记生成 Text，确认输出写入目标字段；再验证选择多条笔记时的生成与写入。
 - 在 Advanced 中验证来源/目标字段与 `{OUT:字段名}` 声明、严格 JSON 格式以及整批预检。选中**超过 100 条有效笔记**时，不应再因固定条数限制拒绝；不合格笔记仍须在发出请求前拒绝整批。
-- **V1.2.0 真实 Anki 待验收：** 检查 Advanced Batch Size 可编辑下拉框（预设 1–10、默认 1、可输入 1–99，最多两位，可保存），灰色 Resolve 按钮已移除且失效字段仍可取消勾选，Easy OCR 显示及行为不变；B=1 原单 JSON、B=10 JSONL 的 10→2→下一批 10、重复/未知 ID、截断与损坏行、连续三次零进展终止、明确上下文超限弹窗，以及非取消部分成功安全提交。
+- **v1.2.1 候选版：** 验证 Advanced 多字段复选框、已选字段摘要、来源/目标互斥和弹窗跟随选择器；GitHub 设置按钮显示为标准 **Settings** 文字；Easy OCR 不受 Provider 名称白名单限制，明确不支持图像输入时弹窗并停止剩余请求；窗口标题显示 `AINotePro — v1.2.1`。
+- **v1.2.0 历史验收项目：** 检查 Advanced Batch Size 可编辑下拉框（预设 1–10、默认 1、可输入 1–99，最多两位，可保存），灰色 Resolve 按钮已移除且失效字段仍可取消勾选，Easy OCR 显示及行为不变；B=1 原单 JSON、B=10 JSONL 的 10→2→下一批 10、重复/未知 ID、截断与损坏行、连续三次零进展终止、明确上下文超限弹窗，以及非取消部分成功安全提交。
 - 在 Windows/Linux 等上位 SPEC 要求的平台，用真实 Anki 检查多次请求最后只有一个 Undo、写入前快照冲突、提交前 Cancel 不写入、提交排队/运行中 Cancel 及关闭 TextTab 后后台协调对象正确结算。自动化 Mock 测试不能替代这些实机验收。
 - 核查 `.github/workflows/advanced-batch-tests.yml` 在候选 Commit 的四平台 CI；失败或未运行不得记为通过。
 - 测试提示词 New、Save、Save As、Delete、Import、Export。确认已删除的 Online 提示词按钮不再显示，Default 保护仍有效。
@@ -25,7 +26,7 @@
 - **V1.1.1 Audio 与批量预检：** 检查四个 Voice 区块、已有三槽 Profile 的迁移，以及 Edge/Kokoro 生成；Text Easy 和 Audio 遇到混合 Note Type 时必须在请求或写入前拒绝整批，同一 Note Type 不同 Card Template 可一起处理。
 - 按 `docs/testing/library-github-sync-v1-acceptance.md` 在支持的桌面系统执行真实 Anki/Qt 和凭据库验收。GitHub Actions 使用 Mock 代替系统凭据服务，不能视为真实平台测试完成。
 - 确认 `.github/workflows/library-sync-tests.yml` 对待发布 Commit 的四平台矩阵全部通过；排队或失败不得记录为通过。
-- **当前源码版本已升为 1.2.0：** `manifest.json` 是唯一权威版本号，`ainotepro/version.py` 负责读取，窗口标题显示 `AINotePro — v1.2.0`；`__init__.py` 不重复硬编码数值。此处仅表示源码版本与合并，不等于已发布 AnkiWeb。发布前仍须完成用户负责的真实 Anki/Qt 与 Undo 验收、备份 `user_files` 并单独确认打包发布。此前单 Prompt 导出 JSON 不能直接作为新版统一 Library 导入。
+- **当前源码候选版本为 1.2.1：** `manifest.json` 是唯一权威版本号，`ainotepro/version.py` 负责读取，窗口标题显示 `AINotePro — v1.2.1`；`__init__.py` 不重复硬编码数值。此处仅表示源码版本与合并，不等于已发布 AnkiWeb。发布前仍须完成用户负责的真实 Anki/Qt 与 Undo 验收、备份 `user_files` 并单独确认打包发布。此前单 Prompt 导出 JSON 不能直接作为新版统一 Library 导入。
 - 视本次发布的功能声明，测试真实视觉模型的 OCR。
 - 确认 `user_files/user_config.json` 及提示词跨版本升级仍保留，失败请求不将 `[Error]` 写入字段。
 - 确认 OCR 拒绝 Anki 媒体目录外的 `file://` 文件，以及远程 `http(s)://` 图像 URL。
@@ -53,28 +54,28 @@
 
 ## 4. 源码版本与插件分发分支
 
-正式源码发布以 **main** 为准，`v1.2.0` Git Tag 应指向 main 的发布 Commit。
+完整源码以 **main** 为准，目前准备 v1.2.1。现有 `v1.2.0` Tag 与旧分发分支保持不变；v1.2.1 验收后再创建新 Tag。
 main 保留完整代码、`docs/`、`tests/`、`.github/` 与开发文档。
 
-**addon/v1.2.0** 只包含可安装插件运行所需内容：`__init__.py`、
+v1.2.1 审核通过后再创建 **addon/v1.2.1**，只包含可安装插件运行所需内容：`__init__.py`、
 `manifest.json`、`ainotepro/`、`libs/`、`user_files/README.txt`、
 许可证与隐私说明；不包含 `docs/`、`tests/`、`scripts/`、`.github/`、
 生成日志、缓存或备份。
 
-在 Mac 本地仓库中，无须切换到 addon 分支就可构建安装包：
+创建 v1.2.1 分发分支后，无须切换分支即可构建安装包：
 
 ~~~bash
 git fetch origin --prune --tags
-git archive --format=zip --output=AINotePro-v1.2.0.ankiaddon origin/addon/v1.2.0
-unzip -t AINotePro-v1.2.0.ankiaddon
-unzip -p AINotePro-v1.2.0.ankiaddon manifest.json
-shasum -a 256 AINotePro-v1.2.0.ankiaddon
+git archive --format=zip --output=AINotePro-v1.2.1.ankiaddon origin/addon/v1.2.1
+unzip -t AINotePro-v1.2.1.ankiaddon
+unzip -p AINotePro-v1.2.1.ankiaddon manifest.json
+shasum -a 256 AINotePro-v1.2.1.ankiaddon
 ~~~
 
 安装包根目录必须直接是 Anki 插件入口文件，不能额外包含 `AINotePro/`
 外层目录。不要直接将 main 打包为可安装插件，否则会包含测试和开发文件。
 GitHub Release 和 Git Tag 对应 **main 的源码版本**，其 `.ankiaddon`
-附件来自 **addon/v1.2.0**。更新已发布的 Tag 或附件前，应核对对应版本及校验值。
+新版本附件应来自 **addon/v1.2.1**，旧版 `addon/v1.2.0` 保持原样。更新已发布的 Tag 或附件前，应核对对应版本及校验值。
 发布 GitHub 源码版本并不等于同步上传 AnkiWeb。
 
 ## 5. 上传 AnkiWeb
