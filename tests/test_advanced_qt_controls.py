@@ -295,6 +295,19 @@ class ActualQtControlsTests(unittest.TestCase):
             combo.close()
             combo.deleteLater()
 
+    def test_real_field_combo_summary_keeps_full_selection_in_tooltip(self):
+        combo = self.CheckableFieldCombo()
+        names = ["Very long source field name", "Another long destination field name"]
+        try:
+            combo.set_fields(names, names)
+            summary = ", ".join(names)
+            self.assertEqual(combo.lineEdit().text(), summary)
+            self.assertEqual(combo.lineEdit().toolTip(), summary)
+            self.assertEqual(combo.toolTip(), summary)
+        finally:
+            combo.close()
+            combo.deleteLater()
+
     def test_real_field_combo_keyboard_multiselect_and_bidirectional_conflicts(self):
         source = self.CheckableFieldCombo()
         destination = self.CheckableFieldCombo()
