@@ -2,6 +2,13 @@
 
 [English](changelog.md) | [简体中文](changelog.zh-CN.md)
 
+## v1.2.1 — Advanced field selection and Easy OCR fixes (source release candidate)
+
+- Fixed **Advanced** source/destination multi-field selection: checkboxes, multiple selections, and selected-field summaries now stay consistent.
+- Replaced the GitHub settings gear with a standard **Settings** text button.
+- **Easy OCR:** Image Recognition can be enabled regardless of the selected Provider preset.
+- **Easy OCR:** When a model or endpoint explicitly rejects image input, show a warning and stop the remaining OCR requests.
+
 ## v1.2.0 — Advanced multi-note generation (source version 1.2.0; AnkiWeb release pending)
 
 - Advanced-only editable **Batch Size** selector (1–99, default 1; dropdown choices 1–10); Easy generation and image OCR remain unchanged.
@@ -9,7 +16,6 @@
 - Batch Size 1 keeps the existing single JSON output protocol. Larger batches use per-note JSONL, strict Note ID/field validation, partial acceptance, and retry of missing records only. Three consecutive attempts with zero new valid records stop the job; confirmed context-limit rejection stops immediately.
 - One final Anki CollectionOp retains snapshot checks, multi-field write atomicity per note and Undo. Cancellation before commit discards uncommitted results. Background commit completion is tracked independently of the TextTab window.
 - Added safe structured Provider failure codes, bounded JSONL parsing, targeted tests and four-platform GitHub Actions checks.
-- Easy Image Recognition no longer depends on a fixed provider-name whitelist; explicit image-unsupported API errors produce a warning dialog and stop further OCR requests. Advanced remains text-only.
 - The application title now reads the version directly from `manifest.json`, avoiding the old hard-coded `v1.0.0` title. The Model field selects the LLM; Mode selects Easy or Advanced. **Real Anki/Qt and Undo acceptance remains a separate manual release gate; merging source code does not mean AnkiWeb publication.**
 
 ## v1.1.1 — Library synchronization and Audio updates (2026-11-05)
