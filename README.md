@@ -4,11 +4,11 @@
 
 AINotePro is an Anki add-on for adding AI-generated text and audio to note fields. It can be opened from the Browse window menu or from the editor toolbar button above a note.
 
-**Source version: 1.2.0.** The AINotePro window title reads the version from `manifest.json`, rather than a hard-coded string. The `Model` selector chooses the LLM; the `Mode` selector chooses Easy or Advanced. GitHub source integration does not itself publish a new AnkiWeb package; real Anki/Qt acceptance and the AnkiWeb release are separate steps.
+**Source version: 1.2.1 (release candidate; not yet published).** The AINotePro window title reads the version from `manifest.json`, rather than a hard-coded string. The `Model` selector chooses the LLM; the `Mode` selector chooses Easy or Advanced. GitHub source integration does not itself publish a new AnkiWeb package; real Anki/Qt acceptance and the AnkiWeb release are separate steps.
 
 ## Features
 
-- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields, with batch size 1–99 and independently validated JSONL output for multiple notes).
+- Generate text in **Easy** mode (single source/destination) or **Advanced** mode (multiple source/destination fields with checkable multi-select lists, batch size 1–99, and independently validated JSONL output for multiple notes).
 - Use saved prompt templates with `{Source Field}` or `{Source}` placeholders.
 - Save, load, and delete prompt templates; import/export a complete library containing both Text prompt modes and saved Audio Profiles in one JSON file.
 - Manually save/load that library to GitHub using the HTTPS Contents API. GitHub tokens are kept in the operating system credential store; sync is not automatic.
@@ -125,7 +125,7 @@ This feature stores your **saved** Easy/Advanced prompts and Audio Profiles in *
 
 **Step 3 — Enter the exact settings in AINotePro.**
 
-1. In Anki, open AINotePro → **Text**. Click the **⚙** next to **Save to GitHub** and **Load from GitHub**, opening **GitHub AINotePro Library Settings**.
+1. In Anki, open AINotePro → **Text**. Click **Settings** next to **Save to GitHub** and **Load from GitHub**, opening **GitHub AINotePro Library Settings**.
 2. Fill out the form (replace `yourname` with your GitHub login):
 
    | Field | Example | What it means |
