@@ -312,11 +312,81 @@ class ActualQtControlsTests(unittest.TestCase):
             QTest.mouseClick(combo, Qt.MouseButton.LeftButton, pos=combo.rect().center())
             self.app.processEvents()
             self.assertTrue(combo.listWidget().isVisible())
+            QTest.mouseClick(combo, Qt.MouseButton.LeftButton, pos=combo.rect().center())
+            self.app.processEvents()
+            self.assertFalse(combo.listWidget().isVisible())
         finally:
             combo.close()
             provider.close()
             combo.deleteLater()
             provider.deleteLater()
+
+    def test_real_field_combo_popup_tracks_parent_and_hides_with_it(self):
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        combo = self.CheckableFieldCombo(host)
+        layout.addWidget(combo)
+        try:
+            combo.set_fields(["Text", "Scenario", "Translation"])
+            host.setGeometry(100, 100, 360, 180)
+            host.show()
+            self.app.processEvents()
+            combo.showPopup()
+            self.app.processEvents()
+            self.assertTrue(combo._popup.windowType() & Qt.WindowType.Popup)
+            self.assertEqual(combo._popup.pos(), combo.mapToGlobal(QPoint(0, combo.height())))
+
+            host.move(160, 150)
+            self.app.processEvents()
+            self.assertEqual(combo._popup.pos(), combo.mapToGlobal(QPoint(0, combo.height())))
+
+            host.resize(440, 180)
+            self.app.processEvents()
+            self.assertEqual(combo._popup.width(), combo.width() + 2)
+            self.assertEqual(combo._popup.pos(), combo.mapToGlobal(QPoint(0, combo.height())))
+            self.assertTrue(combo.listWidget().hasFocus())
+
+            QTest.keyClick(combo.listWidget(), Qt.Key.Key_Escape)
+            self.assertFalse(combo.listWidget().isVisible())
+            self.assertTrue(host.isVisible())
+
+            combo.showPopup()
+            host.hide()
+            self.app.processEvents()
+            self.assertFalse(combo.listWidget().isVisible())
+        finally:
+            combo.hidePopup()
+            host.close()
+            combo.deleteLater()
+            host.deleteLater()
+
+    def test_real_field_combo_popup_stays_inside_available_screen(self):
+        available = self.app.primaryScreen().availableGeometry()
+        if available.height() < 300:
+            self.skipTest("screen is too small to test upward popup placement")
+
+        host = QWidget()
+        combo = self.CheckableFieldCombo(host)
+        host.setGeometry(available.left() + 10, available.bottom() - 160, 300, 150)
+        combo.setGeometry(10, 115, 280, combo.sizeHint().height())
+        try:
+            combo.set_fields(["Text", "Scenario", "Translation"])
+            host.show()
+            self.app.processEvents()
+            combo.showPopup()
+            self.app.processEvents()
+
+            popup = combo._popup.geometry()
+            self.assertGreaterEqual(popup.left(), available.left())
+            self.assertGreaterEqual(popup.top(), available.top())
+            self.assertLessEqual(popup.right(), available.right())
+            self.assertLessEqual(popup.bottom(), available.bottom())
+            self.assertLess(popup.top(), combo.mapToGlobal(QPoint(0, 0)).y())
+        finally:
+            combo.hidePopup()
+            host.close()
+            combo.deleteLater()
+            host.deleteLater()
 
     def test_real_field_combo_summary_keeps_full_selection_in_tooltip(self):
         combo = self.CheckableFieldCombo()

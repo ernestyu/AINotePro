@@ -85,8 +85,9 @@ class CheckableFieldCombo(QWidget):
         self.setAccessibleName("Selected fields")
         self.setToolTip("Select one or more fields")
 
-        self._popup = QDialog(self, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
-        self._popup.setModal(False)
+        self._popup = QWidget(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self._popup_anchor_window = None
+        self._popup.installEventFilter(self)
         self._list = QListWidget(self._popup)
         self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self._list.setAccessibleName("Field choices")
@@ -97,6 +98,7 @@ class CheckableFieldCombo(QWidget):
         popup_layout = QVBoxLayout(self._popup)
         popup_layout.setContentsMargins(1, 1, 1, 1)
         popup_layout.addWidget(self._list)
+        self._list.installEventFilter(self)
         self._list.itemChanged.connect(self._on_item_changed)
 
     def _combo_style_option(self) -> QStyleOptionComboBox:
@@ -130,6 +132,18 @@ class CheckableFieldCombo(QWidget):
         self._summary_label.setGeometry(edit_rect)
         self._update_summary_label()
         super().resizeEvent(event)
+        if self._popup.isVisible():
+            self._prepare_popup()
+            self._position_popup()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if self._popup.isVisible():
+            self._position_popup()
+
+    def hideEvent(self, event) -> None:
+        self.hidePopup()
+        super().hideEvent(event)
 
     def paintEvent(self, event) -> None:
         option = self._combo_style_option()
@@ -139,10 +153,16 @@ class CheckableFieldCombo(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._toggle_popup()
             event.accept()
             return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_popup()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def set_fields(self, names: list[str], selected: Optional[list[str]] = None,
                    disabled: Optional[set[str]] = None) -> None:
@@ -215,19 +235,72 @@ class CheckableFieldCombo(QWidget):
 
     def showPopup(self) -> None:
         self._prepare_popup()
-        self._popup.move(self.mapToGlobal(QPoint(0, self.height())))
+        self._install_popup_anchor()
+        self._position_popup()
         self._popup.show()
         self._list.setFocus()
 
     def _prepare_popup(self) -> None:
         row_height = max(self._list.sizeHintForRow(0), self._line_edit.sizeHint().height())
+        available = self.screen().availableGeometry()
         height = max(row_height + 2, min(self.count(), 12) * row_height + 2)
+        height = min(height, max(1, available.height() - 2))
         width = max(self.width(), self._line_edit.minimumSizeHint().width())
+        width = min(width, max(1, available.width() - 2))
         self._list.setFixedSize(width, height)
         self._popup.setFixedSize(width + 2, height + 2)
 
+    def _position_popup(self) -> None:
+        available = self.screen().availableGeometry()
+        below = self.mapToGlobal(QPoint(0, self.height()))
+        top = self.mapToGlobal(QPoint(0, 0))
+        popup_width = self._popup.width()
+        popup_height = self._popup.height()
+        x = max(available.left(), min(below.x(), available.right() - popup_width + 1))
+        below_y = below.y()
+        above_y = top.y() - popup_height
+        if below_y + popup_height <= available.bottom() + 1 or above_y < available.top():
+            y = min(below_y, available.bottom() - popup_height + 1)
+        else:
+            y = above_y
+        self._popup.move(QPoint(x, max(available.top(), y)))
+
+    def _install_popup_anchor(self) -> None:
+        anchor_window = self.window()
+        if anchor_window is self._popup_anchor_window:
+            return
+        self._remove_popup_anchor()
+        self._popup_anchor_window = anchor_window
+        anchor_window.installEventFilter(self)
+
+    def _remove_popup_anchor(self) -> None:
+        if self._popup_anchor_window is not None:
+            self._popup_anchor_window.removeEventFilter(self)
+            self._popup_anchor_window = None
+
+    def eventFilter(self, watched, event):
+        if (watched is getattr(self, "_list", None) and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Escape):
+            self.hidePopup()
+            return True
+        if watched is getattr(self, "_popup", None) and event.type() == QEvent.Type.Hide:
+            self._remove_popup_anchor()
+        elif watched is getattr(self, "_popup_anchor_window", None):
+            if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+                self.hidePopup()
+                return True
+            if event.type() in (QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show):
+                if self._popup.isVisible():
+                    self._prepare_popup()
+                    self._position_popup()
+                    self._list.setFocus()
+            elif event.type() in (QEvent.Type.Hide, QEvent.Type.Close):
+                self.hidePopup()
+        return super().eventFilter(watched, event)
+
     def hidePopup(self) -> None:
         self._popup.hide()
+        self._remove_popup_anchor()
 
     def _toggle_popup(self) -> None:
         if self._popup.isVisible():
