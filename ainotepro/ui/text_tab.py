@@ -13,7 +13,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QListWidget, QListWidgetItem, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QStyleFactory, QEvent, QMenu, QDialog, QIntValidator, QPoint
+    QIcon, QPalette, QStyle, QStyleFactory, QStyleOptionComboBox, QEvent, QMenu, QDialog, QIntValidator, QPoint, QPainter, QSize
 )
 from aqt.utils import showInfo, showWarning
 
@@ -71,20 +71,19 @@ class CheckableFieldCombo(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._summary = ""
         self._line_edit = QLineEdit(self)
         self._line_edit.setReadOnly(True)
+        self._line_edit.setFrame(False)
         self._line_edit.setPlaceholderText("Select fields…")
         self._line_edit.setAccessibleName("Selected fields")
-        self._toggle_button = QToolButton(self)
-        self._toggle_button.setArrowType(Qt.ArrowType.DownArrow)
-        self._toggle_button.setToolTip("Select one or more fields")
-        self._toggle_button.setAccessibleName("Open field selector")
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self._line_edit, 1)
-        layout.addWidget(self._toggle_button)
+        self._line_edit.hide()
+        self._summary_label = QLabel(self)
+        self._summary_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._summary_label.setContentsMargins(4, 0, 2, 0)
+        self.setAccessibleName("Selected fields")
+        self.setToolTip("Select one or more fields")
 
         self._popup = QDialog(self, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self._popup.setModal(False)
@@ -98,8 +97,52 @@ class CheckableFieldCombo(QWidget):
         popup_layout = QVBoxLayout(self._popup)
         popup_layout.setContentsMargins(1, 1, 1, 1)
         popup_layout.addWidget(self._list)
-        self._toggle_button.clicked.connect(self._toggle_popup)
         self._list.itemChanged.connect(self._on_item_changed)
+
+    def _combo_style_option(self) -> QStyleOptionComboBox:
+        option = QStyleOptionComboBox()
+        option.initFrom(self)
+        return option
+
+    def sizeHint(self):
+        option = self._combo_style_option()
+        frame_width = self.style().pixelMetric(QStyle.PixelMetric.PM_DefaultFrameWidth)
+        contents = QSize(
+            self._line_edit.sizeHint().width(),
+            self.fontMetrics().height() + 2 * frame_width)
+        return self.style().sizeFromContents(
+            QStyle.ContentsType.CT_ComboBox, option, contents, self)
+
+    def minimumSizeHint(self):
+        option = self._combo_style_option()
+        frame_width = self.style().pixelMetric(QStyle.PixelMetric.PM_DefaultFrameWidth)
+        contents = QSize(
+            self._line_edit.minimumSizeHint().width(),
+            self.fontMetrics().height() + 2 * frame_width)
+        return self.style().sizeFromContents(
+            QStyle.ContentsType.CT_ComboBox, option, contents, self)
+
+    def resizeEvent(self, event) -> None:
+        option = self._combo_style_option()
+        edit_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, option,
+            QStyle.SubControl.SC_ComboBoxEditField, self)
+        self._summary_label.setGeometry(edit_rect)
+        self._update_summary_label()
+        super().resizeEvent(event)
+
+    def paintEvent(self, event) -> None:
+        option = self._combo_style_option()
+        painter = QPainter(self)
+        self.style().drawComplexControl(
+            QStyle.ComplexControl.CC_ComboBox, option, painter, self)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._toggle_popup()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def set_fields(self, names: list[str], selected: Optional[list[str]] = None,
                    disabled: Optional[set[str]] = None) -> None:
@@ -200,10 +243,20 @@ class CheckableFieldCombo(QWidget):
         values = self.selected_fields()
         self._summary = ', '.join(values)
         self._line_edit.setText(self._summary)
-        self._line_edit.setCursorPosition(0)
         self._line_edit.setPlaceholderText('Select fields…')
         self._line_edit.setToolTip(self._summary or 'Select one or more fields')
+        self._update_summary_label()
         self.setToolTip(self._summary or 'Select one or more fields')
+
+    def _update_summary_label(self) -> None:
+        text = self._summary or 'Select fields…'
+        palette = self._summary_label.palette()
+        color = (QPalette.ColorRole.WindowText if self._summary
+                 else QPalette.ColorRole.PlaceholderText)
+        palette.setColor(QPalette.ColorRole.WindowText, palette.color(color))
+        self._summary_label.setPalette(palette)
+        self._summary_label.setText(self.fontMetrics().elidedText(
+            text, Qt.TextElideMode.ElideRight, self._summary_label.contentsRect().width()))
 
 
 class AdvancedGenerationWorker(QObject):
@@ -606,15 +659,8 @@ class TextTab(QWidget):
         btn_row.addWidget(self.import_button); btn_row.addWidget(self.export_button)
         self.github_save_button = QPushButton("Save to GitHub")
         self.github_load_button = QPushButton("Load from GitHub")
-        self.github_settings_button = QToolButton()
-        self.github_settings_button.setText("⚙")
+        self.github_settings_button = QPushButton("Settings")
         self.github_settings_button.setToolTip("GitHub AINotePro Library Settings")
-        # The Unicode gear has a small default glyph on macOS; size it
-        # explicitly instead of relying on the platform's tiny toolbutton font.
-        self.github_settings_button.setStyleSheet(
-            "QToolButton { font-size: 22px; padding: 0px 4px; }"
-        )
-        self.github_settings_button.setFixedSize(40, 32)
         self.github_save_button.clicked.connect(self._on_save_to_github)
         self.github_load_button.clicked.connect(self._on_load_from_github)
         self.github_settings_button.clicked.connect(self._on_github_settings)

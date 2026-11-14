@@ -13,12 +13,12 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, QPoint, Qt, QEvent, pyqtSignal
-from PyQt6.QtGui import QIntValidator, QFocusEvent
+from PyQt6.QtCore import QObject, QPoint, QSize, Qt, QEvent, pyqtSignal
+from PyQt6.QtGui import QIntValidator, QFocusEvent, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMenu, QStyleFactory, QToolButton,
-    QVBoxLayout, QWidget,
+    QStyle, QStyleOptionComboBox, QVBoxLayout, QWidget,
 )
 from PyQt6.QtTest import QTest
 
@@ -40,9 +40,11 @@ def widget_classes(warnings):
                        and node.name == "CheckableFieldCombo")
     module = ast.Module(body=[batch_ast, combo_class], type_ignores=[])
     scope = dict(QObject=QObject, QWidget=QWidget, QComboBox=QComboBox, QEvent=QEvent,
-                 QPoint=QPoint, Qt=Qt, QFrame=QFrame, QHBoxLayout=QHBoxLayout,
+                 QPoint=QPoint, QSize=QSize, Qt=Qt, QFrame=QFrame, QHBoxLayout=QHBoxLayout,
                  QListWidget=QListWidget, QListWidgetItem=QListWidgetItem,
-                 QDialog=QDialog, QLineEdit=QLineEdit, QMenu=QMenu,
+                 QDialog=QDialog, QLabel=QLabel, QLineEdit=QLineEdit, QMenu=QMenu, QPainter=QPainter,
+                 QPalette=QPalette,
+                 QStyle=QStyle, QStyleOptionComboBox=QStyleOptionComboBox,
                  QStyleFactory=QStyleFactory, QToolButton=QToolButton, QVBoxLayout=QVBoxLayout,
                  pyqtSignal=pyqtSignal, Optional=__import__("typing").Optional,
                  showWarning=warnings.append)
@@ -295,6 +297,27 @@ class ActualQtControlsTests(unittest.TestCase):
             combo.close()
             combo.deleteLater()
 
+    def test_real_field_combo_uses_standard_combo_frame_and_full_click_target(self):
+        combo = self.CheckableFieldCombo()
+        provider = QComboBox()
+        try:
+            provider.addItem("OpenAI")
+            combo.set_fields(["Text", "Scenario"])
+            combo.resize(combo.sizeHint())
+            self.assertEqual(combo.sizeHint().height(), provider.sizeHint().height())
+            self.assertFalse(combo.lineEdit().hasFrame())
+            self.assertFalse(combo.lineEdit().isVisible())
+            self.assertEqual(combo._summary_label.text(), "Select fields…")
+            combo.show()
+            QTest.mouseClick(combo, Qt.MouseButton.LeftButton, pos=combo.rect().center())
+            self.app.processEvents()
+            self.assertTrue(combo.listWidget().isVisible())
+        finally:
+            combo.close()
+            provider.close()
+            combo.deleteLater()
+            provider.deleteLater()
+
     def test_real_field_combo_summary_keeps_full_selection_in_tooltip(self):
         combo = self.CheckableFieldCombo()
         names = ["Very long source field name", "Another long destination field name"]
@@ -307,6 +330,14 @@ class ActualQtControlsTests(unittest.TestCase):
         finally:
             combo.close()
             combo.deleteLater()
+
+    def test_github_settings_uses_standard_button_style(self):
+        init_source = SOURCE[SOURCE.index("# Get standard icons"):SOURCE.index("# Fields row")]
+        self.assertIn('QPushButton("Settings")', init_source)
+        self.assertNotIn("github_settings_button.setIcon", init_source)
+        self.assertNotIn("setFixedSize", init_source)
+        self.assertNotIn('setText("⚙")', init_source)
+        self.assertNotIn("font-size: 22px", init_source)
 
     def test_real_field_combo_keyboard_multiselect_and_bidirectional_conflicts(self):
         source = self.CheckableFieldCombo()
