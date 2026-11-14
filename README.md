@@ -147,7 +147,7 @@ This feature stores your **saved** Easy/Advanced prompts and Audio Profiles in *
 
 **Step 5 — Restore the library on another computer (Load from GitHub).**
 
-1. Install AINotePro in Anki on the second computer. Open the same **⚙** window and enter the **same Repository, Branch, and JSON path**.
+1. Install AINotePro in Anki on the second computer. Open the same **Settings** window and enter the **same Repository, Branch, and JSON path**.
 2. For a private repository, you must **save a token on this computer as well** (the same still-valid repository-scoped token is acceptable). Tokens are **not** synchronized through the library. A public repository may allow Load without a token.
 3. Click **Load from GitHub**. AINotePro **merges** remote entries into the current computer without deleting existing prompts or Audio Profiles. Same-name, different-content entries receive numbered names. Review **Prompt Name** and the **Audio Profiles** list after import.
 4. Later, after changing something on computer A, use **Save to GitHub** on A and **Load from GitHub** on B. Repeat in the other direction if B also added content. This is **not real-time two-way automatic sync**.
