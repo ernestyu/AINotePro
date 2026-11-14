@@ -11,9 +11,9 @@ from urllib.parse import unquote, urlparse
 
 from aqt import mw
 from aqt.qt import (
-    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
+    QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QListWidget, QListWidgetItem, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QEvent, QMenu, QDialog, QIntValidator, QTimer
+    QIcon, QStyle, QStyleFactory, QEvent, QMenu, QDialog, QIntValidator, QPoint
 )
 from aqt.utils import showInfo, showWarning
 
@@ -65,93 +65,145 @@ TEXT_PROVIDER_LABEL_ALIASES = {
 }
 
 
-class CheckableFieldCombo(QComboBox):
-    """Compact multi-select combo suitable for the Text tab's field row."""
+class CheckableFieldCombo(QWidget):
+    """Compact field picker backed by Qt's native checkable list items."""
     selectionChanged = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setEditable(True)
-        self.lineEdit().setReadOnly(True)
-        self.setMaxVisibleItems(12)
-        self._keep_popup_open = False
-        self.view().pressed.connect(self._toggle_index)
-        self.view().installEventFilter(self)
+        self._summary = ""
+        self._line_edit = QLineEdit(self)
+        self._line_edit.setReadOnly(True)
+        self._line_edit.setPlaceholderText("Select fields…")
+        self._line_edit.setAccessibleName("Selected fields")
+        self._toggle_button = QToolButton(self)
+        self._toggle_button.setArrowType(Qt.ArrowType.DownArrow)
+        self._toggle_button.setToolTip("Select one or more fields")
+        self._toggle_button.setAccessibleName("Open field selector")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._line_edit, 1)
+        layout.addWidget(self._toggle_button)
+
+        self._popup = QDialog(self, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self._popup.setModal(False)
+        self._list = QListWidget(self._popup)
+        self._list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self._list.setAccessibleName("Field choices")
+        # Use Qt's own cross-platform Fusion delegate for consistently visible
+        # unchecked indicators in a standalone checkable list.
+        self._list_style = QStyleFactory.create("fusion")
+        self._list.setStyle(self._list_style)
+        popup_layout = QVBoxLayout(self._popup)
+        popup_layout.setContentsMargins(1, 1, 1, 1)
+        popup_layout.addWidget(self._list)
+        self._toggle_button.clicked.connect(self._toggle_popup)
+        self._list.itemChanged.connect(self._on_item_changed)
 
     def set_fields(self, names: list[str], selected: Optional[list[str]] = None,
                    disabled: Optional[set[str]] = None) -> None:
         selected_set = set(selected or [])
         disabled = disabled or set()
-        self.clear()
+        self._list.blockSignals(True)
+        self._list.clear()
         for name in names:
-            self.addItem(name)
-            item = self.model().item(self.count() - 1)
-            # CheckStateRole alone does not make a QStandardItem checkable in
-            # Qt 6. Declare the item contract explicitly so the popup delegate
-            # renders a checkbox in Anki's PyQt binding.
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setData(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked,
-                         Qt.ItemDataRole.CheckStateRole)
+            item = QListWidgetItem(name, self._list)
+            flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
+            if name not in disabled or name in selected_set:
+                flags |= Qt.ItemFlag.ItemIsEnabled
+            item.setFlags(flags)
+            item.setCheckState(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked)
             item.setToolTip(name)
             if name in disabled and name not in selected_set:
-                item.setEnabled(False)
                 item.setToolTip(f"{name} (selected in the other field set)")
+        self._list.blockSignals(False)
         self._update_label()
 
     def set_disabled_fields(self, disabled: set[str]) -> None:
         """Refresh conflict availability without recreating the open popup."""
+        was_blocked = self._list.blockSignals(True)
         for index in range(self.count()):
-            item = self.model().item(index)
+            item = self._list.item(index)
             name = self.itemText(index)
             is_disabled = name in disabled and name not in self.selected_fields()
-            item.setEnabled(not is_disabled)
+            self.set_item_enabled(index, not is_disabled)
             item.setToolTip(f"{name} (selected in the other field set)" if is_disabled else name)
+        self._list.blockSignals(was_blocked)
 
-    def eventFilter(self, watched, event):
-        if watched is self.view() and event.type() == QEvent.Type.KeyPress:
-            key = event.key()
-            if key in (Qt.Key.Key_Space, Qt.Key.Key_Select):
-                index = self.view().currentIndex()
-                if index.isValid():
-                    self._toggle_index(index)
-                return True
-        return super().eventFilter(watched, event)
+    def set_item_enabled(self, index: int, enabled: bool) -> None:
+        item = self._list.item(index)
+        flags = item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable
+        if enabled:
+            flags |= Qt.ItemFlag.ItemIsEnabled
+        else:
+            flags &= ~Qt.ItemFlag.ItemIsEnabled
+        was_blocked = self._list.blockSignals(True)
+        item.setFlags(flags)
+        self._list.blockSignals(was_blocked)
+
+    def set_item_tooltip(self, index: int, tooltip: str) -> None:
+        was_blocked = self._list.blockSignals(True)
+        self._list.item(index).setToolTip(tooltip)
+        self._list.blockSignals(was_blocked)
+
+    def count(self) -> int:
+        return self._list.count()
+
+    def itemText(self, index: int) -> str:
+        item = self._list.item(index)
+        return item.text() if item else ""
+
+    def item(self, index: int) -> Optional[QListWidgetItem]:
+        return self._list.item(index)
+
+    def lineEdit(self) -> QLineEdit:
+        return self._line_edit
+
+    def currentText(self) -> str:
+        return self._line_edit.text()
+
+    def listWidget(self) -> QListWidget:
+        return self._list
 
     def selected_fields(self) -> list[str]:
-        result = []
-        for index in range(self.count()):
-            item = self.model().item(index)
-            if item.data(Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
-                result.append(self.itemText(index))
-        return result
+        return [self.itemText(index) for index in range(self.count())
+                if self._list.item(index).checkState() == Qt.CheckState.Checked]
 
-    def _toggle_index(self, index) -> None:
-        item = self.model().item(index.row())
-        if not item or not item.isEnabled():
-            return
-        state = item.data(Qt.ItemDataRole.CheckStateRole)
-        item.setData(Qt.CheckState.Unchecked if state == Qt.CheckState.Checked else Qt.CheckState.Checked,
-                     Qt.ItemDataRole.CheckStateRole)
-        self._keep_popup_open = True
-        self.selectionChanged.emit()
-        # QComboBox updates currentIndex after QListView.pressed and overwrites
-        # the editable display. Run after that internal update so the summary
-        # remains the sole visible representation of check state.
-        QTimer.singleShot(0, self._update_label)
+    def showPopup(self) -> None:
+        self._prepare_popup()
+        self._popup.move(self.mapToGlobal(QPoint(0, self.height())))
+        self._popup.show()
+        self._list.setFocus()
+
+    def _prepare_popup(self) -> None:
+        row_height = max(self._list.sizeHintForRow(0), self._line_edit.sizeHint().height())
+        height = max(row_height + 2, min(self.count(), 12) * row_height + 2)
+        width = max(self.width(), self._line_edit.minimumSizeHint().width())
+        self._list.setFixedSize(width, height)
+        self._popup.setFixedSize(width + 2, height + 2)
 
     def hidePopup(self) -> None:
-        # A check action should permit consecutive mouse/keyboard selections;
-        # clicking elsewhere or Escape uses the normal QComboBox close path.
-        if self._keep_popup_open:
-            self._keep_popup_open = False
-            return
-        super().hidePopup()
+        self._popup.hide()
+
+    def _toggle_popup(self) -> None:
+        if self._popup.isVisible():
+            self.hidePopup()
+        else:
+            self.showPopup()
+
+    def _on_item_changed(self, _item: QListWidgetItem) -> None:
+        self._update_label()
+        self.selectionChanged.emit()
 
     def _update_label(self) -> None:
         values = self.selected_fields()
-        summary = ', '.join(values)
-        self.lineEdit().setText(summary or 'Select fields…')
-        self.setToolTip(summary or 'Select one or more fields')
+        self._summary = ', '.join(values)
+        self._line_edit.setText(self._summary)
+        self._line_edit.setCursorPosition(0)
+        self._line_edit.setPlaceholderText('Select fields…')
+        self._line_edit.setToolTip(self._summary or 'Select one or more fields')
+        self.setToolTip(self._summary or 'Select one or more fields')
 
 
 class AdvancedGenerationWorker(QObject):
@@ -822,10 +874,16 @@ class TextTab(QWidget):
             for index in range(combo.count()):
                 name = combo.itemText(index)
                 if name not in valid:
-                    item = combo.model().item(index)
-                    item.setEnabled(name in selected)
-                    item.setToolTip(
-                        f"{name} (unavailable in this Note Type; uncheck to remove)")
+                    if hasattr(combo, "set_item_enabled"):
+                        combo.set_item_enabled(index, name in selected)
+                        combo.set_item_tooltip(
+                            index,
+                            f"{name} (unavailable in this Note Type; uncheck to remove)")
+                    else:  # Test doubles retain the former model-shaped API.
+                        item = combo.model().item(index)
+                        item.setEnabled(name in selected)
+                        item.setToolTip(
+                            f"{name} (unavailable in this Note Type; uncheck to remove)")
 
     def _resolve_invalid_field(self, role: str, name: str) -> None:
         """Explicitly remove one unavailable selection without touching peers."""

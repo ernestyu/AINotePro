@@ -13,9 +13,13 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, Qt, QEvent, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QPoint, Qt, QEvent, pyqtSignal
 from PyQt6.QtGui import QIntValidator, QFocusEvent
-from PyQt6.QtWidgets import QApplication, QComboBox, QCheckBox, QLabel, QLineEdit, QWidget
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
+    QLineEdit, QListWidget, QListWidgetItem, QMenu, QStyleFactory, QToolButton,
+    QVBoxLayout, QWidget,
+)
 from PyQt6.QtTest import QTest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,8 +39,12 @@ def widget_classes(warnings):
     combo_class = next(node for node in tree.body if isinstance(node, ast.ClassDef)
                        and node.name == "CheckableFieldCombo")
     module = ast.Module(body=[batch_ast, combo_class], type_ignores=[])
-    scope = dict(QObject=QObject, QComboBox=QComboBox, QEvent=QEvent, Qt=Qt,
-                 QTimer=QTimer, pyqtSignal=pyqtSignal, Optional=__import__("typing").Optional,
+    scope = dict(QObject=QObject, QWidget=QWidget, QComboBox=QComboBox, QEvent=QEvent,
+                 QPoint=QPoint, Qt=Qt, QFrame=QFrame, QHBoxLayout=QHBoxLayout,
+                 QListWidget=QListWidget, QListWidgetItem=QListWidgetItem,
+                 QDialog=QDialog, QLineEdit=QLineEdit, QMenu=QMenu,
+                 QStyleFactory=QStyleFactory, QToolButton=QToolButton, QVBoxLayout=QVBoxLayout,
+                 pyqtSignal=pyqtSignal, Optional=__import__("typing").Optional,
                  showWarning=warnings.append)
     exec(compile(ast.fix_missing_locations(module), "<real Qt controls>", "exec"), scope)
     return scope["BatchEditor"], scope["CheckableFieldCombo"]
@@ -243,12 +251,12 @@ class ActualQtControlsTests(unittest.TestCase):
             combo.set_fields(["Text", "Out", "Missing"], ["Text", "Missing"], {"Out"})
             self.assertEqual(combo.selected_fields(), ["Text", "Missing"])
             # An unavailable but previously selected field must remain removable.
-            self.assertTrue(combo.model().item(2).isEnabled())
-            combo._toggle_index(combo.model().index(2, 0))
+            self.assertTrue(combo.item(2).flags() & Qt.ItemFlag.ItemIsEnabled)
+            combo.item(2).setCheckState(Qt.CheckState.Unchecked)
             self.assertEqual(combo.selected_fields(), ["Text"])
-            self.assertFalse(combo.model().item(1).isEnabled())
+            self.assertFalse(combo.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
             combo.set_disabled_fields(set())
-            self.assertTrue(combo.model().item(1).isEnabled())
+            self.assertTrue(combo.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
             self.assertEqual(len(changes), 1)
         finally:
             combo.close()
@@ -259,26 +267,30 @@ class ActualQtControlsTests(unittest.TestCase):
         try:
             combo.set_fields(["Text", "Scenario", "Translation", "Takeaway"])
             for row in range(combo.count()):
-                item = combo.model().item(row)
+                item = combo.item(row)
                 self.assertTrue(item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
-                self.assertTrue(item.isEnabled())
-                self.assertEqual(item.data(Qt.ItemDataRole.CheckStateRole),
-                                 Qt.CheckState.Unchecked)
+                self.assertTrue(item.flags() & Qt.ItemFlag.ItemIsEnabled)
+                self.assertEqual(item.checkState(), Qt.CheckState.Unchecked)
 
             combo.show()
             combo.showPopup()
             self.app.processEvents()
-            view = combo.view()
+            view = combo.listWidget()
             for row, expected in ((0, ["Text"]), (1, ["Text", "Scenario"])):
-                index = combo.model().index(row, 0)
+                rect = view.visualItemRect(combo.item(row))
                 QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
-                                 pos=view.visualRect(index).center())
+                                 pos=rect.topLeft() + QPoint(12, rect.height() // 2))
                 self.app.processEvents()
                 self.assertEqual(combo.selected_fields(), expected)
                 self.assertEqual(combo.lineEdit().text(), ", ".join(expected))
                 self.assertTrue(view.isVisible())
             combo.hidePopup()
             self.assertFalse(view.isVisible())
+            combo.showPopup()
+            self.app.processEvents()
+            self.assertEqual(combo.selected_fields(), ["Text", "Scenario"])
+            self.assertEqual(combo.item(0).checkState(), Qt.CheckState.Checked)
+            self.assertEqual(combo.item(2).checkState(), Qt.CheckState.Unchecked)
         finally:
             combo.close()
             combo.deleteLater()
@@ -298,27 +310,65 @@ class ActualQtControlsTests(unittest.TestCase):
             source.show()
             source.showPopup()
             self.app.processEvents()
-            view = source.view()
-            view.setCurrentIndex(source.model().index(0, 0))
+            view = source.listWidget()
+            view.setCurrentRow(0)
             QTest.keyClick(view, Qt.Key.Key_Space)
             QTest.keyClick(view, Qt.Key.Key_Down)
             QTest.keyClick(view, Qt.Key.Key_Space)
             self.app.processEvents()
             self.assertEqual(source.selected_fields(), ["Text", "Scenario"])
-            self.assertFalse(destination.model().item(0).isEnabled())
-            self.assertFalse(destination.model().item(1).isEnabled())
-            self.assertTrue(destination.model().item(2).isEnabled())
-            self.assertTrue(destination.model().item(3).isEnabled())
+            self.assertFalse(destination.item(0).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertFalse(destination.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertTrue(destination.item(2).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertTrue(destination.item(3).flags() & Qt.ItemFlag.ItemIsEnabled)
 
-            source._toggle_index(source.model().index(1, 0))
+            source.item(1).setCheckState(Qt.CheckState.Unchecked)
             self.assertEqual(source.selected_fields(), ["Text"])
-            self.assertTrue(destination.model().item(1).isEnabled())
-            self.assertFalse(destination.model().item(0).isEnabled())
+            self.assertTrue(destination.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertFalse(destination.item(0).flags() & Qt.ItemFlag.ItemIsEnabled)
+            QTest.keyClick(view, Qt.Key.Key_Escape)
+            self.assertFalse(view.isVisible())
         finally:
             source.close()
             destination.close()
             source.deleteLater()
             destination.deleteLater()
+
+    def test_note_type_refresh_keeps_missing_selection_removable(self):
+        tree = ast.parse(SOURCE)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "TextTab")
+        method = next(node for node in tab.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "_update_invalid_field_resolver")
+        cls = ast.ClassDef(name="InvalidFieldOwner", bases=[ast.Name(id="QObject", ctx=ast.Load())],
+                           keywords=[], body=[method], decorator_list=[])
+        scope = {"QObject": QObject}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
+                     "<note type refresh>", "exec"), scope)
+        owner = scope["InvalidFieldOwner"]()
+        source = self.CheckableFieldCombo()
+        destination = self.CheckableFieldCombo()
+        try:
+            source.set_fields(["Text", "Missing"], ["Missing"])
+            destination.set_fields(["Text", "Missing"])
+            owner._advanced_field_names = ["Text"]
+            owner.advanced_source_fields = source
+            owner.advanced_destination_fields = destination
+
+            owner._update_invalid_field_resolver()
+            self.assertTrue(source.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertIn("unavailable in this Note Type", source.item(1).toolTip())
+
+            source.item(1).setCheckState(Qt.CheckState.Unchecked)
+            owner._update_invalid_field_resolver()
+            self.assertFalse(source.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
+            self.assertFalse(destination.item(1).flags() & Qt.ItemFlag.ItemIsEnabled)
+        finally:
+            source.close()
+            destination.close()
+            source.deleteLater()
+            destination.deleteLater()
+            owner.deleteLater()
 
     def test_provider_switch_preserves_existing_advanced_field_state(self):
         tree = ast.parse(SOURCE)
@@ -339,8 +389,8 @@ class ActualQtControlsTests(unittest.TestCase):
             source.set_fields(names, ["Text", "Scenario"], {"Translation", "Takeaway"})
             destination.set_fields(names, ["Translation", "Takeaway"], {"Text", "Scenario"})
             expected = (source.selected_fields(), destination.selected_fields(),
-                        [source.model().item(i).isEnabled() for i in range(source.count())],
-                        [destination.model().item(i).isEnabled() for i in range(destination.count())])
+                        [bool(source.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(source.count())],
+                        [bool(destination.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(destination.count())])
             owner._provider_switching = False
             owner._service_map = lambda: "vllm"
             owner._active_provider = "openai"
@@ -374,8 +424,8 @@ class ActualQtControlsTests(unittest.TestCase):
 
             owner._populate_provider_cfg()
             actual = (source.selected_fields(), destination.selected_fields(),
-                      [source.model().item(i).isEnabled() for i in range(source.count())],
-                      [destination.model().item(i).isEnabled() for i in range(destination.count())])
+                      [bool(source.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(source.count())],
+                      [bool(destination.item(i).flags() & Qt.ItemFlag.ItemIsEnabled) for i in range(destination.count())])
             self.assertEqual(actual, expected)
         finally:
             source.close()
