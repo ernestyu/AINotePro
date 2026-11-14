@@ -13,9 +13,9 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QObject, Qt, QEvent, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QEvent, QTimer, pyqtSignal
 from PyQt6.QtGui import QIntValidator, QFocusEvent
-from PyQt6.QtWidgets import QApplication, QComboBox, QCheckBox, QWidget
+from PyQt6.QtWidgets import QApplication, QComboBox, QCheckBox, QLabel, QLineEdit, QWidget
 from PyQt6.QtTest import QTest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +36,7 @@ def widget_classes(warnings):
                        and node.name == "CheckableFieldCombo")
     module = ast.Module(body=[batch_ast, combo_class], type_ignores=[])
     scope = dict(QObject=QObject, QComboBox=QComboBox, QEvent=QEvent, Qt=Qt,
-                 pyqtSignal=pyqtSignal, Optional=__import__("typing").Optional,
+                 QTimer=QTimer, pyqtSignal=pyqtSignal, Optional=__import__("typing").Optional,
                  showWarning=warnings.append)
     exec(compile(ast.fix_missing_locations(module), "<real Qt controls>", "exec"), scope)
     return scope["BatchEditor"], scope["CheckableFieldCombo"]
@@ -253,6 +253,136 @@ class ActualQtControlsTests(unittest.TestCase):
         finally:
             combo.close()
             combo.deleteLater()
+
+    def test_real_field_combo_renders_checkable_items_and_keeps_popup_open_for_mouse_multiselect(self):
+        combo = self.CheckableFieldCombo()
+        try:
+            combo.set_fields(["Text", "Scenario", "Translation", "Takeaway"])
+            for row in range(combo.count()):
+                item = combo.model().item(row)
+                self.assertTrue(item.flags() & Qt.ItemFlag.ItemIsUserCheckable)
+                self.assertTrue(item.isEnabled())
+                self.assertEqual(item.data(Qt.ItemDataRole.CheckStateRole),
+                                 Qt.CheckState.Unchecked)
+
+            combo.show()
+            combo.showPopup()
+            self.app.processEvents()
+            view = combo.view()
+            for row, expected in ((0, ["Text"]), (1, ["Text", "Scenario"])):
+                index = combo.model().index(row, 0)
+                QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
+                                 pos=view.visualRect(index).center())
+                self.app.processEvents()
+                self.assertEqual(combo.selected_fields(), expected)
+                self.assertEqual(combo.lineEdit().text(), ", ".join(expected))
+                self.assertTrue(view.isVisible())
+            combo.hidePopup()
+            self.assertFalse(view.isVisible())
+        finally:
+            combo.close()
+            combo.deleteLater()
+
+    def test_real_field_combo_keyboard_multiselect_and_bidirectional_conflicts(self):
+        source = self.CheckableFieldCombo()
+        destination = self.CheckableFieldCombo()
+        names = ["Text", "Scenario", "Translation", "Takeaway"]
+        try:
+            source.set_fields(names)
+            destination.set_fields(names)
+            source.selectionChanged.connect(
+                lambda: destination.set_disabled_fields(set(source.selected_fields())))
+            destination.selectionChanged.connect(
+                lambda: source.set_disabled_fields(set(destination.selected_fields())))
+
+            source.show()
+            source.showPopup()
+            self.app.processEvents()
+            view = source.view()
+            view.setCurrentIndex(source.model().index(0, 0))
+            QTest.keyClick(view, Qt.Key.Key_Space)
+            QTest.keyClick(view, Qt.Key.Key_Down)
+            QTest.keyClick(view, Qt.Key.Key_Space)
+            self.app.processEvents()
+            self.assertEqual(source.selected_fields(), ["Text", "Scenario"])
+            self.assertFalse(destination.model().item(0).isEnabled())
+            self.assertFalse(destination.model().item(1).isEnabled())
+            self.assertTrue(destination.model().item(2).isEnabled())
+            self.assertTrue(destination.model().item(3).isEnabled())
+
+            source._toggle_index(source.model().index(1, 0))
+            self.assertEqual(source.selected_fields(), ["Text"])
+            self.assertTrue(destination.model().item(1).isEnabled())
+            self.assertFalse(destination.model().item(0).isEnabled())
+        finally:
+            source.close()
+            destination.close()
+            source.deleteLater()
+            destination.deleteLater()
+
+    def test_provider_switch_preserves_existing_advanced_field_state(self):
+        tree = ast.parse(SOURCE)
+        tab = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                   and node.name == "TextTab")
+        method = next(node for node in tab.body if isinstance(node, ast.FunctionDef)
+                      and node.name == "_populate_provider_cfg")
+        cls = ast.ClassDef(name="ProviderOwner", bases=[ast.Name(id="QObject", ctx=ast.Load())],
+                           keywords=[], body=[method], decorator_list=[])
+        scope = {"QObject": QObject, "showWarning": self.warnings.append}
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[])),
+                     "<provider switch>", "exec"), scope)
+        owner = scope["ProviderOwner"]()
+        source = self.CheckableFieldCombo()
+        destination = self.CheckableFieldCombo()
+        try:
+            names = ["Text", "Scenario", "Translation", "Takeaway"]
+            source.set_fields(names, ["Text", "Scenario"], {"Translation", "Takeaway"})
+            destination.set_fields(names, ["Translation", "Takeaway"], {"Text", "Scenario"})
+            expected = (source.selected_fields(), destination.selected_fields(),
+                        [source.model().item(i).isEnabled() for i in range(source.count())],
+                        [destination.model().item(i).isEnabled() for i in range(destination.count())])
+            owner._provider_switching = False
+            owner._service_map = lambda: "vllm"
+            owner._active_provider = "openai"
+            owner._save_current_provider_config = lambda **_kwargs: True
+            owner.cfg = type("Config", (), {
+                "get_provider_config": lambda _self, _domain, _provider: {
+                    "chat_endpoint": "http://server:8000/v1/chat/completions",
+                    "api_key": "", "model": "model", "temperature": 0.7,
+                    "reasoning_by_model": {},
+                },
+                "set_active_provider": lambda _self, _domain, _provider: None,
+            })()
+            owner._legacy_base_url = ""
+            owner._stored_chat_endpoint = ""
+            owner._shown_chat_endpoint = ""
+            owner.base_url_edit = QLineEdit()
+            owner.endpoint_label = QLabel()
+            owner.api_key_edit = QLineEdit()
+            owner.model_combo = QComboBox(); owner.model_combo.setEditable(True)
+            owner.temperature_edit = QLineEdit()
+            owner.reasoning_combo = QComboBox(); owner.reasoning_combo.addItem("Default", "default")
+            owner._reasoning_by_model = {}
+            owner._active_model = ""
+            owner._loading_provider = False
+            owner._local_server_address = lambda value: value.rsplit("/v1/", 1)[0]
+            owner._legacy_chat_endpoint = lambda value: value
+            owner._apply_provider_capabilities = lambda _provider: None
+            owner._restore_provider_selection = lambda _provider: None
+            owner.advanced_source_fields = source
+            owner.advanced_destination_fields = destination
+
+            owner._populate_provider_cfg()
+            actual = (source.selected_fields(), destination.selected_fields(),
+                      [source.model().item(i).isEnabled() for i in range(source.count())],
+                      [destination.model().item(i).isEnabled() for i in range(destination.count())])
+            self.assertEqual(actual, expected)
+        finally:
+            source.close()
+            destination.close()
+            source.deleteLater()
+            destination.deleteLater()
+            owner.deleteLater()
 
 
 if __name__ == "__main__":

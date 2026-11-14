@@ -13,7 +13,7 @@ from aqt import mw
 from aqt.qt import (
     QWidget, QVBoxLayout, QLabel, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QToolButton, QObject, pyqtSignal, QThread,
     QPushButton, QFrame, QTextEdit, QSizePolicy, Qt, QProgressDialog, QFileDialog, QMessageBox, QInputDialog, QCheckBox,
-    QIcon, QStyle, QEvent, QMenu, QDialog, QIntValidator
+    QIcon, QStyle, QEvent, QMenu, QDialog, QIntValidator, QTimer
 )
 from aqt.utils import showInfo, showWarning
 
@@ -86,6 +86,10 @@ class CheckableFieldCombo(QComboBox):
         for name in names:
             self.addItem(name)
             item = self.model().item(self.count() - 1)
+            # CheckStateRole alone does not make a QStandardItem checkable in
+            # Qt 6. Declare the item contract explicitly so the popup delegate
+            # renders a checkbox in Anki's PyQt binding.
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setData(Qt.CheckState.Checked if name in selected_set else Qt.CheckState.Unchecked,
                          Qt.ItemDataRole.CheckStateRole)
             item.setToolTip(name)
@@ -129,8 +133,11 @@ class CheckableFieldCombo(QComboBox):
         item.setData(Qt.CheckState.Unchecked if state == Qt.CheckState.Checked else Qt.CheckState.Checked,
                      Qt.ItemDataRole.CheckStateRole)
         self._keep_popup_open = True
-        self._update_label()
         self.selectionChanged.emit()
+        # QComboBox updates currentIndex after QListView.pressed and overwrites
+        # the editable display. Run after that internal update so the summary
+        # remains the sole visible representation of check state.
+        QTimer.singleShot(0, self._update_label)
 
     def hidePopup(self) -> None:
         # A check action should permit consecutive mouse/keyboard selections;
