@@ -129,7 +129,7 @@ Text Easy 和 Audio 会在生成前检查本批选中的所有笔记：必须属
 
 **第五步：在另一台电脑导入（Load from GitHub）。**
 
-1. 在另一台电脑安装 AINotePro，打开同一个 **⚙** 设置窗口，填写**完全相同**的 Repository、Branch 与 JSON path。
+1. 在另一台电脑安装 AINotePro，打开同一个 **Settings** 设置窗口，填写**完全相同**的 Repository、Branch 与 JSON path。
 2. Private 仓库的 Token 需要在新电脑**另外保存一次**（可使用仍有效、权限正确的同一个 Token）；Token 不随 Library 同步。公开仓库的 Load 可以不填写 Token。
 3. 点击 **Load from GitHub**。插件将远端内容**合并进本机**，不会删除现有 Prompt 或 Audio Profile；同名但不同内容会增加编号副本。完成后在 Prompt Name 与 Audio Profiles 中核对。
 4. 以后在电脑 A 修改后，先 **Save to GitHub**，在电脑 B 再 **Load from GitHub**；B 也有新数据时同理反向操作。这不是自动双向同步。
